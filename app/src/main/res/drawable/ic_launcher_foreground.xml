@@ -1,0 +1,14 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Centered safety shield -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,20 C38,20 30,28 30,38 C30,64 54,88 54,88 C54,88 78,64 78,38 C78,28 70,20 54,20 Z" />
+    <!-- Emergency cross emblem inside the shield -->
+    <path
+        android:fillColor="#0061A4"
+        android:pathData="M50,36 h8 v10 h10 v8 h-10 v10 h-8 v-10 h-10 v-8 h10 Z" />
+</vector>
