@@ -49,8 +49,13 @@ class DatabaseService(private val context: Context) {
     private fun initializeFirestore() {
         try {
             if (FirebaseApp.getApps(context).isNotEmpty()) {
-                firestore = FirebaseFirestore.getInstance()
-                Log.d("DatabaseService", "Firestore bound successfully!")
+                val fs = FirebaseFirestore.getInstance()
+                val settings = com.google.firebase.firestore.FirebaseFirestoreSettings.Builder()
+                    .setPersistenceEnabled(true)
+                    .build()
+                fs.firestoreSettings = settings
+                firestore = fs
+                Log.d("DatabaseService", "Firestore bound successfully with offline persistence!")
             }
         } catch (e: Exception) {
             firestore = null
@@ -65,6 +70,7 @@ class DatabaseService(private val context: Context) {
             firestoreListener?.remove()
             firestoreListener = fs.collection("alerts")
                 .orderBy("timestamp", Query.Direction.DESCENDING)
+                .limit(100)
                 .addSnapshotListener { snapshot, e ->
                     if (e != null) {
                         Log.e("DatabaseService", "Listen failed.", e)
@@ -118,6 +124,22 @@ class DatabaseService(private val context: Context) {
         }
     }
 
+    private suspend fun <T> runWithRetry(times: Int = 3, block: suspend () -> T): T {
+        var exception: Exception? = null
+        for (attempt in 1..times) {
+            try {
+                return block()
+            } catch (e: Exception) {
+                exception = e
+                Log.w("DatabaseService", "Firestore operation failed (attempt $attempt/$times): ${e.message}")
+                if (attempt < times) {
+                    kotlinx.coroutines.delay(1000L * attempt)
+                }
+            }
+        }
+        throw exception ?: Exception("Failed database operation after $times attempts")
+    }
+
     // --- ALERTS OPERATIONS ---
 
     suspend fun triggerSOS(userId: String, userName: String, userPhone: String, lat: Double, lng: Double, triggerType: String): Alert {
@@ -137,9 +159,11 @@ class DatabaseService(private val context: Context) {
         val fs = firestore
         if (fs != null) {
             try {
-                fs.collection("alerts").document(alertId).set(newAlert.toMap()).await()
+                runWithRetry {
+                    fs.collection("alerts").document(alertId).set(newAlert.toMap()).await()
+                }
             } catch (e: Exception) {
-                Log.e("DatabaseService", "Failed to upload SOS alert, saving locally: ${e.message}")
+                Log.e("DatabaseService", "Failed to upload SOS alert after multiple attempts, saving locally: ${e.message}")
                 saveAlertLocally(newAlert)
             }
         } else {
@@ -152,16 +176,18 @@ class DatabaseService(private val context: Context) {
         val fs = firestore
         if (fs != null) {
             try {
-                fs.collection("alerts").document(alertId).update(
-                    mapOf(
-                        "status" to "RESOLVED",
-                        "resolvedAt" to System.currentTimeMillis(),
-                        "resolvedBy" to resolvedBy,
-                        "notes" to notes
-                    )
-                ).await()
+                runWithRetry {
+                    fs.collection("alerts").document(alertId).update(
+                        mapOf(
+                            "status" to "RESOLVED",
+                            "resolvedAt" to System.currentTimeMillis(),
+                            "resolvedBy" to resolvedBy,
+                            "notes" to notes
+                        )
+                    ).await()
+                }
             } catch (e: Exception) {
-                Log.e("DatabaseService", "Failed to resolve SOS on Firestore: ${e.message}")
+                Log.e("DatabaseService", "Failed to resolve SOS on Firestore after multiple attempts: ${e.message}")
                 resolveAlertLocally(alertId, resolvedBy, notes)
             }
         } else {
@@ -278,9 +304,11 @@ class DatabaseService(private val context: Context) {
         val fs = firestore
         if (fs != null) {
             try {
-                fs.collection("devices").document(deviceId).set(newDevice.toMap()).await()
+                runWithRetry {
+                    fs.collection("devices").document(deviceId).set(newDevice.toMap()).await()
+                }
             } catch (e: Exception) {
-                Log.e("DatabaseService", "Failed to save device in Firestore, saving locally: ${e.message}")
+                Log.e("DatabaseService", "Failed to save device in Firestore after multiple attempts, saving locally: ${e.message}")
                 saveDeviceLocally(newDevice)
             }
         } else {
@@ -293,9 +321,11 @@ class DatabaseService(private val context: Context) {
         val fs = firestore
         if (fs != null) {
             try {
-                fs.collection("devices").document(deviceId).delete().await()
+                runWithRetry {
+                    fs.collection("devices").document(deviceId).delete().await()
+                }
             } catch (e: Exception) {
-                Log.e("DatabaseService", "Failed to remove device from Firestore, updating locally: ${e.message}")
+                Log.e("DatabaseService", "Failed to remove device from Firestore after multiple attempts, updating locally: ${e.message}")
                 removeDeviceLocally(deviceId)
             }
         } else {
@@ -414,6 +444,28 @@ class DatabaseService(private val context: Context) {
         obj.put("firmwareVersion", device.firmwareVersion)
         obj.put("signalStrength", device.signalStrength)
         obj.put("deviceHealth", device.deviceHealth)
+        
+        // New Device Monitoring Fields:
+        obj.put("isCharging", device.isCharging)
+        obj.put("wifiSignal", device.wifiSignal)
+        obj.put("bluetoothStatus", device.bluetoothStatus)
+        obj.put("gpsStatus", device.gpsStatus)
+        obj.put("deviceTemperature", device.deviceTemperature.toDouble())
+        obj.put("uptimeSeconds", device.uptimeSeconds)
+        obj.put("memoryUsagePercent", device.memoryUsagePercent)
+        obj.put("cpuUsagePercent", device.cpuUsagePercent)
+        obj.put("healthScore", device.healthScore)
+        obj.put("connectionStatus", device.connectionStatus)
+
+        // GPS & MPU6050:
+        obj.put("latitude", device.latitude)
+        obj.put("longitude", device.longitude)
+        obj.put("accelX", device.accelX.toDouble())
+        obj.put("accelY", device.accelY.toDouble())
+        obj.put("accelZ", device.accelZ.toDouble())
+        obj.put("gyroX", device.gyroX.toDouble())
+        obj.put("gyroY", device.gyroY.toDouble())
+        obj.put("gyroZ", device.gyroZ.toDouble())
         return obj
     }
 
@@ -428,7 +480,29 @@ class DatabaseService(private val context: Context) {
             lastSync = obj.optLong("lastSync", System.currentTimeMillis()),
             firmwareVersion = obj.optString("firmwareVersion", "v1.2.4-esp32"),
             signalStrength = obj.optInt("signalStrength", -67),
-            deviceHealth = obj.optString("deviceHealth", "EXCELLENT")
+            deviceHealth = obj.optString("deviceHealth", "EXCELLENT"),
+            
+            // New Device Monitoring Fields:
+            isCharging = obj.optBoolean("isCharging", false),
+            wifiSignal = obj.optInt("wifiSignal", -55),
+            bluetoothStatus = obj.optString("bluetoothStatus", "CONNECTED"),
+            gpsStatus = obj.optString("gpsStatus", "LOCKED"),
+            deviceTemperature = obj.optDouble("deviceTemperature", 36.5).toFloat(),
+            uptimeSeconds = obj.optLong("uptimeSeconds", 3600L),
+            memoryUsagePercent = obj.optInt("memoryUsagePercent", 42),
+            cpuUsagePercent = obj.optInt("cpuUsagePercent", 18),
+            healthScore = obj.optInt("healthScore", 98),
+            connectionStatus = obj.optString("connectionStatus", "ONLINE"),
+
+            // GPS & MPU6050:
+            latitude = obj.optDouble("latitude", 37.7749),
+            longitude = obj.optDouble("longitude", -122.4194),
+            accelX = obj.optDouble("accelX", 0.05).toFloat(),
+            accelY = obj.optDouble("accelY", -0.02).toFloat(),
+            accelZ = obj.optDouble("accelZ", 0.98).toFloat(),
+            gyroX = obj.optDouble("gyroX", 0.1).toFloat(),
+            gyroY = obj.optDouble("gyroY", -0.1).toFloat(),
+            gyroZ = obj.optDouble("gyroZ", 0.2).toFloat()
         )
     }
 
@@ -436,9 +510,11 @@ class DatabaseService(private val context: Context) {
         val fs = firestore
         if (fs != null) {
             try {
-                fs.collection("devices").document(device.deviceId).set(device.toMap()).await()
+                runWithRetry {
+                    fs.collection("devices").document(device.deviceId).set(device.toMap()).await()
+                }
             } catch (e: Exception) {
-                Log.e("DatabaseService", "Failed to update device on Firestore, updating locally: ${e.message}")
+                Log.e("DatabaseService", "Failed to update device on Firestore after multiple attempts, updating locally: ${e.message}")
                 saveDeviceLocally(device)
             }
         } else {
@@ -467,9 +543,11 @@ class DatabaseService(private val context: Context) {
         val fs = firestore
         if (fs != null) {
             try {
-                fs.collection("contacts").document(finalContact.id).set(finalContact.toMap()).await()
+                runWithRetry {
+                    fs.collection("contacts").document(finalContact.id).set(finalContact.toMap()).await()
+                }
             } catch (e: Exception) {
-                Log.e("DatabaseService", "Failed to save contact on Firestore, saving locally: ${e.message}")
+                Log.e("DatabaseService", "Failed to save contact on Firestore after multiple attempts, saving locally: ${e.message}")
                 saveContactLocally(finalContact)
             }
         } else {
@@ -482,9 +560,11 @@ class DatabaseService(private val context: Context) {
         val fs = firestore
         if (fs != null) {
             try {
-                fs.collection("contacts").document(contactId).delete().await()
+                runWithRetry {
+                    fs.collection("contacts").document(contactId).delete().await()
+                }
             } catch (e: Exception) {
-                Log.e("DatabaseService", "Failed to delete contact from Firestore, updating locally: ${e.message}")
+                Log.e("DatabaseService", "Failed to delete contact from Firestore after multiple attempts, updating locally: ${e.message}")
                 removeContactLocally(contactId)
             }
         } else {

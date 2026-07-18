@@ -47,12 +47,24 @@ fun HomeScreen(
     onNavigateToProfile: () -> Unit,
     onNavigateToContacts: () -> Unit,
     onNavigateToDevicePairing: () -> Unit,
-    onNavigateToMap: () -> Unit
+    onNavigateToMap: () -> Unit,
+    onNavigateToEmergency: () -> Unit,
+    onNavigateToNotifications: () -> Unit,
+    onNavigateToHistory: () -> Unit,
+    onNavigateToAiDashboard: () -> Unit,
+    onNavigateToDeviceMonitoring: () -> Unit,
+    onNavigateToSettings: () -> Unit,
+    onNavigateToAnalytics: () -> Unit,
+    onNavigateToReports: () -> Unit
 ) {
     val authState by viewModel.authState.collectAsState()
     val alerts by viewModel.alerts.collectAsState()
     val devices by viewModel.devices.collectAsState()
+    val emergencySession by viewModel.emergencySession.collectAsState()
+    val notifications by viewModel.notifications.collectAsState()
     val isDemo = viewModel.isDemoMode
+
+    val unreadCount = remember(notifications) { notifications.count { !it.isRead } }
 
     val currentUser = (authState as? AuthState.Success)?.user ?: com.example.model.User(name = "Guardian User")
 
@@ -129,6 +141,62 @@ fun HomeScreen(
 
                     Spacer(modifier = Modifier.width(10.dp))
 
+                    // Premium Notification Bell Icon with Badge
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFF3F3FA), CircleShape)
+                            .clickable { onNavigateToNotifications() }
+                            .testTag("notification_bell_button"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Notifications,
+                            contentDescription = "Notifications",
+                            tint = Color(0xFF0061A4),
+                            modifier = Modifier.size(22.dp)
+                        )
+                        if (unreadCount > 0) {
+                            Box(
+                                modifier = Modifier
+                                    .size(16.dp)
+                                    .background(Color.Red, CircleShape)
+                                    .align(Alignment.TopEnd),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = unreadCount.toString(),
+                                    color = Color.White,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(10.dp))
+
+                    // Settings Button
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFF3F3FA), CircleShape)
+                            .clickable { onNavigateToSettings() }
+                            .testTag("settings_header_button"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = "Settings",
+                            tint = Color(0xFF0061A4),
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(10.dp))
+
                     // Profile initials bubble (JD) matching HTML
                     val initials = if (currentUser.name.isNotBlank()) {
                         currentUser.name.split(" ")
@@ -165,6 +233,51 @@ fun HomeScreen(
                     .padding(horizontal = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
+                // --- ACTIVE EMERGENCY PANEL BANNER (Blinking Red) ---
+                if (emergencySession.isActive) {
+                    item {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF8B0000)),
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onNavigateToEmergency() }
+                                .border(2.dp, Color.White, RoundedCornerShape(16.dp))
+                                .shadow(8.dp, RoundedCornerShape(16.dp))
+                                .testTag("active_emergency_banner")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(16.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(16.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .background(Color.White, CircleShape),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text("🚨", fontSize = 20.sp)
+                                }
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "CRITICAL LIVE EMERGENCY",
+                                        fontWeight = FontWeight.Black,
+                                        fontSize = 14.sp,
+                                        color = Color.White
+                                    )
+                                    Text(
+                                        text = "Tap immediately to access telemetry, maps & controls.",
+                                        fontSize = 11.sp,
+                                        color = Color.LightGray
+                                    )
+                                }
+                                Text("GO →", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+
                 // --- SOS RADAR MAP SCANNER (Wow-factor) ---
                 item {
                     Card(
@@ -518,6 +631,259 @@ fun HomeScreen(
                     }
                 }
 
+                // --- ESP32 SMART-BAND SOS SIMULATOR DECK ---
+                item {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFFF0F4F8)),
+                        shape = RoundedCornerShape(20.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(1.5.dp, Color(0xFFB0C4DE), RoundedCornerShape(20.dp))
+                            .shadow(2.dp, RoundedCornerShape(20.dp))
+                            .testTag("esp32_simulator_card")
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(18.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Text("🛰️", fontSize = 20.sp)
+                                    Column {
+                                        Text(
+                                            text = "ESP32 SMART-BAND EMULATOR",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.sp,
+                                            color = Color(0xFF1E3A8A)
+                                        )
+                                        Text(
+                                            text = "Simulate physical device broadcasts",
+                                            fontSize = 10.sp,
+                                            color = Color(0xFF475569)
+                                        )
+                                    }
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(Color(0xFF3B82F6).copy(alpha = 0.15f))
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text("ACTIVE BIND", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFF2563EB))
+                                }
+                            }
+
+                            HorizontalDivider(color = Color(0xFFCBD5E1))
+
+                            Text(
+                                text = "Pressing these buttons will instantly broadcast simulated hardware events to trigger the Emergency SOS system.",
+                                fontSize = 11.sp,
+                                color = Color(0xFF64748B)
+                            )
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                // Simulate Manual SOS Button Press
+                                Button(
+                                    onClick = { viewModel.triggerEsp32SOS("ESP32_BUTTON") },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444)),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(44.dp)
+                                        .testTag("simulate_esp32_sos_button"),
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = PaddingValues(0.dp)
+                                ) {
+                                    Icon(Icons.Default.Emergency, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color.White)
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Simulate SOS", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                }
+
+                                // Simulate Fall Detected Event
+                                Button(
+                                    onClick = { viewModel.triggerEsp32SOS("FALL_DETECTED") },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF59E0B)),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(44.dp)
+                                        .testTag("simulate_esp32_fall_button"),
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = PaddingValues(0.dp)
+                                ) {
+                                    Icon(Icons.Default.DirectionsRun, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color.White)
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Simulate Fall", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // --- AI INTELLIGENCE SYSTEM CARD ---
+                item {
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.25f)
+                        ),
+                        shape = RoundedCornerShape(20.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onNavigateToAiDashboard() }
+                            .testTag("ai_summary_preview_card")
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.tertiary.copy(alpha = 0.15f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("🤖", fontSize = 24.sp)
+                            }
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "AI Incident Analytics",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp,
+                                    color = MaterialTheme.colorScheme.onTertiaryContainer
+                                )
+                                Text(
+                                    text = "MPU6050 Accelerometer & Gyroscope pattern matching logs. Tap to view live waveform telemetry.",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.75f)
+                                )
+                            }
+
+                            Icon(
+                                imageVector = Icons.Default.ChevronRight,
+                                contentDescription = "Go to AI Analytics",
+                                tint = MaterialTheme.colorScheme.tertiary
+                            )
+                        }
+                    }
+                }
+
+                // --- SYSTEM ANALYTICS DASHBOARD CARD ---
+                item {
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f)
+                        ),
+                        shape = RoundedCornerShape(20.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onNavigateToAnalytics() }
+                            .testTag("system_analytics_preview_card")
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("📈", fontSize = 24.sp)
+                            }
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Analytics Dashboard",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                                Text(
+                                    text = "Audits, severity distribution, incident frequencies, response times, and battery health trends.",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                                )
+                            }
+
+                            Icon(
+                                imageVector = Icons.Default.ChevronRight,
+                                contentDescription = "Go to Analytics",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                }
+
+                // --- SAFETY & ACTIVITY REPORTS CARD ---
+                item {
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.2f)
+                        ),
+                        shape = RoundedCornerShape(20.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onNavigateToReports() }
+                            .testTag("reports_preview_card")
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.12f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("📋", fontSize = 24.sp)
+                            }
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Safety & Activity Reports",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                                )
+                                Text(
+                                    text = "Generate commercial-grade PDF/CSV safety audit logs, print summaries, and share maps/event details.",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f)
+                                )
+                            }
+
+                            Icon(
+                                imageVector = Icons.Default.ChevronRight,
+                                contentDescription = "Go to Reports",
+                                tint = MaterialTheme.colorScheme.secondary
+                            )
+                        }
+                    }
+                }
+
                 // --- ACTIVE EMERGENCY ALERTS FEED ---
                 item {
                     Text(
@@ -565,7 +931,7 @@ fun HomeScreen(
                         }
                     }
                 } else {
-                    items(activeAlerts) { alert ->
+                    items(activeAlerts, key = { it.id }) { alert ->
                         AlertCard(alert = alert, onResolveClick = { showResolveDialog = alert })
                     }
                 }
@@ -582,7 +948,7 @@ fun HomeScreen(
                             modifier = Modifier.padding(top = 8.dp)
                         )
                     }
-                    items(resolvedAlerts) { alert ->
+                    items(resolvedAlerts, key = { it.id }) { alert ->
                         ResolvedAlertCard(alert = alert)
                     }
                 }
@@ -655,13 +1021,14 @@ fun HomeScreen(
                         }
                     }
                 } else {
-                    items(devices) { device ->
+                    items(devices, key = { it.deviceId }) { device ->
                         DeviceCard(
                             device = device,
                             onUnbond = { viewModel.unbondDevice(device.deviceId) },
                             onSimulateClick = { triggerType ->
                                 viewModel.triggerESP32SimulatedSOS(triggerType)
-                            }
+                            },
+                            onMonitorClick = onNavigateToDeviceMonitoring
                         )
                     }
                 }
@@ -771,6 +1138,30 @@ fun HomeScreen(
                 ) {
                     Text("👥", fontSize = 18.sp)
                     Text("Guardians", fontSize = 10.sp, fontWeight = FontWeight.Medium, color = Color(0xFF44474E))
+                }
+
+                // History Log
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier
+                        .clickable { onNavigateToHistory() }
+                        .testTag("history_nav_button")
+                ) {
+                    Text("📜", fontSize = 18.sp)
+                    Text("History", fontSize = 10.sp, fontWeight = FontWeight.Medium, color = Color(0xFF44474E))
+                }
+
+                // AI Dashboard
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier
+                        .clickable { onNavigateToAiDashboard() }
+                        .testTag("ai_dashboard_nav_button")
+                ) {
+                    Text("🤖", fontSize = 18.sp)
+                    Text("AI Panel", fontSize = 10.sp, fontWeight = FontWeight.Medium, color = Color(0xFF44474E))
                 }
 
                 // Settings
@@ -996,7 +1387,8 @@ fun ResolvedAlertCard(alert: Alert) {
 fun DeviceCard(
     device: Device,
     onUnbond: () -> Unit,
-    onSimulateClick: (String) -> Unit
+    onSimulateClick: (String) -> Unit,
+    onMonitorClick: () -> Unit
 ) {
     Card(
         colors = CardDefaults.cardColors(
@@ -1140,6 +1532,27 @@ fun DeviceCard(
                     Spacer(modifier = Modifier.width(4.dp))
                     Text("Hardware Click", fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            Button(
+                onClick = onMonitorClick,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary
+                ),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(38.dp)
+                    .testTag("device_monitor_button_${device.deviceId}")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Watch,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("📈 View System Diagnostics", fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
         }
     }

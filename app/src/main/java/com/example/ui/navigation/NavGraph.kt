@@ -19,6 +19,15 @@ import com.example.ui.screens.ProfileScreen
 import com.example.ui.screens.ContactsScreen
 import com.example.ui.screens.DevicePairingScreen
 import com.example.ui.screens.MapScreen
+import com.example.ui.screens.EmergencyScreen
+import com.example.ui.screens.NotificationScreen
+import com.example.ui.screens.EmergencyHistoryScreen
+import com.example.ui.screens.AiDashboardScreen
+import com.example.ui.screens.DeviceMonitoringScreen
+import com.example.ui.screens.SettingsScreen
+import com.example.ui.screens.SecurityScreen
+import com.example.ui.screens.AnalyticsScreen
+import com.example.ui.screens.ReportsScreen
 
 @Composable
 fun NavGraph(
@@ -43,6 +52,9 @@ fun NavGraph(
                     navController.navigate(Screen.Login.route) {
                         popUpTo(0) { inclusive = true }
                     }
+                }
+                is GuardianViewModel.UiEvent.NavigateToEmergency -> {
+                    navController.navigate(Screen.Emergency.route)
                 }
             }
         }
@@ -94,6 +106,30 @@ fun NavGraph(
                 },
                 onNavigateToMap = {
                     navController.navigate(Screen.Map.route)
+                },
+                onNavigateToEmergency = {
+                    navController.navigate(Screen.Emergency.route)
+                },
+                onNavigateToNotifications = {
+                    navController.navigate(Screen.Notifications.route)
+                },
+                onNavigateToHistory = {
+                    navController.navigate(Screen.History.route)
+                },
+                onNavigateToAiDashboard = {
+                    navController.navigate(Screen.AiDashboard.route)
+                },
+                onNavigateToDeviceMonitoring = {
+                    navController.navigate(Screen.DeviceMonitoring.route)
+                },
+                onNavigateToSettings = {
+                    navController.navigate(Screen.Settings.route)
+                },
+                onNavigateToAnalytics = {
+                    navController.navigate(Screen.Analytics.route)
+                },
+                onNavigateToReports = {
+                    navController.navigate(Screen.Reports.route)
                 }
             )
         }
@@ -117,6 +153,64 @@ fun NavGraph(
         }
         composable(Screen.Map.route) {
             MapScreen(
+                viewModel = viewModel,
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+        composable(Screen.Emergency.route) {
+            EmergencyScreen(
+                viewModel = viewModel,
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToMap = {
+                    navController.navigate(Screen.Map.route)
+                }
+            )
+        }
+        composable(Screen.Notifications.route) {
+            NotificationScreen(
+                viewModel = viewModel,
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+        composable(Screen.History.route) {
+            EmergencyHistoryScreen(
+                viewModel = viewModel,
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+        composable(Screen.AiDashboard.route) {
+            AiDashboardScreen(
+                viewModel = viewModel,
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+        composable(Screen.DeviceMonitoring.route) {
+            DeviceMonitoringScreen(
+                viewModel = viewModel,
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+        composable(Screen.Settings.route) {
+            SettingsScreen(
+                viewModel = viewModel,
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToSecurity = { navController.navigate(Screen.Security.route) }
+            )
+        }
+        composable(Screen.Security.route) {
+            SecurityScreen(
+                viewModel = viewModel,
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+        composable(Screen.Analytics.route) {
+            AnalyticsScreen(
+                viewModel = viewModel,
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+        composable(Screen.Reports.route) {
+            ReportsScreen(
                 viewModel = viewModel,
                 onNavigateBack = { navController.popBackStack() }
             )
