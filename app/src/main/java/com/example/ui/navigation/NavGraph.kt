@@ -28,6 +28,9 @@ import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.SecurityScreen
 import com.example.ui.screens.AnalyticsScreen
 import com.example.ui.screens.ReportsScreen
+import com.example.ui.screens.AIScreen
+import com.example.ui.screens.FallDetectionScreen
+import com.example.ui.screens.VoiceSosScreen
 
 @Composable
 fun NavGraph(
@@ -179,7 +182,7 @@ fun NavGraph(
             )
         }
         composable(Screen.AiDashboard.route) {
-            AiDashboardScreen(
+            AIScreen(
                 viewModel = viewModel,
                 onNavigateBack = { navController.popBackStack() }
             )
@@ -194,7 +197,10 @@ fun NavGraph(
             SettingsScreen(
                 viewModel = viewModel,
                 onNavigateBack = { navController.popBackStack() },
-                onNavigateToSecurity = { navController.navigate(Screen.Security.route) }
+                onNavigateToSecurity = { navController.navigate(Screen.Security.route) },
+                onNavigateToFallDetection = { navController.navigate(Screen.FallDetection.route) },
+                onNavigateToVoiceSos = { navController.navigate(Screen.VoiceSos.route) },
+                onNavigateToAiScreen = { navController.navigate(Screen.AiScreen.route) }
             )
         }
         composable(Screen.Security.route) {
@@ -211,6 +217,24 @@ fun NavGraph(
         }
         composable(Screen.Reports.route) {
             ReportsScreen(
+                viewModel = viewModel,
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+        composable(Screen.AiScreen.route) {
+            AIScreen(
+                viewModel = viewModel,
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+        composable(Screen.FallDetection.route) {
+            FallDetectionScreen(
+                viewModel = viewModel,
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+        composable(Screen.VoiceSos.route) {
+            VoiceSosScreen(
                 viewModel = viewModel,
                 onNavigateBack = { navController.popBackStack() }
             )

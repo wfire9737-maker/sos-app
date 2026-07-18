@@ -29,7 +29,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.model.EmergencyHistoryItem
+import com.example.model.HistoryModel
 import com.example.ui.GuardianViewModel
 import kotlinx.coroutines.delay
 
@@ -55,8 +55,8 @@ fun EmergencyHistoryScreen(
     var selectedSeverityFilter by remember { mutableStateOf("ALL") } // "ALL", "CRITICAL", "HIGH", "WARNING"
     var selectedSortBy by remember { mutableStateOf("DATE_DESC") } // "DATE_DESC", "DATE_ASC", "DURATION_DESC", "RESPONSE_ASC"
 
-    var selectedItemForDetail by remember { mutableStateOf<EmergencyHistoryItem?>(null) }
-    var selectedItemForDelete by remember { mutableStateOf<EmergencyHistoryItem?>(null) }
+    var selectedItemForDetail by remember { mutableStateOf<HistoryModel?>(null) }
+    var selectedItemForDelete by remember { mutableStateOf<HistoryModel?>(null) }
 
     var showExportConfirmDialog by remember { mutableStateOf(false) }
     var exportType by remember { mutableStateOf("") } // "CSV" or "PDF"
@@ -638,7 +638,7 @@ fun StatMetricColumn(
 
 @Composable
 fun HistoryCard(
-    item: EmergencyHistoryItem,
+    item: HistoryModel,
     onClick: () -> Unit,
     onDelete: () -> Unit
 ) {

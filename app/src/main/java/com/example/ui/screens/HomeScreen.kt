@@ -64,6 +64,9 @@ fun HomeScreen(
     val notifications by viewModel.notifications.collectAsState()
     val isDemo = viewModel.isDemoMode
 
+    val fallState by viewModel.fallState.collectAsState()
+    val fallCountdown by viewModel.fallCountdown.collectAsState()
+
     val unreadCount = remember(notifications) { notifications.count { !it.isRead } }
 
     val currentUser = (authState as? AuthState.Success)?.user ?: com.example.model.User(name = "Guardian User")
@@ -100,7 +103,7 @@ fun HomeScreen(
             ) {
                 Column {
                     Text(
-                        text = "Guardian SOS",
+                        text = "Smart SOS App",
                         fontSize = 24.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFF1B1B1F),
@@ -221,6 +224,24 @@ fun HomeScreen(
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFF001D35)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(10.dp))
+
+                    // Log Out Button
+                    IconButton(
+                        onClick = { viewModel.logout() },
+                        modifier = Modifier
+                            .size(40.dp)
+                            .background(Color(0xFFFFF0F1), CircleShape)
+                            .testTag("logout_header_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ExitToApp,
+                            contentDescription = "Log Out",
+                            tint = Color(0xFFD32F2F),
+                            modifier = Modifier.size(22.dp)
                         )
                     }
                 }
@@ -710,7 +731,7 @@ fun HomeScreen(
 
                                 // Simulate Fall Detected Event
                                 Button(
-                                    onClick = { viewModel.triggerEsp32SOS("FALL_DETECTED") },
+                                    onClick = { viewModel.fallDetectionService.triggerSimulatedFall() },
                                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF59E0B)),
                                     modifier = Modifier
                                         .weight(1f)
@@ -1198,6 +1219,14 @@ fun HomeScreen(
                     viewModel.resolveAlert(alert.id, notes)
                     showResolveDialog = null
                 }
+            )
+        }
+
+        // --- FALL DETECTION AUTOMATION MODAL OVERLAY ---
+        if (fallState == "FALL_COUNTDOWN") {
+            FallCountdownDialog(
+                secondsLeft = fallCountdown,
+                onCancel = { viewModel.fallDetectionService.cancelFallCountdown() }
             )
         }
     }

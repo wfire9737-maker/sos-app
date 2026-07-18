@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "Guardian SOS"
+rootProject.name = "Smart SOS App"
 
 include(":app")

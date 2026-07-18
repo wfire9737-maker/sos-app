@@ -24,8 +24,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.model.NotificationItem
-import com.example.model.NotificationType
+import com.example.model.NotificationModel
+import com.example.model.NotificationCategory
 import com.example.ui.GuardianViewModel
 import java.text.SimpleDateFormat
 import java.util.*
@@ -36,7 +36,7 @@ fun NotificationScreen(
     viewModel: GuardianViewModel,
     onNavigateBack: () -> Unit
 ) {
-    val notifications by viewModel.notifications.collectAsState()
+    val notifications by viewModel.notificationsNew.collectAsState()
     val fcmToken by viewModel.fcmToken.collectAsState()
 
     var searchQuery by remember { mutableStateOf("") }
@@ -50,8 +50,8 @@ fun NotificationScreen(
 
             val matchesFilter = when (selectedFilter) {
                 "UNREAD" -> !item.isRead
-                "EMERGENCY" -> item.type == NotificationType.EMERGENCY || item.type == NotificationType.EMERGENCY_CANCELLED
-                "SYSTEM" -> item.type != NotificationType.EMERGENCY && item.type != NotificationType.EMERGENCY_CANCELLED
+                "EMERGENCY" -> item.category == NotificationCategory.EMERGENCY_ALERTS || item.category == NotificationCategory.EMERGENCY_RESOLVED
+                "SYSTEM" -> item.category != NotificationCategory.EMERGENCY_ALERTS && item.category != NotificationCategory.EMERGENCY_RESOLVED
                 else -> true
             }
 
@@ -92,7 +92,7 @@ fun NotificationScreen(
                 actions = {
                     // Mark All Read Action
                     IconButton(
-                        onClick = { viewModel.markAllNotificationsAsRead() },
+                        onClick = { viewModel.markAllNotificationsNewAsRead() },
                         modifier = Modifier.testTag("mark_all_read_button")
                     ) {
                         Icon(
@@ -199,19 +199,19 @@ fun NotificationScreen(
                         SimulatorButton(
                             label = "Emergency",
                             color = Color(0xFFD50000),
-                            onClick = { viewModel.simulateIncomingNotification(NotificationType.EMERGENCY) },
+                            onClick = { viewModel.simulateIncomingNotificationNew(NotificationCategory.EMERGENCY_ALERTS) },
                             modifier = Modifier.weight(1f).testTag("sim_emergency_btn")
                         )
                         SimulatorButton(
                             label = "Low Battery",
                             color = Color(0xFFFF8F00),
-                            onClick = { viewModel.simulateIncomingNotification(NotificationType.BATTERY_LOW) },
+                            onClick = { viewModel.simulateIncomingNotificationNew(NotificationCategory.BATTERY_ALERTS) },
                             modifier = Modifier.weight(1f).testTag("sim_battery_btn")
                         )
                         SimulatorButton(
                             label = "Offline",
                             color = Color(0xFF757575),
-                            onClick = { viewModel.simulateIncomingNotification(NotificationType.DEVICE_OFFLINE) },
+                            onClick = { viewModel.simulateIncomingNotificationNew(NotificationCategory.DEVICE_DISCONNECTED) },
                             modifier = Modifier.weight(1f).testTag("sim_offline_btn")
                         )
                     }
@@ -224,19 +224,19 @@ fun NotificationScreen(
                         SimulatorButton(
                             label = "GPS Lost",
                             color = Color(0xFF1E88E5),
-                            onClick = { viewModel.simulateIncomingNotification(NotificationType.GPS_UNAVAILABLE) },
+                            onClick = { viewModel.simulateIncomingNotificationNew(NotificationCategory.GPS_UNAVAILABLE) },
                             modifier = Modifier.weight(1f).testTag("sim_gps_btn")
                         )
                         SimulatorButton(
                             label = "Firmware",
                             color = Color(0xFF8E24AA),
-                            onClick = { viewModel.simulateIncomingNotification(NotificationType.FIRMWARE_UPDATE) },
+                            onClick = { viewModel.simulateIncomingNotificationNew(NotificationCategory.FIRMWARE_UPDATES) },
                             modifier = Modifier.weight(1f).testTag("sim_firmware_btn")
                         )
                         SimulatorButton(
                             label = "Safe Arrival",
                             color = Color(0xFF43A047),
-                            onClick = { viewModel.simulateIncomingNotification(NotificationType.SAFE_ARRIVAL) },
+                            onClick = { viewModel.simulateIncomingNotificationNew(NotificationCategory.SAFE_ARRIVAL) },
                             modifier = Modifier.weight(1f).testTag("sim_arrival_btn")
                         )
                     }
@@ -245,7 +245,7 @@ fun NotificationScreen(
                     SimulatorButton(
                         label = "Simulate Emergency Cancelled Alarm Reset",
                         color = Color(0xFF00B0FF),
-                        onClick = { viewModel.simulateIncomingNotification(NotificationType.EMERGENCY_CANCELLED) },
+                        onClick = { viewModel.simulateIncomingNotificationNew(NotificationCategory.EMERGENCY_RESOLVED) },
                         modifier = Modifier.fillMaxWidth().height(32.dp).testTag("sim_cancel_btn")
                     )
                 }
@@ -291,8 +291,8 @@ fun NotificationScreen(
                     ) { item ->
                         NotificationCard(
                             item = item,
-                            onMarkRead = { viewModel.markNotificationAsRead(item.id) },
-                            onDelete = { viewModel.deleteNotification(item.id) },
+                            onMarkRead = { viewModel.markNotificationNewAsRead(item.id) },
+                            onDelete = { viewModel.deleteNotificationNew(item.id) },
                             modifier = Modifier
                         )
                     }
@@ -325,29 +325,29 @@ fun SimulatorButton(
 
 @Composable
 fun NotificationCard(
-    item: NotificationItem,
+    item: NotificationModel,
     onMarkRead: () -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val badgeColor = when (item.type) {
-        NotificationType.EMERGENCY -> Color(0xFFD50000)
-        NotificationType.EMERGENCY_CANCELLED -> Color(0xFF00B0FF)
-        NotificationType.BATTERY_LOW -> Color(0xFFFF8F00)
-        NotificationType.DEVICE_OFFLINE -> Color(0xFF757575)
-        NotificationType.GPS_UNAVAILABLE -> Color(0xFF1E88E5)
-        NotificationType.FIRMWARE_UPDATE -> Color(0xFF8E24AA)
-        NotificationType.SAFE_ARRIVAL -> Color(0xFF43A047)
+    val badgeColor = when (item.category) {
+        NotificationCategory.EMERGENCY_ALERTS -> Color(0xFFD50000)
+        NotificationCategory.EMERGENCY_RESOLVED -> Color(0xFF00B0FF)
+        NotificationCategory.BATTERY_ALERTS -> Color(0xFFFF8F00)
+        NotificationCategory.DEVICE_DISCONNECTED -> Color(0xFF757575)
+        NotificationCategory.GPS_UNAVAILABLE -> Color(0xFF1E88E5)
+        NotificationCategory.FIRMWARE_UPDATES -> Color(0xFF8E24AA)
+        NotificationCategory.SAFE_ARRIVAL -> Color(0xFF43A047)
     }
 
-    val icon = when (item.type) {
-        NotificationType.EMERGENCY -> Icons.Default.Emergency
-        NotificationType.EMERGENCY_CANCELLED -> Icons.Default.CheckCircle
-        NotificationType.BATTERY_LOW -> Icons.Default.BatteryAlert
-        NotificationType.DEVICE_OFFLINE -> Icons.Default.SignalCellularNull
-        NotificationType.GPS_UNAVAILABLE -> Icons.Default.GpsOff
-        NotificationType.FIRMWARE_UPDATE -> Icons.Default.SystemUpdate
-        NotificationType.SAFE_ARRIVAL -> Icons.Default.Home
+    val icon = when (item.category) {
+        NotificationCategory.EMERGENCY_ALERTS -> Icons.Default.Emergency
+        NotificationCategory.EMERGENCY_RESOLVED -> Icons.Default.CheckCircle
+        NotificationCategory.BATTERY_ALERTS -> Icons.Default.BatteryAlert
+        NotificationCategory.DEVICE_DISCONNECTED -> Icons.Default.SignalCellularNull
+        NotificationCategory.GPS_UNAVAILABLE -> Icons.Default.GpsOff
+        NotificationCategory.FIRMWARE_UPDATES -> Icons.Default.SystemUpdate
+        NotificationCategory.SAFE_ARRIVAL -> Icons.Default.Home
     }
 
     val formattedTime = remember(item.timestamp) {

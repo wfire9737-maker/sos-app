@@ -30,6 +30,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.pointerInput
+import kotlin.math.*
 import com.example.model.Device
 import com.example.ui.GuardianViewModel
 import com.example.ui.theme.*
@@ -463,6 +467,11 @@ fun DeviceMonitoringScreen(
                                     }
                                 }
                             }
+                        }
+
+                        // Interactive Spatial & Inertial Telemetry Visualizers
+                        item {
+                            InteractiveVisualizersCard(device = device, viewModel = viewModel)
                         }
 
                         // Telemetry Metrics Grid Section
@@ -1458,3 +1467,496 @@ fun TelemetryGaugeCard(
         }
     }
 }
+
+// --- MODULE 16: TACTILE SPATIAL AND INERTIAL TELEMETRY VISUALIZERS ---
+
+@Composable
+fun InteractiveVisualizersCard(
+    device: Device,
+    viewModel: GuardianViewModel
+) {
+    Card(
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f),
+                shape = RoundedCornerShape(24.dp)
+            )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Explore,
+                    contentDescription = null,
+                    tint = SafetyGreen,
+                    modifier = Modifier.size(20.dp)
+                )
+                Column {
+                    Text(
+                        text = "Tactile Spatial & Inertial Lab",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Tap & Drag directly on the scopes below to simulate physical states!",
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Widget 1: MPU6050 Bubble Level & Horizon Tilt (6-axis Inertial Simulation)
+                Card(
+                    modifier = Modifier
+                        .weight(1f)
+                        .aspectRatio(0.82f)
+                        .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.08f), RoundedCornerShape(16.dp)),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF121212)),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "MPU6050 LEVEL",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.LightGray,
+                            fontFamily = FontFamily.Monospace
+                        )
+
+                        var isDraggingLevel by remember { mutableStateOf(false) }
+
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .padding(4.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Canvas(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .aspectRatio(1f)
+                                    .pointerInput(device.deviceId) {
+                                        detectDragGestures(
+                                            onDragStart = { isDraggingLevel = true },
+                                            onDragEnd = {
+                                                isDraggingLevel = false
+                                                // Snap back to resting/level telemetry
+                                                viewModel.sendSimulatedTelemetry(
+                                                    deviceId = device.deviceId,
+                                                    battery = device.batteryLevel,
+                                                    isCharging = device.isCharging,
+                                                    latitude = device.latitude,
+                                                    longitude = device.longitude,
+                                                    ax = 0.05f,
+                                                    ay = -0.02f,
+                                                    az = 0.98f,
+                                                    gx = 0.1f,
+                                                    gy = -0.1f,
+                                                    gz = 0.2f,
+                                                    firmware = device.firmwareVersion
+                                                )
+                                            },
+                                            onDragCancel = {
+                                                isDraggingLevel = false
+                                                viewModel.sendSimulatedTelemetry(
+                                                    deviceId = device.deviceId,
+                                                    battery = device.batteryLevel,
+                                                    isCharging = device.isCharging,
+                                                    latitude = device.latitude,
+                                                    longitude = device.longitude,
+                                                    ax = 0.05f,
+                                                    ay = -0.02f,
+                                                    az = 0.98f,
+                                                    gx = 0.1f,
+                                                    gy = -0.1f,
+                                                    gz = 0.2f,
+                                                    firmware = device.firmwareVersion
+                                                )
+                                            },
+                                            onDrag = { change, _ ->
+                                                change.consume()
+                                                val sizePx = size.width.toFloat()
+                                                val radius = sizePx / 2f
+                                                
+                                                // Get pointer position relative to center
+                                                val localX = change.position.x - radius
+                                                val localY = change.position.y - radius
+                                                
+                                                // Scale factors to gravity (max tilt +/- 2G)
+                                                val newAx = (-localX / radius) * 2.0f
+                                                val newAy = (localY / radius) * 2.0f
+                                                
+                                                viewModel.sendSimulatedTelemetry(
+                                                    deviceId = device.deviceId,
+                                                    battery = device.batteryLevel,
+                                                    isCharging = device.isCharging,
+                                                    latitude = device.latitude,
+                                                    longitude = device.longitude,
+                                                    ax = newAx.coerceIn(-6f, 6f),
+                                                    ay = newAy.coerceIn(-6f, 6f),
+                                                    az = 0.98f,
+                                                    gx = 0.1f,
+                                                    gy = -0.1f,
+                                                    gz = 0.2f,
+                                                    firmware = device.firmwareVersion
+                                                )
+                                            }
+                                        )
+                                    }
+                            ) {
+                                val center = Offset(size.width / 2f, size.height / 2f)
+                                val radius = size.width / 2f - 4.dp.toPx()
+                                
+                                // 1. Draw outer target scope circle
+                                drawCircle(
+                                    color = Color(0xFF2E2E2E),
+                                    radius = radius,
+                                    center = center,
+                                    style = Stroke(width = 1.5.dp.toPx())
+                                )
+                                
+                                // 2. Inner standard compliant boundary (0.5G threshold ring)
+                                drawCircle(
+                                    color = Color(0xFF1A3A1E),
+                                    radius = radius * 0.4f,
+                                    center = center,
+                                    style = Stroke(width = 1.dp.toPx())
+                                )
+                                
+                                // 3. Target crosshairs
+                                drawLine(
+                                    color = Color(0xFF2E2E2E),
+                                    start = Offset(center.x - radius, center.y),
+                                    end = Offset(center.x + radius, center.y),
+                                    strokeWidth = 1.dp.toPx()
+                                )
+                                drawLine(
+                                    color = Color(0xFF2E2E2E),
+                                    start = Offset(center.x, center.y - radius),
+                                    end = Offset(center.x, center.y + radius),
+                                    strokeWidth = 1.dp.toPx()
+                                )
+                                
+                                // 4. Scale inputs to screen coordinates
+                                val maxG = 1.8f
+                                val bubbleRadius = 10.dp.toPx()
+                                val maxOffsetRadius = radius - bubbleRadius - 2.dp.toPx()
+                                
+                                val rawX = (-device.accelX / maxG) * maxOffsetRadius
+                                val rawY = (device.accelY / maxG) * maxOffsetRadius
+                                val dist = sqrt(rawX*rawX + rawY*rawY)
+                                
+                                val bubbleX: Float
+                                val bubbleY: Float
+                                if (dist > maxOffsetRadius) {
+                                    bubbleX = (rawX / dist) * maxOffsetRadius
+                                    bubbleY = (rawY / dist) * maxOffsetRadius
+                                } else {
+                                    bubbleX = rawX
+                                    bubbleY = rawY
+                                }
+                                
+                                val bubbleColor = when {
+                                    dist / maxOffsetRadius < 0.25f -> SafetyGreen
+                                    dist / maxOffsetRadius < 0.70f -> AlertOrange
+                                    else -> Color.Red
+                                }
+                                
+                                // Draw glowing circle bubble representing gravity vector
+                                drawCircle(
+                                    color = bubbleColor.copy(alpha = 0.25f),
+                                    radius = bubbleRadius * 1.5f,
+                                    center = Offset(center.x + bubbleX, center.y + bubbleY)
+                                )
+                                drawCircle(
+                                    color = bubbleColor,
+                                    radius = bubbleRadius,
+                                    center = Offset(center.x + bubbleX, center.y + bubbleY)
+                                )
+                                drawCircle(
+                                    color = Color.White.copy(alpha = 0.6f),
+                                    radius = bubbleRadius * 0.3f,
+                                    center = Offset(center.x + bubbleX - bubbleRadius * 0.3f, center.y + bubbleY - bubbleRadius * 0.3f)
+                                )
+                            }
+                        }
+
+                        // Stats text footer
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = "X: ${String.format("%.2f", device.accelX)}G  Y: ${String.format("%.2f", device.accelY)}G",
+                                fontSize = 9.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isDraggingLevel) SafetyGreen else Color.Gray
+                            )
+                            Text(
+                                text = if (isDraggingLevel) "Tilted Sim active" else "Drag to tilt sensor",
+                                fontSize = 8.sp,
+                                color = if (isDraggingLevel) SafetyGreen.copy(alpha = 0.8f) else Color.DarkGray,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+
+                // Widget 2: Custom Tactical GPS Radar Scan (Relocation Simulation)
+                Card(
+                    modifier = Modifier
+                        .weight(1f)
+                        .aspectRatio(0.82f)
+                        .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.08f), RoundedCornerShape(16.dp)),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF101612)), // custom dark green military backdrop
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "GPS RADAR MAP",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = SafetyGreen.copy(alpha = 0.8f),
+                            fontFamily = FontFamily.Monospace
+                        )
+
+                        // Base Coordinates representing User Base Station
+                        val baseLat = 37.7749
+                        val baseLng = -122.4194
+                        
+                        // Distance calculation
+                        val dLat = device.latitude - baseLat
+                        val dLng = device.longitude - baseLng
+                        val latMeters = dLat * 111139.0
+                        val lngMeters = dLng * 111139.0 * cos(baseLat * PI / 180.0)
+                        val distanceMeters = sqrt(latMeters * latMeters + lngMeters * lngMeters)
+                        
+                        // Bearing calculation
+                        val bearingRad = atan2(lngMeters, latMeters)
+                        val bearingDeg = (bearingRad * 180.0 / PI + 360.0) % 360.0
+
+                        val infiniteTransition = rememberInfiniteTransition(label = "radarSweep")
+                        val sweepAngle by infiniteTransition.animateFloat(
+                            initialValue = 0f,
+                            targetValue = 360f,
+                            animationSpec = infiniteRepeatable(
+                                animation = tween(3000, easing = LinearEasing)
+                            ),
+                            label = "sweepAngle"
+                        )
+
+                        var isDraggingRadar by remember { mutableStateOf(false) }
+
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .padding(4.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Canvas(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .aspectRatio(1f)
+                                    .pointerInput(device.deviceId) {
+                                        detectDragGestures(
+                                            onDragStart = { isDraggingRadar = true },
+                                            onDragEnd = { isDraggingRadar = false },
+                                            onDragCancel = { isDraggingRadar = false },
+                                            onDrag = { change, _ ->
+                                                change.consume()
+                                                val sizePx = size.width.toFloat()
+                                                val radius = sizePx / 2f
+                                                
+                                                val localX = change.position.x - radius
+                                                val localY = change.position.y - radius
+                                                
+                                                // Max distance we map to radar boundary is 800m
+                                                val maxMeters = 800.0
+                                                val fx = (localX / radius).coerceIn(-1.1f, 1.1f)
+                                                val fy = (-localY / radius).coerceIn(-1.1f, 1.1f) // invert Y for Cartesian
+                                                
+                                                val newLatMeters = fy * maxMeters
+                                                val newLngMeters = fx * maxMeters
+                                                
+                                                val newLat = baseLat + (newLatMeters / 111139.0)
+                                                val newLng = baseLng + (newLngMeters / (111139.0 * cos(baseLat * PI / 180.0)))
+                                                
+                                                viewModel.sendSimulatedTelemetry(
+                                                    deviceId = device.deviceId,
+                                                    battery = device.batteryLevel,
+                                                    isCharging = device.isCharging,
+                                                    latitude = newLat,
+                                                    longitude = newLng,
+                                                    ax = device.accelX,
+                                                    ay = device.accelY,
+                                                    az = device.accelZ,
+                                                    gx = device.gyroX,
+                                                    gy = device.gyroY,
+                                                    gz = device.gyroZ,
+                                                    firmware = device.firmwareVersion
+                                                )
+                                            }
+                                        )
+                                    }
+                            ) {
+                                val center = Offset(size.width / 2f, size.height / 2f)
+                                val radius = size.width / 2f - 4.dp.toPx()
+                                
+                                // Radar ring grids
+                                drawCircle(
+                                    color = SafetyGreen.copy(alpha = 0.08f),
+                                    radius = radius,
+                                    center = center
+                                )
+                                drawCircle(
+                                    color = SafetyGreen.copy(alpha = 0.15f),
+                                    radius = radius,
+                                    center = center,
+                                    style = Stroke(width = 1.dp.toPx())
+                                )
+                                drawCircle(
+                                    color = SafetyGreen.copy(alpha = 0.15f),
+                                    radius = radius * 0.66f,
+                                    center = center,
+                                    style = Stroke(width = 1.dp.toPx())
+                                )
+                                drawCircle(
+                                    color = SafetyGreen.copy(alpha = 0.15f),
+                                    radius = radius * 0.33f,
+                                    center = center,
+                                    style = Stroke(width = 1.dp.toPx())
+                                )
+                                
+                                // Crosshairs
+                                drawLine(
+                                    color = SafetyGreen.copy(alpha = 0.12f),
+                                    start = Offset(center.x - radius, center.y),
+                                    end = Offset(center.x + radius, center.y),
+                                    strokeWidth = 1.dp.toPx()
+                                )
+                                drawLine(
+                                    color = SafetyGreen.copy(alpha = 0.12f),
+                                    start = Offset(center.x, center.y - radius),
+                                    end = Offset(center.x, center.y + radius),
+                                    strokeWidth = 1.dp.toPx()
+                                )
+                                
+                                // Center User Base Station Icon/Dot
+                                drawCircle(
+                                    color = Color.White,
+                                    radius = 3.dp.toPx(),
+                                    center = center
+                                )
+                                drawCircle(
+                                    color = Color.White.copy(alpha = 0.25f),
+                                    radius = 6.dp.toPx(),
+                                    center = center,
+                                    style = Stroke(width = 1.dp.toPx())
+                                )
+
+                                // Sweep line
+                                val sweepRad = sweepAngle * PI / 180.0
+                                val sweepX = center.x + radius * cos(sweepRad).toFloat()
+                                val sweepY = center.y + radius * sin(sweepRad).toFloat()
+                                drawLine(
+                                    brush = Brush.linearGradient(
+                                        colors = listOf(SafetyGreen, SafetyGreen.copy(alpha = 0.0f)),
+                                        start = center,
+                                        end = Offset(sweepX, sweepY)
+                                    ),
+                                    start = center,
+                                    end = Offset(sweepX, sweepY),
+                                    strokeWidth = 2.dp.toPx()
+                                )
+
+                                // Plot device blip
+                                val maxMeters = 800.0
+                                val fx = (lngMeters / maxMeters).coerceIn(-1.0, 1.0).toFloat()
+                                val fy = (-latMeters / maxMeters).coerceIn(-1.0, 1.0).toFloat() // invert Y for top-left Canvas
+
+                                val targetX = center.x + fx * radius
+                                val targetY = center.y + fy * radius
+                                
+                                // Calculate angle of target relative to sweep
+                                val targetAngle = (bearingDeg - 90.0 + 360.0) % 360.0 // adjust by -90 because 0 angle in polar is along East, but bearing is along North
+                                val diff = abs(sweepAngle - targetAngle.toFloat())
+                                val shortestDiff = if (diff > 180f) 360f - diff else diff
+                                val isNearSweep = shortestDiff < 25f
+                                
+                                val blipGlowAlpha = if (isNearSweep) {
+                                    (1f - (shortestDiff / 25f)).coerceIn(0f, 1f)
+                                } else 0f
+                                
+                                val blipAlpha = 0.3f + 0.7f * blipGlowAlpha
+                                
+                                // Draw target blip
+                                drawCircle(
+                                    color = SafetyGreen.copy(alpha = blipAlpha * 0.3f),
+                                    radius = 12.dp.toPx(),
+                                    center = Offset(targetX, targetY)
+                                )
+                                drawCircle(
+                                    color = SafetyGreen.copy(alpha = blipAlpha),
+                                    radius = 5.dp.toPx(),
+                                    center = Offset(targetX, targetY)
+                                )
+                                if (isNearSweep) {
+                                    drawCircle(
+                                        color = Color.White.copy(alpha = blipGlowAlpha * 0.8f),
+                                        radius = 2.dp.toPx(),
+                                        center = Offset(targetX, targetY)
+                                    )
+                                }
+                            }
+                        }
+
+                        // Bearing & Distance overlays
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            val distStr = if (distanceMeters < 1.0) "At base" else "${distanceMeters.toInt()}m"
+                            Text(
+                                text = "$distStr @ ${bearingDeg.toInt()}°",
+                                fontSize = 9.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isDraggingRadar) SafetyGreen else Color.LightGray
+                            )
+                            Text(
+                                text = if (isDraggingRadar) "Relocating..." else "Drag to relocate node",
+                                fontSize = 8.sp,
+                                color = if (isDraggingRadar) SafetyGreen.copy(alpha = 0.8f) else Color.DarkGray,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+

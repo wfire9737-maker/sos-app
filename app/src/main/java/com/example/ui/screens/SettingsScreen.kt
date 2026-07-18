@@ -35,7 +35,10 @@ import com.example.ui.theme.*
 fun SettingsScreen(
     viewModel: GuardianViewModel,
     onNavigateBack: () -> Unit,
-    onNavigateToSecurity: () -> Unit
+    onNavigateToSecurity: () -> Unit,
+    onNavigateToFallDetection: () -> Unit = {},
+    onNavigateToVoiceSos: () -> Unit = {},
+    onNavigateToAiScreen: () -> Unit = {}
 ) {
     val context = LocalContext.current
 
@@ -288,6 +291,60 @@ fun SettingsScreen(
                             checked = deviceStatusNotifications,
                             onCheckedChange = { viewModel.setDeviceStatusNotificationsEnabled(it) },
                             testTag = "settings_device_notifications_switch"
+                        )
+                    }
+                }
+            }
+
+            // Category: Hardware Detection Modules
+            item {
+                SettingsCategoryHeader(title = "Hardware Detection Modules")
+            }
+
+            item {
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.08f), RoundedCornerShape(16.dp))
+                ) {
+                    Column {
+                        SettingsNavigationRow(
+                            title = "Fall Detection Engine (Room)",
+                            subtitle = "Local MPU6050 gait classification and automated 15-second countdown settings",
+                            icon = Icons.Default.DirectionsRun,
+                            iconTint = Color(0xFFEF4444),
+                            onClick = onNavigateToFallDetection,
+                            testTag = "settings_fall_detection_row"
+                        )
+
+                        Divider(
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.08f)
+                        )
+
+                        SettingsNavigationRow(
+                            title = "Voice SOS Activation (Acoustics)",
+                            subtitle = "Offline wake word custom triggers, noise thresholding and confidence guards",
+                            icon = Icons.Default.Mic,
+                            iconTint = Color(0xFF3B82F6),
+                            onClick = onNavigateToVoiceSos,
+                            testTag = "settings_voice_sos_row"
+                        )
+
+                        Divider(
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.08f)
+                        )
+
+                        SettingsNavigationRow(
+                            title = "AI Incident Analyser",
+                            subtitle = "Real-time MPU6050 accelerometer graph visualization and neural timeline diagnostic logs",
+                            icon = Icons.Default.Troubleshoot,
+                            iconTint = Color(0xFF8B5CF6),
+                            onClick = onNavigateToAiScreen,
+                            testTag = "settings_ai_screen_row"
                         )
                     }
                 }
@@ -574,13 +631,83 @@ fun SettingsScreen(
                         )
 
                         SettingsNavigationRow(
-                            title = "About Guardian App",
+                            title = "About Smart SOS App",
                             subtitle = "V12.1.4 • Secure telemetry system details",
                             icon = Icons.Default.Info,
                             iconTint = Color(0xFF607D8B),
                             onClick = { showAboutDialog = true },
                             testTag = "settings_about_button"
                         )
+                    }
+                }
+            }
+
+            // Category: Account & Session
+            item {
+                SettingsCategoryHeader(title = "Account & Session")
+            }
+
+            item {
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.08f), RoundedCornerShape(16.dp))
+                ) {
+                    Column {
+                        SettingsNavigationRow(
+                            title = "Manage App Security",
+                            subtitle = "Update PIN code, biometric parameters, and credentials",
+                            icon = Icons.Default.Security,
+                            iconTint = Color(0xFF3F51B5),
+                            onClick = onNavigateToSecurity,
+                            testTag = "settings_security_btn"
+                        )
+
+                        Divider(
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.08f)
+                        )
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { viewModel.logout() }
+                                .padding(16.dp)
+                                .testTag("settings_logout_row"),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .background(Color(0xFFE91E63).copy(alpha = 0.12f), CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ExitToApp,
+                                    contentDescription = null,
+                                    tint = Color(0xFFE91E63),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(16.dp))
+
+                            Column {
+                                Text(
+                                    text = "Log Out Session",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                                Text(
+                                    text = "Safely clear local session authentication tokens",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -715,7 +842,7 @@ fun SettingsScreen(
     if (showAboutDialog) {
         AlertDialog(
             onDismissRequest = { showAboutDialog = false },
-            title = { Text("About Guardian") },
+            title = { Text("About Smart SOS App") },
             text = {
                 Column(
                     modifier = Modifier.fillMaxWidth(),
@@ -737,7 +864,7 @@ fun SettingsScreen(
                     }
                     Spacer(modifier = Modifier.height(16.dp))
                     Text(
-                        text = "Guardian Safety System",
+                        text = "Smart SOS Safety System",
                         fontWeight = FontWeight.Black,
                         fontSize = 18.sp,
                         color = MaterialTheme.colorScheme.onSurface

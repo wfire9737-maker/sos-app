@@ -15,12 +15,35 @@ import com.example.service.AlarmVibratorService
 import com.example.service.NotificationService
 import com.example.model.NotificationItem
 import com.example.model.NotificationType
-import com.example.service.EmergencyHistoryService
-import com.example.model.EmergencyHistoryItem
+import com.example.model.NotificationModel
+import com.example.model.NotificationCategory
+import com.example.service.NotificationProvider
+import com.example.model.HistoryModel
+import com.example.service.HistoryService
+import com.example.service.HistoryProvider
 import com.example.model.AiAnalysisResult
 import com.example.model.SensorReading
 import com.example.service.AiAnalysisService
+import com.example.model.AIAnalysisModel
+import com.example.model.AISensorReading
+import com.example.model.AITimelineEvent
+import com.example.service.AIService
+import com.example.service.AIProvider
+import com.example.model.FallEvent
+import com.example.data.FallDatabase
+import com.example.repository.FallRepository
+import com.example.service.FallDetectionService
+import com.example.service.VoiceSosService
+import com.example.service.VoiceActivationLog
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
 import com.example.service.DeviceService
+import com.example.model.EmergencyModel
+import com.example.service.EmergencyService
+import com.example.service.EmergencyProvider
+import com.example.service.SafetyTimerService
+import com.example.service.SafetyTimerStatus
+import com.example.service.AnalyticsService
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -41,14 +64,104 @@ class GuardianViewModel(application: Application) : AndroidViewModel(application
     val locationService = com.example.service.LocationService(application, databaseService.firestoreInstance)
     val alarmVibratorService = AlarmVibratorService(application)
     val notificationService = NotificationService(application, databaseService.firestoreInstance)
-    val emergencyHistoryService = EmergencyHistoryService(application, databaseService.firestoreInstance)
+    val notificationProvider = NotificationProvider(application, notificationService)
+    val historyService = HistoryService(application, databaseService.firestoreInstance)
+    val historyProvider = HistoryProvider(application, historyService)
     val aiAnalysisService = AiAnalysisService(application, databaseService.firestoreInstance)
     val deviceService = DeviceService(application, databaseService, notificationService)
 
+    // Module 21, 22, 23 Service Initializations
+    val fallDatabase = com.example.data.FallDatabase.getDatabase(application)
+    val fallRepository = com.example.repository.FallRepository(fallDatabase.fallEventDao())
+    val fallDetectionService = com.example.service.FallDetectionService(application, fallRepository)
+    val voiceSosService = com.example.service.VoiceSosService(application)
+    val aiService = com.example.service.AIService(application, databaseService.firestoreInstance)
+    val aiProvider = com.example.service.AIProvider(application, aiService)
+
+    val emergencyService = EmergencyService(
+        application,
+        databaseService.firestoreInstance,
+        locationService,
+        notificationService,
+        databaseService
+    )
+    val emergencyProvider = EmergencyProvider(application, emergencyService)
+
+    // Module 24 & 25 Service Initializations
+    val safetyTimerService = SafetyTimerService(application, notificationProvider)
+    val analyticsService = AnalyticsService(application)
+
+    init {
+        // Register callbacks for Fall, Voice SOS, and Safety Timer automation
+        safetyTimerService.onTimerExpiredCallback = {
+            triggerTimerSOS()
+        }
+        fallDetectionService.onSosTriggeredCallback = {
+            triggerFallDetectedSOS()
+        }
+        voiceSosService.onVoiceSosTriggered = { matchedPhrase, confidence ->
+            triggerVoiceSOS(matchedPhrase, confidence)
+        }
+
+        viewModelScope.launch {
+            emergencyProvider.activeEmergencyState.collect { model ->
+                if (model != null) {
+                    val alert = _emergencySession.value.activeAlert ?: Alert(
+                        id = model.emergencyId,
+                        userId = model.userId,
+                        userName = model.userName,
+                        userPhone = model.userPhone,
+                        latitude = model.latitude,
+                        longitude = model.longitude,
+                        status = "ACTIVE",
+                        triggerType = model.triggerType,
+                        timestamp = model.startTimeMs
+                    )
+                    _emergencySession.value = _emergencySession.value.copy(
+                        activeAlert = alert.copy(
+                            latitude = model.latitude,
+                            longitude = model.longitude,
+                            status = model.status
+                        ),
+                        deviceId = model.deviceId,
+                        startTimeMs = model.startTimeMs,
+                        responderStatus = model.responderStatus,
+                        emergencyLevel = if (model.triggerType == "FALL_DETECTED") "CRITICAL (LEVEL 3)" else "HIGH ALERT (LEVEL 2)",
+                        aiConfidence = model.aiConfidenceScore,
+                        isMarkedSafe = model.status == "MARKED_SAFE" || model.status == "RESOLVED" || model.status == "CANCELLED"
+                    )
+                }
+            }
+        }
+    }
+
     // Bridge Notification states to UI
     val notifications: StateFlow<List<NotificationItem>> = notificationService.notifications
+    val notificationsNew: StateFlow<List<NotificationModel>> = notificationProvider.notifications
+    
+    // AI Analysis (Module 21) State Flows
+    val aiLogsNew: StateFlow<List<AIAnalysisModel>> = aiProvider.analysisLogs
+    val currentLiveReadingNew: StateFlow<AISensorReading> = aiProvider.currentLiveReading
+    val currentLiveAnalysisNew: StateFlow<AIAnalysisModel?> = aiProvider.currentLiveAnalysis
+
+    // Fall Detection (Module 22) State Flows
+    val fallState: StateFlow<String> = fallDetectionService.currentState
+    val fallCountdown: StateFlow<Int> = fallDetectionService.countdownSeconds
+    val allFallEvents: StateFlow<List<FallEvent>> = fallRepository.allEvents.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyList()
+    )
+
+    // Voice SOS (Module 23) State Flows
+    val isVoiceListening: StateFlow<Boolean> = voiceSosService.isListening
+    val voiceState: StateFlow<String> = voiceSosService.voiceState
+    val wakePhrases: StateFlow<List<String>> = voiceSosService.wakePhrases
+    val micDecibels: StateFlow<Float> = voiceSosService.micDecibels
+    val voiceConfidenceThreshold: StateFlow<Int> = voiceSosService.confidenceThreshold
+    val voiceActivationLogs: StateFlow<List<VoiceActivationLog>> = voiceSosService.activationLogs
     val fcmToken: StateFlow<String> = notificationService.fcmToken
-    val emergencyHistory: StateFlow<List<EmergencyHistoryItem>> = emergencyHistoryService.history
+    val emergencyHistory: StateFlow<List<HistoryModel>> = historyService.history
     val aiLogs: StateFlow<List<AiAnalysisResult>> = aiAnalysisService.analysisLogs
     val currentLiveReading: StateFlow<SensorReading> = aiAnalysisService.currentLiveReading
     val currentLiveAnalysis: StateFlow<AiAnalysisResult?> = aiAnalysisService.currentLiveAnalysis
@@ -264,39 +377,103 @@ class GuardianViewModel(application: Application) : AndroidViewModel(application
             val name = currentUser?.name ?: "Unknown User"
             val phone = currentUser?.phone ?: "No Registered Phone"
 
-            val alert = databaseService.triggerSOS(
+            alarmVibratorService.startAlarm()
+            alarmVibratorService.startVibration()
+
+            val model = emergencyProvider.initiateEmergency(
                 userId = uid,
                 userName = name,
                 userPhone = phone,
-                lat = lat,
-                lng = lng,
-                triggerType = "MANUAL"
+                triggerSource = "MANUAL",
+                deviceId = "MOBILE-APP-SOS"
             )
+
             _uiEvents.emit(UiEvent.ShowToast("ALERT TRANSMITTED: Manual SOS Triggered!"))
+            _uiEvents.emit(UiEvent.NavigateToEmergency)
+        }
+    }
+
+    fun triggerFallDetectedSOS() {
+        viewModelScope.launch {
+            val user = (authState.value as? AuthState.Success)?.user
+            val userId = user?.uid ?: "user-101"
+            val userName = user?.name ?: "Marcus Vance"
+            val userPhone = user?.phone ?: "+1-555-0143"
+
+            alarmVibratorService.startAlarm()
+            alarmVibratorService.startVibration()
+
+            val model = emergencyProvider.initiateEmergency(
+                userId = userId,
+                userName = userName,
+                userPhone = userPhone,
+                triggerSource = "FALL_DETECTED",
+                deviceId = "WEARABLE-BAND-IMU"
+            )
+
+            // Trigger AI Emergency Analysis for our new service as well
+            val analysis = AIAnalysisModel(
+                alertId = model.emergencyId,
+                confidenceScore = 98,
+                falseAlarmProbability = 2,
+                motionAnalysis = "CRITICAL_ACCELERATION_SPIKE_FOLLOWED_BY_HORIZONTAL_AXIS_SHIFT",
+                activityRecognition = "SUDDEN FALL DETECTED (STATIC LAYING)",
+                riskLevel = "CRITICAL",
+                suggestedAction = "ALERT ALL PRIMARY FAMILY CONTACTS AND LAUNCH COUNTY DISPATCH CODES",
+                timeline = listOf(
+                    AITimelineEvent("10:44:00 AM", "Impact Shock", "Accelerometer spike of 4.1G logged.", "💥"),
+                    AITimelineEvent("10:44:05 AM", "Countdown Commenced", "Wearer unresponsive. 15-second countdown started.", "⏱️"),
+                    AITimelineEvent("10:44:20 AM", "Auto SOS Dispatch", "No cancel received. Triggering fallback emergency broadcast.", "🚨")
+                )
+            )
+            aiService.addAnalysisLog(analysis)
+
+            _uiEvents.emit(UiEvent.ShowToast("🚨 FALL DETECTED: AUTOMATIC SOS DISPATCHED!"))
+            _uiEvents.emit(UiEvent.NavigateToEmergency)
+        }
+    }
+
+    fun triggerVoiceSOS(matchedPhrase: String, confidence: Int) {
+        viewModelScope.launch {
+            val user = (authState.value as? AuthState.Success)?.user
+            val userId = user?.uid ?: "user-101"
+            val userName = user?.name ?: "Marcus Vance"
+            val userPhone = user?.phone ?: "+1-555-0143"
+
+            alarmVibratorService.startAlarm()
+            alarmVibratorService.startVibration()
+
+            val model = emergencyProvider.initiateEmergency(
+                userId = userId,
+                userName = userName,
+                userPhone = userPhone,
+                triggerSource = "VOICE_SOS",
+                deviceId = "MOBILE-VOICE-RECOGNIZE"
+            )
+
+            val analysis = AIAnalysisModel(
+                alertId = model.emergencyId,
+                confidenceScore = confidence,
+                falseAlarmProbability = 100 - confidence,
+                motionAnalysis = "AUDIO_FREQUENCY_WAVE_MATCH",
+                activityRecognition = "VOICE SOS ACTIVATION: \"$matchedPhrase\"",
+                riskLevel = "CRITICAL",
+                suggestedAction = "WAKE WORD MATCHED DETECTOR. DISPATCH COGNITIVE RESPONSE AGENT.",
+                timeline = listOf(
+                    AITimelineEvent("10:44:00 AM", "Voice Alert Heard", "Acoustic sensor detected wake phrase \"$matchedPhrase\".", "🎤"),
+                    AITimelineEvent("10:44:02 AM", "Neural Match Lock", "Matched against offline template with $confidence% confidence.", "🧠"),
+                    AITimelineEvent("10:44:03 AM", "SOS Dispatch", "Voice SOS emergency alert initiated.", "🚨")
+                )
+            )
+            aiService.addAnalysisLog(analysis)
+
+            _uiEvents.emit(UiEvent.ShowToast("🚨 VOICE SOS: AUTOMATIC SOS DISPATCHED!"))
+            _uiEvents.emit(UiEvent.NavigateToEmergency)
         }
     }
 
     fun triggerESP32SimulatedSOS(triggerType: String) {
-        viewModelScope.launch {
-            val currentUser = (authState.value as? AuthState.Success)?.user
-            val uid = currentUser?.uid ?: "anonymous"
-            val name = currentUser?.name ?: "Unknown User"
-            val phone = currentUser?.phone ?: "No Registered Phone"
-
-            // Simulate slight variation in coordinates
-            val lat = 37.7749 + (Math.random() - 0.5) * 0.01
-            val lng = -122.4194 + (Math.random() - 0.5) * 0.01
-
-            databaseService.triggerSOS(
-                userId = uid,
-                userName = name,
-                userPhone = phone,
-                lat = lat,
-                lng = lng,
-                triggerType = triggerType
-            )
-            _uiEvents.emit(UiEvent.ShowToast("ALERT RECEIVED: ESP32 Wearable $triggerType detected!"))
-        }
+        triggerEsp32SOS(triggerType)
     }
 
     fun resolveAlert(alertId: String, notes: String) {
@@ -435,42 +612,21 @@ class GuardianViewModel(application: Application) : AndroidViewModel(application
             val userName = user?.name ?: "Marcus Vance"
             val userPhone = user?.phone ?: "+1-555-0143"
 
-            // Get current location from LocationService or defaults
-            val lat = locationService.currentLocation.value.latitude
-            val lng = locationService.currentLocation.value.longitude
-
-            // Trigger real Firestore / local Database SOS alert
-            val alert = databaseService.triggerSOS(
-                userId = userId,
-                userName = userName,
-                userPhone = userPhone,
-                lat = lat,
-                lng = lng,
-                triggerType = triggerType
-            )
-
             // Start alarm sound and vibration
             alarmVibratorService.startAlarm()
             alarmVibratorService.startVibration()
 
-            // Initialize the Emergency Session
-            _emergencySession.value = EmergencySession(
-                activeAlert = alert,
-                deviceId = "ESP32-SOS-BAND-81F4",
-                batteryLevel = (80..98).random(),
-                gpsStatus = "HIGH ACCURACY (±2.5m)",
-                internetStatus = "ESP-WIFI-CELLULAR-BRIDGE (CONNECTED)",
-                emergencyLevel = if (triggerType == "FALL_DETECTED") "CRITICAL (LEVEL 3)" else "HIGH ALERT (LEVEL 2)",
-                aiConfidence = if (triggerType == "FALL_DETECTED") 96 else 90,
-                startTimeMs = System.currentTimeMillis(),
-                responderStatus = "DISPATCHING FIRST RESPONDERS",
-                isMuted = false,
-                isAcknowledged = false,
-                isMarkedSafe = false
+            // Initialize the Emergency Session via EmergencyProvider
+            val model = emergencyProvider.initiateEmergency(
+                userId = userId,
+                userName = userName,
+                userPhone = userPhone,
+                triggerSource = triggerType,
+                deviceId = "ESP32-SOS-BAND-81F4"
             )
 
             // Trigger AI Emergency Analysis
-            aiAnalysisService.generateAnalysisForAlert(alert.id, triggerType)
+            aiAnalysisService.generateAnalysisForAlert(model.emergencyId, triggerType)
 
             // Emit Navigation event to automatically redirect to the emergency screen!
             _uiEvents.emit(UiEvent.ShowToast("🚨 ESP32 SOS ALERT TRIGGERED!"))
@@ -516,12 +672,41 @@ class GuardianViewModel(application: Application) : AndroidViewModel(application
                 alarmVibratorService.stopAlarm()
                 alarmVibratorService.stopVibration()
                 aiAnalysisService.stopSimulation()
+                
+                // End tracking and sync to cloud
+                emergencyProvider.markEmergencySafe()
+                
                 _emergencySession.value = current.copy(
                     isMarkedSafe = true,
                     responderStatus = "MARKED SAFE - ALL CLEAR"
                 )
-                _uiEvents.emit(UiEvent.ShowToast("User marked safe. Sound & vibration stopped."))
+                _uiEvents.emit(UiEvent.ShowToast("User marked safe. Session auto-closing..."))
+                
+                // Automatically close the session when marked safe
+                delay(3000)
+                _emergencySession.value = EmergencySession() // reset session
+                _uiEvents.emit(UiEvent.NavigateToHome)
             }
+        }
+    }
+
+    fun cancelEmergencyWithPin(pin: String, callback: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            val expectedPin = _emergencyPin.value
+            val success = emergencyProvider.cancelEmergency(pin, expectedPin, "Cancelled securely with PIN verification.")
+            if (success) {
+                alarmVibratorService.stopAlarm()
+                alarmVibratorService.stopVibration()
+                aiAnalysisService.stopSimulation()
+                alarmVibratorService.cleanUp()
+                
+                _emergencySession.value = EmergencySession() // Reset legacy state
+                _uiEvents.emit(UiEvent.ShowToast("SOS Session Cancelled successfully with PIN."))
+                _uiEvents.emit(UiEvent.NavigateToHome)
+            } else {
+                _uiEvents.emit(UiEvent.ShowToast("Incorrect Emergency Security PIN."))
+            }
+            callback(success)
         }
     }
 
@@ -533,28 +718,30 @@ class GuardianViewModel(application: Application) : AndroidViewModel(application
                 val userName = (authState.value as? AuthState.Success)?.user?.name ?: "Operator"
                 databaseService.resolveSOS(alertId, userName, notes)
                 aiAnalysisService.stopSimulation()
+                
+                // End tracking loop
+                emergencyProvider.markEmergencySafe()
 
                 // Add to emergency history log
                 val duration = (System.currentTimeMillis() - current.startTimeMs) / 1000
                 val activeContacts = contacts.value.map { it.name }
-                val historyItem = EmergencyHistoryItem(
+                val historyItem = HistoryModel(
                     id = alertId,
                     date = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date()),
                     time = SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date()),
                     durationSeconds = if (duration > 0) duration else 45L,
                     responseTimeSeconds = 14L,
-                    locationName = "GPS Coordinate Plot",
+                    address = "GPS Coordinate Plot",
                     latitude = current.activeAlert.latitude,
                     longitude = current.activeAlert.longitude,
                     severity = if (current.activeAlert.triggerType == "FALL_DETECTED") "CRITICAL" else "HIGH",
-                    deviceUsed = "ESP32-SOS-BAND-81F4",
                     contactsNotified = if (activeContacts.isNotEmpty()) activeContacts else listOf("Dr. Jenkins", "Warden Vance"),
-                    aiScore = if (current.activeAlert.triggerType == "FALL_DETECTED") 94 else 100,
+                    aiConfidence = if (current.activeAlert.triggerType == "FALL_DETECTED") 94 else 100,
                     triggerType = current.activeAlert.triggerType,
                     resolutionNotes = notes,
                     resolvedBy = userName
                 )
-                emergencyHistoryService.addHistoryItem(historyItem)
+                historyProvider.addHistoryRecord(historyItem)
             }
             alarmVibratorService.cleanUp()
             _emergencySession.value = EmergencySession() // reset
@@ -564,31 +751,47 @@ class GuardianViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun deleteHistoryItem(id: String) {
-        emergencyHistoryService.deleteHistoryItem(id)
+        historyProvider.deleteHistoryRecord(id)
     }
 
     fun getHistoryCSVString(): String {
-        return emergencyHistoryService.generateCSVString()
+        return historyProvider.exportToCSV()
     }
 
     fun getHistoryPDFReportText(): String {
-        return emergencyHistoryService.generatePDFReportText()
+        return historyProvider.exportToPDF()
     }
 
     fun markNotificationAsRead(id: String) {
         notificationService.markAsRead(id)
     }
 
+    fun markNotificationNewAsRead(id: String) {
+        notificationProvider.markAsRead(id)
+    }
+
     fun markAllNotificationsAsRead() {
         notificationService.markAllAsRead()
+    }
+
+    fun markAllNotificationsNewAsRead() {
+        notificationProvider.markAllAsRead()
     }
 
     fun deleteNotification(id: String) {
         notificationService.deleteNotification(id)
     }
 
+    fun deleteNotificationNew(id: String) {
+        notificationProvider.deleteNotification(id)
+    }
+
     fun simulateIncomingNotification(type: NotificationType) {
         notificationService.triggerSimulatedFCMNotification(type)
+    }
+
+    fun simulateIncomingNotificationNew(category: NotificationCategory) {
+        notificationProvider.triggerFCMNotification(category)
     }
 
     fun refreshDeviceStatus() {
@@ -692,5 +895,8 @@ class GuardianViewModel(application: Application) : AndroidViewModel(application
     override fun onCleared() {
         super.onCleared()
         alarmVibratorService.cleanUp()
+        fallDetectionService.cleanup()
+        voiceSosService.cleanup()
+        aiService.stopSimulation()
     }
 }

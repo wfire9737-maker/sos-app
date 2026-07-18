@@ -95,18 +95,11 @@ fun LoginScreen(
 
             // Title
             Text(
-                text = "GUARDIAN SOS",
+                text = "SMART SOS APP",
                 fontSize = 28.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 1.5.sp,
                 color = MaterialTheme.colorScheme.onBackground
-            )
-
-            Text(
-                text = "IEEE Wearable Emergency Hub",
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
             )
 
             Spacer(modifier = Modifier.height(32.dp))

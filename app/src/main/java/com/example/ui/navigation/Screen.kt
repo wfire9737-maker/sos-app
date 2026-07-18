@@ -18,4 +18,7 @@ sealed class Screen(val route: String) {
     object Security : Screen("security")
     object Analytics : Screen("analytics")
     object Reports : Screen("reports")
+    object AiScreen : Screen("ai_screen")
+    object FallDetection : Screen("fall_detection")
+    object VoiceSos : Screen("voice_sos")
 }
