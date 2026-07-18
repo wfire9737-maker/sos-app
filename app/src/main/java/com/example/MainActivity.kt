@@ -15,12 +15,15 @@ import com.example.ui.GuardianViewModel
 import com.example.ui.navigation.NavGraph
 import com.example.ui.theme.GuardianTheme
 
+import dagger.hilt.android.AndroidEntryPoint
+
+@AndroidEntryPoint
 class MainActivity : ComponentActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     enableEdgeToEdge()
     setContent {
-      val guardianViewModel: GuardianViewModel = viewModel()
+      val guardianViewModel: GuardianViewModel = androidx.hilt.navigation.compose.hiltViewModel()
       val themeMode by guardianViewModel.themeMode.collectAsState()
       val isDarkTheme = when (themeMode) {
         "DARK" -> true

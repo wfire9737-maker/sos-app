@@ -38,7 +38,11 @@ fun SettingsScreen(
     onNavigateToSecurity: () -> Unit,
     onNavigateToFallDetection: () -> Unit = {},
     onNavigateToVoiceSos: () -> Unit = {},
-    onNavigateToAiScreen: () -> Unit = {}
+    onNavigateToAiScreen: () -> Unit = {},
+    onNavigateToSafetyTimer: () -> Unit = {},
+    onNavigateToAnalytics: () -> Unit = {},
+    onNavigateToQRCode: () -> Unit = {},
+    onNavigateToHelpFaq: () -> Unit = {}
 ) {
     val context = LocalContext.current
 
@@ -346,6 +350,34 @@ fun SettingsScreen(
                             onClick = onNavigateToAiScreen,
                             testTag = "settings_ai_screen_row"
                         )
+
+                        Divider(
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.08f)
+                        )
+
+                        SettingsNavigationRow(
+                            title = "Safety Timer",
+                            subtitle = "Configure automated check-in timers and auto-SOS",
+                            icon = Icons.Default.Timer,
+                            iconTint = Color(0xFF10B981),
+                            onClick = onNavigateToSafetyTimer,
+                            testTag = "settings_safety_timer_row"
+                        )
+
+                        Divider(
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.08f)
+                        )
+
+                        SettingsNavigationRow(
+                            title = "Analytics Dashboard",
+                            subtitle = "View safety incident trends and device telemetry",
+                            icon = Icons.Default.Analytics,
+                            iconTint = Color(0xFFF59E0B),
+                            onClick = onNavigateToAnalytics,
+                            testTag = "settings_analytics_row"
+                        )
                     }
                 }
             }
@@ -616,6 +648,34 @@ fun SettingsScreen(
                         .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.08f), RoundedCornerShape(16.dp))
                 ) {
                     Column {
+                        SettingsNavigationRow(
+                            title = "My QR Code",
+                            subtitle = "Share your QR code to add emergency contacts",
+                            icon = Icons.Default.QrCode,
+                            iconTint = Color(0xFF9C27B0),
+                            onClick = onNavigateToQRCode,
+                            testTag = "settings_qrcode_button"
+                        )
+
+                        Divider(
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.08f)
+                        )
+
+                        SettingsNavigationRow(
+                            title = "Help & FAQ",
+                            subtitle = "Get help with using the Guardian application",
+                            icon = Icons.Default.HelpOutline,
+                            iconTint = Color(0xFFF9A825),
+                            onClick = onNavigateToHelpFaq,
+                            testTag = "settings_helpfaq_button"
+                        )
+
+                        Divider(
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.08f)
+                        )
+
                         SettingsNavigationRow(
                             title = "Terms & Privacy Policy",
                             subtitle = "View safety directives, legal agreements, and policy disclosures",

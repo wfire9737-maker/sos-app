@@ -21,4 +21,7 @@ sealed class Screen(val route: String) {
     object AiScreen : Screen("ai_screen")
     object FallDetection : Screen("fall_detection")
     object VoiceSos : Screen("voice_sos")
+    object SafetyTimer : Screen("safety_timer")
+    object QRCode : Screen("qr_code")
+    object HelpFaq : Screen("help_faq")
 }

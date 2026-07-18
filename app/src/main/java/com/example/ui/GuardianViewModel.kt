@@ -57,39 +57,34 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-class GuardianViewModel(application: Application) : AndroidViewModel(application) {
-    
-    val authService = AuthService(application)
-    val databaseService = DatabaseService(application)
-    val locationService = com.example.service.LocationService(application, databaseService.firestoreInstance)
-    val alarmVibratorService = AlarmVibratorService(application)
-    val notificationService = NotificationService(application, databaseService.firestoreInstance)
-    val notificationProvider = NotificationProvider(application, notificationService)
-    val historyService = HistoryService(application, databaseService.firestoreInstance)
-    val historyProvider = HistoryProvider(application, historyService)
-    val aiAnalysisService = AiAnalysisService(application, databaseService.firestoreInstance)
-    val deviceService = DeviceService(application, databaseService, notificationService)
+import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
 
-    // Module 21, 22, 23 Service Initializations
-    val fallDatabase = com.example.data.FallDatabase.getDatabase(application)
-    val fallRepository = com.example.repository.FallRepository(fallDatabase.fallEventDao())
-    val fallDetectionService = com.example.service.FallDetectionService(application, fallRepository)
-    val voiceSosService = com.example.service.VoiceSosService(application)
-    val aiService = com.example.service.AIService(application, databaseService.firestoreInstance)
-    val aiProvider = com.example.service.AIProvider(application, aiService)
-
-    val emergencyService = EmergencyService(
-        application,
-        databaseService.firestoreInstance,
-        locationService,
-        notificationService,
-        databaseService
-    )
-    val emergencyProvider = EmergencyProvider(application, emergencyService)
-
-    // Module 24 & 25 Service Initializations
-    val safetyTimerService = SafetyTimerService(application, notificationProvider)
-    val analyticsService = AnalyticsService(application)
+@HiltViewModel
+class GuardianViewModel @Inject constructor(
+    application: Application,
+    val authService: AuthService,
+    val databaseService: DatabaseService,
+    val locationService: com.example.service.LocationService,
+    val alarmVibratorService: AlarmVibratorService,
+    val notificationService: NotificationService,
+    val notificationProvider: NotificationProvider,
+    val historyService: HistoryService,
+    val historyProvider: HistoryProvider,
+    val aiAnalysisService: AiAnalysisService,
+    val deviceService: DeviceService,
+    val fallDatabase: com.example.data.FallDatabase,
+    val fallRepository: com.example.repository.FallRepository,
+    val fallDetectionService: com.example.service.FallDetectionService,
+    val voiceSosService: com.example.service.VoiceSosService,
+    val aiService: com.example.service.AIService,
+    val aiProvider: com.example.service.AIProvider,
+    val emergencyService: EmergencyService,
+    val emergencyProvider: EmergencyProvider,
+    val safetyTimerService: SafetyTimerService,
+    val analyticsService: AnalyticsService,
+    val securityService: com.example.service.SecurityService
+) : AndroidViewModel(application) {
 
     init {
         // Register callbacks for Fall, Voice SOS, and Safety Timer automation
@@ -234,9 +229,12 @@ class GuardianViewModel(application: Application) : AndroidViewModel(application
     val appLockPin = _appLockPin.asStateFlow()
     fun setAppLockPin(pin: String, enabled: Boolean) { _appLockPin.value = pin; _appLockPinEnabled.value = enabled }
 
-    private val _emergencyPin = MutableStateFlow("9999")
+    private val _emergencyPin = MutableStateFlow(securityService.getEmergencyPin())
     val emergencyPin = _emergencyPin.asStateFlow()
-    fun setEmergencyPin(pin: String) { _emergencyPin.value = pin }
+    fun setEmergencyPin(pin: String) { 
+        securityService.saveEmergencyPin(pin)
+        _emergencyPin.value = pin 
+    }
 
     private val _isBackupRunning = MutableStateFlow(false)
     val isBackupRunning = _isBackupRunning.asStateFlow()
@@ -370,24 +368,41 @@ class GuardianViewModel(application: Application) : AndroidViewModel(application
 
     // --- SOS TRIGGERS ---
 
+    private suspend fun initiateEmergencySequence(triggerSource: String, deviceId: String): com.example.model.EmergencyModel {
+        val user = (authState.value as? AuthState.Success)?.user
+        val userId = user?.uid ?: "user-101"
+        val userName = user?.name ?: "Marcus Vance"
+        val userPhone = user?.phone ?: "+1-555-0143"
+
+        alarmVibratorService.startAlarm()
+        alarmVibratorService.startVibration()
+
+        return emergencyProvider.initiateEmergency(
+            userId = userId,
+            userName = userName,
+            userPhone = userPhone,
+            triggerSource = triggerSource,
+            deviceId = deviceId
+        )
+    }
+
+    fun triggerTimerSOS() {
+        viewModelScope.launch {
+            initiateEmergencySequence(
+                triggerSource = "SAFETY_TIMER_EXPIRED",
+                deviceId = "MOBILE-APP-TIMER"
+            )
+            _uiEvents.emit(UiEvent.ShowToast("🚨 SAFETY TIMER EXPIRED: AUTOMATIC SOS DISPATCHED!"))
+            _uiEvents.emit(UiEvent.NavigateToEmergency)
+        }
+    }
+
     fun triggerManualSOS(lat: Double = 37.7749, lng: Double = -122.4194) {
         viewModelScope.launch {
-            val currentUser = (authState.value as? AuthState.Success)?.user
-            val uid = currentUser?.uid ?: "anonymous"
-            val name = currentUser?.name ?: "Unknown User"
-            val phone = currentUser?.phone ?: "No Registered Phone"
-
-            alarmVibratorService.startAlarm()
-            alarmVibratorService.startVibration()
-
-            val model = emergencyProvider.initiateEmergency(
-                userId = uid,
-                userName = name,
-                userPhone = phone,
+            initiateEmergencySequence(
                 triggerSource = "MANUAL",
                 deviceId = "MOBILE-APP-SOS"
             )
-
             _uiEvents.emit(UiEvent.ShowToast("ALERT TRANSMITTED: Manual SOS Triggered!"))
             _uiEvents.emit(UiEvent.NavigateToEmergency)
         }
@@ -395,18 +410,7 @@ class GuardianViewModel(application: Application) : AndroidViewModel(application
 
     fun triggerFallDetectedSOS() {
         viewModelScope.launch {
-            val user = (authState.value as? AuthState.Success)?.user
-            val userId = user?.uid ?: "user-101"
-            val userName = user?.name ?: "Marcus Vance"
-            val userPhone = user?.phone ?: "+1-555-0143"
-
-            alarmVibratorService.startAlarm()
-            alarmVibratorService.startVibration()
-
-            val model = emergencyProvider.initiateEmergency(
-                userId = userId,
-                userName = userName,
-                userPhone = userPhone,
+            val model = initiateEmergencySequence(
                 triggerSource = "FALL_DETECTED",
                 deviceId = "WEARABLE-BAND-IMU"
             )
@@ -435,18 +439,7 @@ class GuardianViewModel(application: Application) : AndroidViewModel(application
 
     fun triggerVoiceSOS(matchedPhrase: String, confidence: Int) {
         viewModelScope.launch {
-            val user = (authState.value as? AuthState.Success)?.user
-            val userId = user?.uid ?: "user-101"
-            val userName = user?.name ?: "Marcus Vance"
-            val userPhone = user?.phone ?: "+1-555-0143"
-
-            alarmVibratorService.startAlarm()
-            alarmVibratorService.startVibration()
-
-            val model = emergencyProvider.initiateEmergency(
-                userId = userId,
-                userName = userName,
-                userPhone = userPhone,
+            val model = initiateEmergencySequence(
                 triggerSource = "VOICE_SOS",
                 deviceId = "MOBILE-VOICE-RECOGNIZE"
             )
@@ -607,20 +600,7 @@ class GuardianViewModel(application: Application) : AndroidViewModel(application
 
     fun triggerEsp32SOS(triggerType: String = "ESP32_BUTTON") {
         viewModelScope.launch {
-            val user = (authState.value as? AuthState.Success)?.user
-            val userId = user?.uid ?: "user-101"
-            val userName = user?.name ?: "Marcus Vance"
-            val userPhone = user?.phone ?: "+1-555-0143"
-
-            // Start alarm sound and vibration
-            alarmVibratorService.startAlarm()
-            alarmVibratorService.startVibration()
-
-            // Initialize the Emergency Session via EmergencyProvider
-            val model = emergencyProvider.initiateEmergency(
-                userId = userId,
-                userName = userName,
-                userPhone = userPhone,
+            val model = initiateEmergencySequence(
                 triggerSource = triggerType,
                 deviceId = "ESP32-SOS-BAND-81F4"
             )
@@ -692,7 +672,7 @@ class GuardianViewModel(application: Application) : AndroidViewModel(application
 
     fun cancelEmergencyWithPin(pin: String, callback: (Boolean) -> Unit) {
         viewModelScope.launch {
-            val expectedPin = _emergencyPin.value
+            val expectedPin = securityService.getEmergencyPin()
             val success = emergencyProvider.cancelEmergency(pin, expectedPin, "Cancelled securely with PIN verification.")
             if (success) {
                 alarmVibratorService.stopAlarm()

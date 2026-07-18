@@ -31,6 +31,7 @@ import com.example.ui.screens.ReportsScreen
 import com.example.ui.screens.AIScreen
 import com.example.ui.screens.FallDetectionScreen
 import com.example.ui.screens.VoiceSosScreen
+import com.example.ui.screens.SafetyTimerScreen
 
 @Composable
 fun NavGraph(
@@ -200,7 +201,11 @@ fun NavGraph(
                 onNavigateToSecurity = { navController.navigate(Screen.Security.route) },
                 onNavigateToFallDetection = { navController.navigate(Screen.FallDetection.route) },
                 onNavigateToVoiceSos = { navController.navigate(Screen.VoiceSos.route) },
-                onNavigateToAiScreen = { navController.navigate(Screen.AiScreen.route) }
+                onNavigateToAiScreen = { navController.navigate(Screen.AiScreen.route) },
+                onNavigateToSafetyTimer = { navController.navigate(Screen.SafetyTimer.route) },
+                onNavigateToAnalytics = { navController.navigate(Screen.Analytics.route) },
+                onNavigateToQRCode = { navController.navigate(Screen.QRCode.route) },
+                onNavigateToHelpFaq = { navController.navigate(Screen.HelpFaq.route) }
             )
         }
         composable(Screen.Security.route) {
@@ -235,6 +240,24 @@ fun NavGraph(
         }
         composable(Screen.VoiceSos.route) {
             VoiceSosScreen(
+                viewModel = viewModel,
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+        composable(Screen.SafetyTimer.route) {
+            SafetyTimerScreen(
+                viewModel = viewModel,
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+        composable(Screen.QRCode.route) {
+            com.example.ui.screens.QRCodeScreen(
+                viewModel = viewModel,
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+        composable(Screen.HelpFaq.route) {
+            com.example.ui.screens.HelpFaqScreen(
                 viewModel = viewModel,
                 onNavigateBack = { navController.popBackStack() }
             )

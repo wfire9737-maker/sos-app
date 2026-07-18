@@ -14,7 +14,8 @@ import java.util.UUID
 class DeviceService(
     private val context: Context,
     private val databaseService: DatabaseService,
-    private val notificationService: NotificationService
+    private val notificationService: NotificationService,
+    private val deviceDataSource: com.example.data.DeviceDataSource = com.example.data.MockDeviceDataSource()
 ) {
     private val deviceProvider = DeviceProvider(context)
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
