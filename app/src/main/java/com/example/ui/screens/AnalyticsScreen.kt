@@ -12,6 +12,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -632,7 +633,7 @@ fun AnalyticsScreen(
                                 }
 
                                 if (index < locationsLeaderboard.size - 1) {
-                                    Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.05f))
+                                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.05f))
                                 }
                             }
                         }

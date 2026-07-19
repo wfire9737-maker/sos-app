@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -181,7 +182,7 @@ fun EmergencyHistoryScreen(
                         color = Color(0xFFD50000),
                         modifier = Modifier.weight(1f)
                     )
-                    Divider(
+                    HorizontalDivider(
                         modifier = Modifier
                             .height(40.dp)
                             .width(1.dp)
@@ -194,7 +195,7 @@ fun EmergencyHistoryScreen(
                         color = Color(0xFFFF8F00),
                         modifier = Modifier.weight(1f)
                     )
-                    Divider(
+                    HorizontalDivider(
                         modifier = Modifier
                             .height(40.dp)
                             .width(1.dp)
@@ -207,7 +208,7 @@ fun EmergencyHistoryScreen(
                         color = Color(0xFF1E88E5),
                         modifier = Modifier.weight(1f)
                     )
-                    Divider(
+                    HorizontalDivider(
                         modifier = Modifier
                             .height(40.dp)
                             .width(1.dp)
@@ -597,7 +598,7 @@ fun DetailTextRow(label: String, value: String) {
             fontWeight = FontWeight.Medium
         )
         Spacer(modifier = Modifier.height(4.dp))
-        Divider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
     }
 }
 

@@ -12,6 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -267,11 +268,11 @@ fun SecurityScreen(
                             icon = Icons.Default.Fingerprint,
                             iconTint = Color(0xFF00bcd4),
                             checked = biometricEnabled,
-                            onCheckedChange = { viewModel.setBiometricEnabled(it) },
+                            onCheckedChange = { checked -> viewModel.setBiometricEnabled(checked) },
                             testTag = "security_biometric_switch"
                         )
 
-                        Divider(
+                        HorizontalDivider(
                             modifier = Modifier.padding(horizontal = 16.dp),
                             color = MaterialTheme.colorScheme.outline.copy(alpha = 0.08f)
                         )
@@ -459,7 +460,7 @@ fun SecurityScreen(
                             }
                         }
 
-                        Divider(
+                        HorizontalDivider(
                             modifier = Modifier.padding(horizontal = 16.dp),
                             color = MaterialTheme.colorScheme.outline.copy(alpha = 0.08f)
                         )
@@ -690,4 +691,31 @@ fun SecurityCategoryHeader(title: String) {
         letterSpacing = 1.sp,
         modifier = Modifier.padding(start = 8.dp, top = 8.dp)
     )
+}
+
+@Composable
+fun SettingsToggleRow(
+    title: String,
+    subtitle: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    iconTint: androidx.compose.ui.graphics.Color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
+    checked: Boolean,
+    testTag: String = "",
+    onCheckedChange: (Boolean) -> Unit
+) {
+    androidx.compose.foundation.layout.Row(
+        modifier = androidx.compose.ui.Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween
+    ) {
+        if (icon != null) {
+            androidx.compose.material3.Icon(icon, contentDescription = null, tint = iconTint)
+            androidx.compose.foundation.layout.Spacer(modifier = androidx.compose.ui.Modifier.width(16.dp))
+        }
+        androidx.compose.foundation.layout.Column(modifier = androidx.compose.ui.Modifier.weight(1f)) {
+            androidx.compose.material3.Text(title, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold, fontSize = 16.sp)
+            androidx.compose.material3.Text(subtitle, color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+        }
+        androidx.compose.material3.Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
 }

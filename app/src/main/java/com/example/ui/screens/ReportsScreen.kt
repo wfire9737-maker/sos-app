@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -451,7 +452,7 @@ fun ReportsScreen(
                             }
                         }
 
-                        Divider(
+                        HorizontalDivider(
                             modifier = Modifier.padding(vertical = 14.dp),
                             color = MaterialTheme.colorScheme.outline.copy(alpha = 0.08f)
                         )
@@ -745,7 +746,7 @@ fun ReportsScreen(
                         color = MaterialTheme.colorScheme.primary
                     )
                     
-                    Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.08f))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.08f))
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -826,7 +827,7 @@ fun ReportsScreen(
                         }
                     }
 
-                    Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.08f))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.08f))
 
                     Text("Responder Field Notes:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
                     Text(

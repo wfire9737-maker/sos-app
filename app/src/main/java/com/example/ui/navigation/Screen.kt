@@ -1,15 +1,19 @@
 package com.example.ui.navigation
 
 sealed class Screen(val route: String) {
+    object Splash : Screen("splash")
+    object Onboarding : Screen("onboarding")
     object Login : Screen("login")
     object Register : Screen("register")
     object ForgotPassword : Screen("forgot_password")
     object Home : Screen("home")
     object Profile : Screen("profile")
     object Contacts : Screen("contacts")
+    object TrustedPlaces : Screen("trusted_places")
     object DevicePairing : Screen("device_pairing")
     object Map : Screen("map")
     object Emergency : Screen("emergency")
+    object SafeCheckIn : Screen("safe_checkin")
     object Notifications : Screen("notifications")
     object History : Screen("history")
     object AiDashboard : Screen("ai_dashboard")
@@ -24,4 +28,6 @@ sealed class Screen(val route: String) {
     object SafetyTimer : Screen("safety_timer")
     object QRCode : Screen("qr_code")
     object HelpFaq : Screen("help_faq")
+    object Permissions : Screen("permissions")
+    object About : Screen("about")
 }

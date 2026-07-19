@@ -24,6 +24,13 @@ import com.example.service.SafetyTimerService
 import com.example.service.VoiceSosService
 import com.example.repository.FallRepository
 import com.example.data.FallDatabase
+
+import androidx.room.Room
+import com.example.data.local.SmartSosDatabase
+import com.example.data.local.dao.UserDao
+import com.example.data.local.dao.EmergencyContactDao
+import com.example.data.local.dao.SosHistoryDao
+
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -122,4 +129,24 @@ object AppModule {
     @Provides
     @Singleton
     fun provideSecurityService(@ApplicationContext context: Context): com.example.service.SecurityService = com.example.service.SecurityService(context)
+
+    @Provides
+    @Singleton
+    fun provideSmartSosDatabase(@ApplicationContext context: Context): SmartSosDatabase {
+        return Room.databaseBuilder(
+            context,
+            SmartSosDatabase::class.java,
+            "smart_sos_db"
+        ).fallbackToDestructiveMigration().build()
+    }
+
+    @Provides
+    fun provideUserDao(database: SmartSosDatabase): UserDao = database.userDao()
+
+    @Provides
+    fun provideEmergencyContactDao(database: SmartSosDatabase): EmergencyContactDao = database.emergencyContactDao()
+
+    @Provides
+    fun provideSosHistoryDao(database: SmartSosDatabase): SosHistoryDao = database.sosHistoryDao()
+
 }

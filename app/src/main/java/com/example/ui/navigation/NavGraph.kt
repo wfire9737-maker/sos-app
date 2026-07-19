@@ -28,6 +28,12 @@ import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.SecurityScreen
 import com.example.ui.screens.AnalyticsScreen
 import com.example.ui.screens.ReportsScreen
+import com.example.ui.screens.SplashScreen
+import com.example.ui.screens.OnboardingScreen
+import com.example.ui.screens.TrustedPlacesScreen
+import com.example.ui.screens.SafeCheckInScreen
+import com.example.ui.screens.PermissionsScreen
+import com.example.ui.screens.AboutScreen
 import com.example.ui.screens.AIScreen
 import com.example.ui.screens.FallDetectionScreen
 import com.example.ui.screens.VoiceSosScreen
@@ -66,12 +72,32 @@ fun NavGraph(
 
     // Determine starting route depending on session availability
     val authState = viewModel.authState.value
-    val startDestination = if (authState is AuthState.Success) Screen.Home.route else Screen.Login.route
+    val startDestination = Screen.Splash.route
 
     NavHost(
         navController = navController,
         startDestination = startDestination
     ) {
+        composable(Screen.Splash.route) {
+            SplashScreen(
+                viewModel = viewModel,
+                onNavigateToNext = {
+                    if (authState is AuthState.Success) {
+                        navController.navigate(Screen.Home.route) { popUpTo(0) { inclusive = true } }
+                    } else {
+                        navController.navigate(Screen.Onboarding.route) { popUpTo(0) { inclusive = true } }
+                    }
+                }
+            )
+        }
+        composable(Screen.Onboarding.route) {
+            OnboardingScreen(
+                viewModel = viewModel,
+                onFinishOnboarding = {
+                    navController.navigate(Screen.Login.route) { popUpTo(Screen.Onboarding.route) { inclusive = true } }
+                }
+            )
+        }
         composable(Screen.Login.route) {
             LoginScreen(
                 viewModel = viewModel,
@@ -108,9 +134,6 @@ fun NavGraph(
                 onNavigateToDevicePairing = {
                     navController.navigate(Screen.DevicePairing.route)
                 },
-                onNavigateToMap = {
-                    navController.navigate(Screen.Map.route)
-                },
                 onNavigateToEmergency = {
                     navController.navigate(Screen.Emergency.route)
                 },
@@ -134,6 +157,12 @@ fun NavGraph(
                 },
                 onNavigateToReports = {
                     navController.navigate(Screen.Reports.route)
+                },
+                onNavigateToSafeCheckIn = {
+                    navController.navigate(Screen.SafeCheckIn.route)
+                },
+                onNavigateToMap = {
+                    navController.navigate(Screen.Map.route)
                 }
             )
         }
@@ -165,10 +194,7 @@ fun NavGraph(
             EmergencyScreen(
                 viewModel = viewModel,
                 onNavigateBack = { navController.popBackStack() },
-                onNavigateToMap = {
-                    navController.navigate(Screen.Map.route)
-                }
-            )
+                )
         }
         composable(Screen.Notifications.route) {
             NotificationScreen(
@@ -200,12 +226,16 @@ fun NavGraph(
                 onNavigateBack = { navController.popBackStack() },
                 onNavigateToSecurity = { navController.navigate(Screen.Security.route) },
                 onNavigateToFallDetection = { navController.navigate(Screen.FallDetection.route) },
-                onNavigateToVoiceSos = { navController.navigate(Screen.VoiceSos.route) },
-                onNavigateToAiScreen = { navController.navigate(Screen.AiScreen.route) },
-                onNavigateToSafetyTimer = { navController.navigate(Screen.SafetyTimer.route) },
                 onNavigateToAnalytics = { navController.navigate(Screen.Analytics.route) },
+                onNavigateToVoiceSos = { navController.navigate(Screen.VoiceSos.route) },
+                onNavigateToSafetyTimer = { navController.navigate(Screen.SafetyTimer.route) },
+                onNavigateToMap = { navController.navigate(Screen.Map.route) },
                 onNavigateToQRCode = { navController.navigate(Screen.QRCode.route) },
-                onNavigateToHelpFaq = { navController.navigate(Screen.HelpFaq.route) }
+                onNavigateToHelpFaq = { navController.navigate(Screen.HelpFaq.route) },
+                onNavigateToAiScreen = { navController.navigate(Screen.AiScreen.route) },
+                onNavigateToTrustedPlaces = { navController.navigate(Screen.TrustedPlaces.route) },
+                onNavigateToPermissions = { navController.navigate(Screen.Permissions.route) },
+                onNavigateToAbout = { navController.navigate(Screen.About.route) }
             )
         }
         composable(Screen.Security.route) {
@@ -258,6 +288,30 @@ fun NavGraph(
         }
         composable(Screen.HelpFaq.route) {
             com.example.ui.screens.HelpFaqScreen(
+                viewModel = viewModel,
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+        composable(Screen.TrustedPlaces.route) {
+            TrustedPlacesScreen(
+                viewModel = viewModel,
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+        composable(Screen.SafeCheckIn.route) {
+            SafeCheckInScreen(
+                viewModel = viewModel,
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+        composable(Screen.Permissions.route) {
+            PermissionsScreen(
+                viewModel = viewModel,
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+        composable(Screen.About.route) {
+            AboutScreen(
                 viewModel = viewModel,
                 onNavigateBack = { navController.popBackStack() }
             )
