@@ -1,0 +1,18 @@
+cd /path/to/smart-sos-app
+cat > codemagic.yaml << 'EOF'
+workflows:
+  android-workflow:
+    name: Android Build
+    instance_type: linux
+    max_build_duration: 120
+    environment:
+      android_sdk: 34
+      java: 17
+    scripts:
+      - name: Build APK
+        script: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+    artifacts:
+      - app/build/outputs/apk/debug/**/*.apk
+EOF
