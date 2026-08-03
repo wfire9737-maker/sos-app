@@ -1,5 +1,3 @@
-cd /path/to/smart-sos-app
-cat > codemagic.yaml << 'EOF'
 workflows:
   android-workflow:
     name: Android Build
@@ -15,4 +13,3 @@ workflows:
           ./gradlew assembleDebug
     artifacts:
       - app/build/outputs/apk/debug/**/*.apk
-EOF
