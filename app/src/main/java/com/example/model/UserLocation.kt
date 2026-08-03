@@ -45,7 +45,8 @@ data class UserLocation(
     val distanceTraveled: Double = 0.0, // km
     val viewMode: String = "NORMAL", // NORMAL, SATELLITE, TERRAIN
     val trafficEnabled: Boolean = false,
-    val favorites: List<FavoritePlace> = emptyList()
+    val favorites: List<FavoritePlace> = emptyList(),
+    val address: String = ""
 ) {
     fun toMap(): Map<String, Any> {
         return mapOf(
@@ -60,6 +61,7 @@ data class UserLocation(
             "distanceTraveled" to distanceTraveled,
             "viewMode" to viewMode,
             "trafficEnabled" to trafficEnabled,
+            "address" to address,
             "favorites" to favorites.map { it.toMap() }
         )
     }
@@ -77,6 +79,7 @@ data class UserLocation(
         obj.put("distanceTraveled", distanceTraveled)
         obj.put("viewMode", viewMode)
         obj.put("trafficEnabled", trafficEnabled)
+        obj.put("address", address)
 
         val favsArray = JSONArray()
         favorites.forEach { fav ->
@@ -94,7 +97,8 @@ data class UserLocation(
 
     companion object {
         fun fromMap(map: Map<String, Any?>): UserLocation {
-            val favListRaw = map["favorites"] as? List<Map<String, Any?>> ?: emptyList()
+            val favListRaw = (map["favorites"] as? List<*>)?.filterIsInstance<Map<String, Any?>>() ?: emptyList()
+            //val favListRaw = map["favorites"] as? List<Map<String, Any?>> ?: emptyList()
             val favs = favListRaw.map { FavoritePlace.fromMap(it) }
 
             return UserLocation(
@@ -109,6 +113,7 @@ data class UserLocation(
                 distanceTraveled = (map["distanceTraveled"] as? Number)?.toDouble() ?: 0.0,
                 viewMode = map["viewMode"] as? String ?: "NORMAL",
                 trafficEnabled = map["trafficEnabled"] as? Boolean ?: false,
+                address = map["address"] as? String ?: "",
                 favorites = favs
             )
         }
@@ -143,6 +148,7 @@ data class UserLocation(
                 distanceTraveled = obj.optDouble("distanceTraveled", 0.0),
                 viewMode = obj.optString("viewMode", "NORMAL"),
                 trafficEnabled = obj.optBoolean("trafficEnabled", false),
+                address = obj.optString("address", ""),
                 favorites = favs
             )
         }

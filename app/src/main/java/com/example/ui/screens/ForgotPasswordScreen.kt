@@ -74,7 +74,7 @@ fun ForgotPasswordScreen(
             ) {
                 IconButton(onClick = onNavigateToLogin) {
                     Icon(
-                        imageVector = Icons.Default.ArrowBack,
+                        imageVector = Icons.Filled.ArrowBack,
                         contentDescription = "Go Back to Login",
                         tint = MaterialTheme.colorScheme.onBackground
                     )

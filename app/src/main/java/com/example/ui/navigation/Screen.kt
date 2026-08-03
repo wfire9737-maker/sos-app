@@ -10,6 +10,7 @@ sealed class Screen(val route: String) {
     object Profile : Screen("profile")
     object Contacts : Screen("contacts")
     object TrustedPlaces : Screen("trusted_places")
+    object AddEditTrustedPlace : Screen("add_edit_trusted_place?placeId={placeId}") { fun createRoute(placeId: String?) = if (placeId != null) "add_edit_trusted_place?placeId=$placeId" else "add_edit_trusted_place?placeId=" }
     object DevicePairing : Screen("device_pairing")
     object Map : Screen("map")
     object Emergency : Screen("emergency")
@@ -30,4 +31,5 @@ sealed class Screen(val route: String) {
     object HelpFaq : Screen("help_faq")
     object Permissions : Screen("permissions")
     object About : Screen("about")
+    object DeveloperDashboard : Screen("developer_dashboard")
 }

@@ -9,6 +9,8 @@ import android.net.NetworkCapabilities
 import android.os.BatteryManager
 import android.os.SystemClock
 import android.util.Log
+import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothAdapter
 import java.io.RandomAccessFile
 import kotlin.math.roundToInt
 
@@ -80,8 +82,13 @@ class DeviceProvider(private val context: Context) {
     }
 
     fun getLocalBluetoothStatus(): String {
-        // Bluetooth is typically CONNECTED if the virtual or physical band is paired
-        return "CONNECTED"
+        return try {
+            val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+            val adapter = bluetoothManager?.adapter
+            if (adapter?.isEnabled == true) "CONNECTED" else "DISCONNECTED"
+        } catch (e: Exception) {
+            "DISCONNECTED"
+        }
     }
 
     fun getLocalGpsStatus(): String {

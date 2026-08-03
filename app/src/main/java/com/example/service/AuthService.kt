@@ -45,29 +45,39 @@ class AuthService(private val context: Context) {
             firebaseAuth = FirebaseAuth.getInstance()
             firestore = FirebaseFirestore.getInstance()
             Log.d("AuthService", "Firebase Auth & Firestore successfully initialized!")
-            
-            // Check for existing Firebase user session
-            firebaseAuth?.currentUser?.let { firebaseUser ->
-                loadUserProfile(firebaseUser.uid)
-            } ?: run {
-                _authState.value = AuthState.Initial
-            }
         } catch (e: Exception) {
             firebaseAuth = null
             firestore = null
             Log.w("AuthService", "Firebase App not fully configured (missing google-services.json). Falling back to Offline Demo Mode: ${e.message}")
-            
-            // Check for existing Demo user session
-            val activeUserJson = sharedPrefs.getString("current_user", null)
-            if (activeUserJson != null) {
-                try {
-                    val userObj = JSONObject(activeUserJson)
-                    val demoUser = userFromJsonObject(userObj)
-                    _authState.value = AuthState.Success(demoUser)
-                } catch (e: Exception) {
-                    _authState.value = AuthState.Initial
+        }
+        
+        // Always check for existing persisted user session to bypass login quickly
+        val activeUserJson = sharedPrefs.getString("current_user", null)
+        if (activeUserJson != null) {
+            try {
+                val userObj = JSONObject(activeUserJson)
+                val user = userFromJsonObject(userObj)
+                _authState.value = AuthState.Success(user)
+                
+                // If using Firebase, update profile in background without resetting AuthState
+                if (firebaseAuth?.currentUser != null) {
+                    val uid = firebaseAuth!!.currentUser!!.uid
+                    firestore?.collection("users")?.document(uid)?.get()?.addOnSuccessListener { document ->
+                        if (document.exists()) {
+                            val updatedUser = User.fromMap(document.data ?: emptyMap())
+                            _authState.value = AuthState.Success(updatedUser)
+                            persistUserSession(updatedUser)
+                        }
+                    }
                 }
-            } else {
+            } catch (e: Exception) {
+                _authState.value = AuthState.Initial
+            }
+        } else {
+            // Check for existing Firebase user session as fallback
+            firebaseAuth?.currentUser?.let { firebaseUser ->
+                loadUserProfile(firebaseUser.uid)
+            } ?: run {
                 _authState.value = AuthState.Initial
             }
         }
@@ -116,9 +126,11 @@ class AuthService(private val context: Context) {
                         } else {
                             User(uid = firebaseUser.uid, email = email, name = "Guardian User")
                         }
+                        persistUserSession(user)
                         _authState.value = AuthState.Success(user)
                     } else {
                         val simpleUser = User(uid = firebaseUser.uid, email = email)
+                        persistUserSession(simpleUser)
                         _authState.value = AuthState.Success(simpleUser)
                     }
                 } ?: run {
@@ -136,7 +148,7 @@ class AuthService(private val context: Context) {
                     val storedPassword = userObj.optString("password")
                     if (storedPassword == password) {
                         val loggedInUser = userFromJsonObject(userObj)
-                        persistDemoSession(loggedInUser)
+                        persistUserSession(loggedInUser)
                         _authState.value = AuthState.Success(loggedInUser)
                     } else {
                         _authState.value = AuthState.Error("Incorrect password for this account.")
@@ -161,7 +173,7 @@ class AuthService(private val context: Context) {
                         medications = "Albuterol Inhaler"
                     )
                     preRegisterDemoUser(demoUser, "password123")
-                    persistDemoSession(demoUser)
+                    persistUserSession(demoUser)
                     _authState.value = AuthState.Success(demoUser)
                 } else {
                     _authState.value = AuthState.Error("No account found for $email. Tip: Use demo@guardian.sos with password123, or tap register.")
@@ -188,6 +200,7 @@ class AuthService(private val context: Context) {
                 result.user?.let { firebaseUser ->
                     val finalUser = user.copy(uid = firebaseUser.uid)
                     firestore?.collection("users")?.document(firebaseUser.uid)?.set(finalUser.toMap())?.await()
+                    persistUserSession(finalUser)
                     _authState.value = AuthState.Success(finalUser)
                 } ?: run {
                     _authState.value = AuthState.Error("Registration failed.")
@@ -211,7 +224,7 @@ class AuthService(private val context: Context) {
                 .putString("user_reg_${finalUser.email}", userObj.toString())
                 .apply()
 
-            persistDemoSession(finalUser)
+            persistUserSession(finalUser)
             _authState.value = AuthState.Success(finalUser)
         }
     }
@@ -228,7 +241,7 @@ class AuthService(private val context: Context) {
             }
         } else {
             // Local Demo Save
-            persistDemoSession(updatedUser)
+            persistUserSession(updatedUser)
             
             // Load old password if existing to preserve registration integrity
             val oldUserJson = sharedPrefs.getString("user_reg_${updatedUser.email}", null)
@@ -280,7 +293,7 @@ class AuthService(private val context: Context) {
         _authState.value = AuthState.Initial
     }
 
-    private fun persistDemoSession(user: User) {
+    private fun persistUserSession(user: User) {
         val userObj = userToJsonObject(user)
         sharedPrefs.edit()
             .putString("current_user", userObj.toString())

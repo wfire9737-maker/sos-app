@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SOS Alert Monitor</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            background-color: #f5f5f5;
+        }
+
+        #main-screen {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            height: 100%;
+        }
+
+        #emergency-screen {
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            height: 100%;
+            background-color: #d32f2f;
+            color: white;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 100;
+        }
+
+        .siren {
+            font-size: 100px;
+            margin-bottom: 20px;
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.15); }
+            100% { transform: scale(1); }
+        }
+
+        .alert-text {
+            font-size: 36px;
+            font-weight: 900;
+            margin-bottom: 40px;
+            text-align: center;
+            letter-spacing: 2px;
+        }
+
+        #reset-button {
+            padding: 20px 48px;
+            font-size: 22px;
+            font-weight: bold;
+            color: #d32f2f;
+            background-color: white;
+            border: none;
+            border-radius: 40px;
+            cursor: pointer;
+            box-shadow: 0 6px 16px rgba(0,0,0,0.3);
+            transition: transform 0.1s, box-shadow 0.1s;
+        }
+
+        #reset-button:active {
+            transform: scale(0.95);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        }
+
+        #connection-status {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px 24px;
+            background: white;
+            border-radius: 30px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            color: #555;
+            font-size: 16px;
+        }
+
+        .dot {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background-color: #ccc;
+        }
+
+        .dot.connected {
+            background-color: #4caf50;
+        }
+
+        .dot.disconnected {
+            background-color: #f44336;
+        }
+        
+        #status-banner {
+            margin-top: 24px;
+            font-size: 14px;
+            color: #666;
+            min-height: 20px;
+            text-align: center;
+        }
+        
+        h2 {
+            color: #333;
+            margin-bottom: 24px;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Main Idle Screen -->
+    <div id="main-screen">
+        <h2>SOS Monitor</h2>
+        <div id="connection-status">
+            <div id="connection-dot" class="dot disconnected"></div>
+            <span id="connection-text">Checking device connection...</span>
+        </div>
+        <div id="status-banner"></div>
+    </div>
+
+    <!-- Full Screen Emergency Alert -->
+    <div id="emergency-screen">
+        <div class="siren">🚨</div>
+        <div class="alert-text">EMERGENCY ACTIVE</div>
+        <button id="reset-button">I'm Safe Now</button>
+    </div>
+
+    <script>
+        const ESP32_BASE_URL = "http://127.0.0.1:8080";
+        const POLL_INTERVAL_MS = 2000;
+
+        let pollTimer = null;
+        let wasEmergencyActive = false;
+
+        function startPolling() {
+            if (pollTimer) return;
+            pollTimer = setInterval(checkDeviceStatus, POLL_INTERVAL_MS);
+            console.log("Started polling ESP32 for SOS button state.");
+        }
+
+        function stopPolling() {
+            clearInterval(pollTimer);
+            pollTimer = null;
+        }
+
+        async function checkDeviceStatus() {
+            try {
+                const response = await fetch(`${ESP32_BASE_URL}/status`, {
+                    method: "GET",
+                    signal: AbortSignal.timeout(3000)
+                });
+                const data = await response.json();
+
+                updateConnectionIndicator(true);
+
+                if (data.sosActive && !wasEmergencyActive) {
+                    wasEmergencyActive = true;
+                    showEmergencyAlert();
+                } else if (!data.sosActive) {
+                    wasEmergencyActive = false;
+                    hideEmergencyAlert(); // In case device was reset physically
+                }
+
+                return data;
+            } catch (error) {
+                updateConnectionIndicator(false);
+                return null;
+            }
+        }
+
+        async function resetSOS() {
+            try {
+                // Optimistically hide the UI immediately
+                hideEmergencyAlert();
+                wasEmergencyActive = false; 
+                
+                const response = await fetch(`${ESP32_BASE_URL}/reset`, {
+                    method: "GET",
+                    signal: AbortSignal.timeout(3000)
+                });
+                const data = await response.json();
+                
+                showStatus("SOS reset successfully.", "success");
+                return data;
+            } catch (error) {
+                showStatus("Could not reach device to reset.", "error");
+                return null;
+            }
+        }
+
+        function showEmergencyAlert() {
+            console.log("EMERGENCY: physical button was pressed!");
+            showStatus("Emergency button pressed! Alert is active.", "emergency");
+            document.getElementById('main-screen').style.display = 'none';
+            document.getElementById('emergency-screen').style.display = 'flex';
+        }
+
+        function hideEmergencyAlert() {
+            document.getElementById('main-screen').style.display = 'flex';
+            document.getElementById('emergency-screen').style.display = 'none';
+        }
+
+        function updateConnectionIndicator(isConnected) {
+            const dot = document.getElementById('connection-dot');
+            const text = document.getElementById('connection-text');
+            
+            if (isConnected) {
+                dot.className = 'dot connected';
+                text.textContent = 'Connected to SOS Device';
+            } else {
+                dot.className = 'dot disconnected';
+                text.textContent = 'Disconnected from SOS Device';
+            }
+        }
+
+        function showStatus(message, type) {
+            console.log(`[${type.toUpperCase()}] ${message}`);
+            const banner = document.getElementById('status-banner');
+            banner.textContent = message;
+            
+            if (type === 'error') {
+                banner.style.color = '#d32f2f';
+            } else if (type === 'success') {
+                banner.style.color = '#4caf50';
+            } else {
+                banner.style.color = '#666';
+            }
+            
+            // clear success/error messages after a few seconds
+            if (type !== 'emergency') {
+                setTimeout(() => {
+                    if (banner.textContent === message) banner.textContent = '';
+                }, 4000);
+            }
+        }
+
+        // Initialize when app loads
+        window.addEventListener('load', () => {
+            startPolling();
+            // Initial check so we don't wait 2 seconds for the first update
+            checkDeviceStatus();
+        });
+
+        document.getElementById('reset-button').addEventListener('click', resetSOS);
+    </script>
+</body>
+</html>

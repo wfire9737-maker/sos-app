@@ -12,9 +12,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -43,6 +41,20 @@ fun VoiceSosScreen(
     val micDecibels by viewModel.micDecibels.collectAsState()
     val threshold by viewModel.voiceConfidenceThreshold.collectAsState()
     val logs by viewModel.voiceActivationLogs.collectAsState()
+    val isSpeechActive by viewModel.isSpeechRecognizerActive.collectAsState()
+    val liveSpokenText by viewModel.liveSpokenText.collectAsState()
+    val speechStatusMessage by viewModel.speechStatusMessage.collectAsState()
+
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val micPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            viewModel.startVoiceRecognition(context)
+        } else {
+            android.widget.Toast.makeText(context, "Microphone permission required for voice commands", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
 
     var customPhraseInput by remember { mutableStateOf("") }
     var spokenSimulatedInput by remember { mutableStateOf("Help me") }
@@ -64,7 +76,7 @@ fun VoiceSosScreen(
                         modifier = Modifier.testTag("voice_screen_back_button")
                     ) {
                         Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            imageVector = Icons.Filled.ArrowBack,
                             contentDescription = "Back"
                         )
                     }
@@ -242,24 +254,90 @@ fun VoiceSosScreen(
 
                         Spacer(modifier = Modifier.height(10.dp))
 
-                        Button(
-                            onClick = {
-                                viewModel.voiceSosService.processVoiceInput(
-                                    spokenSimulatedInput,
-                                    simulatedConfidence.toInt()
-                                )
-                            },
-                            enabled = isListening,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.primary
-                            ),
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(44.dp)
-                                .testTag("sim_voice_speak_btn")
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Text("Simulate Vocal Recognition", fontWeight = FontWeight.Bold)
+                            Button(
+                                onClick = {
+                                    val hasPermission = androidx.core.content.ContextCompat.checkSelfPermission(
+                                        context,
+                                        android.Manifest.permission.RECORD_AUDIO
+                                    ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+                                    if (isSpeechActive) {
+                                        viewModel.stopVoiceRecognition()
+                                    } else {
+                                        if (hasPermission) {
+                                            viewModel.startVoiceRecognition(context)
+                                        } else {
+                                            micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                                        }
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (isSpeechActive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.tertiary
+                                ),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(44.dp)
+                                    .testTag("voice_screen_live_mic_btn")
+                            ) {
+                                Icon(
+                                    imageVector = if (isSpeechActive) Icons.Default.MicOff else Icons.Default.Mic,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(if (isSpeechActive) "Stop Mic" else "Live Mic", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+
+                            Button(
+                                onClick = {
+                                    viewModel.voiceSosService.processVoiceInput(
+                                        spokenSimulatedInput,
+                                        simulatedConfidence.toInt()
+                                    )
+                                },
+                                enabled = isListening,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary
+                                ),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .weight(1.2f)
+                                    .height(44.dp)
+                                    .testTag("sim_voice_speak_btn")
+                            ) {
+                                Text("Simulate Input", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+                        }
+
+                        if (liveSpokenText.isNotBlank() || speechStatusMessage.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Surface(
+                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(10.dp)) {
+                                    Text(
+                                        text = speechStatusMessage,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                    if (liveSpokenText.isNotBlank()) {
+                                        Text(
+                                            text = "Recognized: \"$liveSpokenText\"",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -425,7 +503,7 @@ fun VoiceSosScreen(
                     }
                 }
             } else {
-                items(logs) { log ->
+                items(logs, key = { it.timestampMs }) { log ->
                     val dateStr = remember(log.timestampMs) {
                         SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(log.timestampMs))
                     }

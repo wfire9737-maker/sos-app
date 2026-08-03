@@ -17,9 +17,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -360,7 +358,7 @@ fun ReportsScreen(
                         modifier = Modifier.testTag("reports_back_button")
                     ) {
                         Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            imageVector = Icons.Filled.ArrowBack,
                             contentDescription = "Go Back",
                             tint = MaterialTheme.colorScheme.onPrimaryContainer
                         )
@@ -650,7 +648,7 @@ fun ReportsScreen(
                     }
                 }
             } else {
-                items(processedAlerts) { alert ->
+                items(processedAlerts, key = { it.id }) { alert ->
                     IncidentReportItem(
                         alert = alert,
                         onClick = { selectedAlertForDetail = alert }

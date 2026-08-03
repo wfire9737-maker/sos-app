@@ -13,8 +13,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -27,8 +30,16 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
 import com.example.ui.GuardianViewModel
 import com.example.ui.theme.*
+
+import com.example.ui.rememberLocationPermissionHandler
+import com.example.model.SosWorkflowState
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -37,7 +48,56 @@ fun EmergencyScreen(
     onNavigateBack: () -> Unit
 ) {
     val emergencySession by viewModel.emergencySession.collectAsState()
+    val isSirenPlaying by viewModel.isSirenPlaying.collectAsState()
+    val sosSoundEnabled by viewModel.sosSoundEnabled.collectAsState()
+    val countdown by viewModel.countdown.collectAsState()
+    val contacts by viewModel.contacts.collectAsState()
+    val sosWorkflowState by viewModel.sosWorkflowState.collectAsState()
     val context = LocalContext.current
+    val primaryContactPhone = contacts.firstOrNull()?.phone ?: "911"
+    
+    val sosTriggerHandler = rememberLocationPermissionHandler {
+        viewModel.triggerManualSOS()
+    }
+    
+    if (sosWorkflowState != SosWorkflowState.IDLE) {
+        androidx.compose.ui.window.Dialog(onDismissRequest = {}) {
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 8.dp
+            ) {
+                Column(
+                    modifier = Modifier.padding(24.dp).fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    CircularProgressIndicator(color = MaterialTheme.colorScheme.error)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = when (sosWorkflowState) {
+                            SosWorkflowState.OBTAINING_LOCATION -> "Obtaining high accuracy location..."
+                            SosWorkflowState.SENDING_SMS -> "Sending SMS to emergency contacts..."
+                            SosWorkflowState.CALLING_CONTACT -> "Placing emergency call..."
+                            SosWorkflowState.UPLOADING -> "Uploading SOS alert to servers..."
+                            SosWorkflowState.COMPLETED -> "SOS Completed!"
+                            else -> "Preparing SOS..."
+                        },
+                        style = MaterialTheme.typography.bodyLarge,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+        }
+    }
+    
+    val callPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted: Boolean ->
+        if (isGranted) {
+            val intent = Intent(Intent.ACTION_CALL).apply { data = Uri.parse("tel:$primaryContactPhone") }
+            context.startActivity(intent)
+        }
+    }
     
     // Status text animation
     var flashWarning by remember { mutableStateOf(false) }
@@ -80,24 +140,45 @@ fun EmergencyScreen(
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        Icons.Default.Warning,
-                        contentDescription = "Warning",
-                        modifier = Modifier.size(64.dp),
-                        tint = if (flashWarning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onError
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        text = "SOS ACTIVATED",
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.Black,
-                        color = if (flashWarning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onError
-                    )
-                    Text(
-                        text = "Help is on the way. Stay calm.",
-                        fontSize = 16.sp,
-                        color = if (flashWarning) MaterialTheme.colorScheme.error.copy(alpha=0.8f) else MaterialTheme.colorScheme.onError.copy(alpha=0.8f)
-                    )
+                    if (countdown != null) {
+                        Text(
+                            text = countdown.toString(),
+                            fontSize = 72.sp,
+                            fontWeight = FontWeight.Black,
+                            color = MaterialTheme.colorScheme.onError
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "SENDING SOS...",
+                            fontSize = 24.sp,
+                            fontWeight = FontWeight.Black,
+                            color = MaterialTheme.colorScheme.onError
+                        )
+                        Text(
+                            text = "Tap CANCEL to abort.",
+                            fontSize = 16.sp,
+                            color = MaterialTheme.colorScheme.onError.copy(alpha=0.8f)
+                        )
+                    } else {
+                        Icon(
+                            Icons.Default.Warning,
+                            contentDescription = "Warning",
+                            modifier = Modifier.size(64.dp),
+                            tint = if (flashWarning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onError
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "SOS ACTIVATED",
+                            fontSize = 24.sp,
+                            fontWeight = FontWeight.Black,
+                            color = if (flashWarning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onError
+                        )
+                        Text(
+                            text = "Help is on the way. Stay calm.",
+                            fontSize = 16.sp,
+                            color = if (flashWarning) MaterialTheme.colorScheme.error.copy(alpha=0.8f) else MaterialTheme.colorScheme.onError.copy(alpha=0.8f)
+                        )
+                    }
                 }
             }
 
@@ -111,13 +192,17 @@ fun EmergencyScreen(
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 ActionCard(
-                    title = "Call Emergency Services (911)",
-                    subtitle = "Instantly dials the local emergency number",
+                    title = "Call Emergency Contact",
+                    subtitle = "Instantly dials the primary emergency contact or 911",
                     icon = Icons.Default.Phone,
                     color = MaterialTheme.colorScheme.error,
                     onClick = {
-                        val intent = Intent(Intent.ACTION_DIAL).apply { data = Uri.parse("tel:911") }
-                        context.startActivity(intent)
+                        if (ContextCompat.checkSelfPermission(context, Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED) {
+                            val intent = Intent(Intent.ACTION_CALL).apply { data = Uri.parse("tel:$primaryContactPhone") }
+                            context.startActivity(intent)
+                        } else {
+                            callPermissionLauncher.launch(Manifest.permission.CALL_PHONE)
+                        }
                     }
                 )
                 
@@ -127,17 +212,27 @@ fun EmergencyScreen(
                     icon = Icons.Default.Sms,
                     color = AlertOrange,
                     onClick = {
-                        viewModel.triggerManualSOS()
+                        val message = "🚨 EMERGENCY SOS: I need help! Location: https://maps.google.com/?q=${emergencySession?.activeAlert?.latitude ?: 0.0},${emergencySession?.activeAlert?.longitude ?: 0.0}"
+                        val intent = Intent(Intent.ACTION_SENDTO).apply {
+                            data = Uri.parse("smsto:$primaryContactPhone")
+                            putExtra("sms_body", message)
+                        }
+                        try {
+                            context.startActivity(intent)
+                        } catch (e: Exception) {
+                            // Fallback
+                        }
+                        sosTriggerHandler()
                     }
                 )
                 
                 ActionCard(
-                    title = "Sound Siren Alarm",
-                    subtitle = "Plays a loud alarm to attract attention",
-                    icon = Icons.Default.VolumeUp,
-                    color = Color(0xFF00BCD4),
+                    title = if (isSirenPlaying) "Silence Siren Alarm" else "Sound Siren Alarm",
+                    subtitle = if (isSirenPlaying) "Alarm is currently sounding. Tap to silence." else if (!sosSoundEnabled) "SOS sound is OFF in Settings (Tap to start manually)" else "Plays a loud alarm to attract attention",
+                    icon = if (isSirenPlaying) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
+                    color = if (isSirenPlaying) MaterialTheme.colorScheme.error else Color(0xFF00BCD4),
                     onClick = {
-                        // In a real app, this would play a loud sound.
+                        viewModel.toggleSirenAlarm()
                     }
                 )
             }
@@ -148,7 +243,15 @@ fun EmergencyScreen(
             var showPinDialog by remember { mutableStateOf(false) }
             
             Button(
-                onClick = { showPinDialog = true },
+                onClick = { 
+                    if (countdown != null) {
+                        viewModel.cancelEmergencyWithPin("") { success -> 
+                            if (success) onNavigateBack()
+                        }
+                    } else {
+                        showPinDialog = true 
+                    }
+                },
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
                 modifier = Modifier
                     .fillMaxWidth()
@@ -207,7 +310,7 @@ fun ActionCard(title: String, subtitle: String, icon: androidx.compose.ui.graphi
                 Text(title, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
             }
-            Icon(Icons.Default.ArrowForward, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

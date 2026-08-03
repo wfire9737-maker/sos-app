@@ -10,8 +10,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -23,6 +23,14 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.content.Intent
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
+import androidx.compose.ui.platform.LocalContext
 import com.example.model.EmergencyContact
 import com.example.ui.GuardianViewModel
 
@@ -100,7 +108,7 @@ fun ContactsScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     contentPadding = PaddingValues(bottom = 80.dp) // space for FAB
                 ) {
-                    items(contacts) { contact ->
+                    items(contacts, key = { it.id }) { contact ->
                         ContactCard(
                             contact = contact,
                             onEdit = { contactToEdit = contact },
@@ -159,6 +167,16 @@ fun ContactCard(
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
+    val context = LocalContext.current
+    val callPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted: Boolean ->
+        if (isGranted) {
+            val intent = Intent(Intent.ACTION_CALL).apply { data = Uri.parse("tel:${contact.phone}") }
+            context.startActivity(intent)
+        }
+    }
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -189,13 +207,30 @@ fun ContactCard(
             
             // Info
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = contact.name,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = contact.name,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    if (contact.priority == 1) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer
+                        ) {
+                            Text(
+                                text = "PRIMARY",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                }
                 Text(
                     text = contact.phone,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -213,6 +248,31 @@ fun ContactCard(
             
             // Actions
             Row {
+                IconButton(onClick = {
+                    when (PackageManager.PERMISSION_GRANTED) {
+                        ContextCompat.checkSelfPermission(context, Manifest.permission.CALL_PHONE) -> {
+                            val intent = Intent(Intent.ACTION_CALL).apply { data = Uri.parse("tel:${contact.phone}") }
+                            context.startActivity(intent)
+                        }
+                        else -> {
+                            callPermissionLauncher.launch(Manifest.permission.CALL_PHONE)
+                        }
+                    }
+                }) {
+                    Icon(Icons.Default.Phone, contentDescription = "Call", tint = MaterialTheme.colorScheme.primary)
+                }
+                IconButton(onClick = {
+                    val intent = Intent(Intent.ACTION_SENDTO).apply {
+                        data = Uri.parse("smsto:${contact.phone}")
+                    }
+                    try {
+                        context.startActivity(intent)
+                    } catch (e: Exception) {
+                        // Handle exception if SMS app is not found
+                    }
+                }) {
+                    Icon(Icons.Default.Sms, contentDescription = "SMS", tint = MaterialTheme.colorScheme.primary)
+                }
                 IconButton(onClick = onEdit) {
                     Icon(Icons.Default.Edit, contentDescription = "Edit", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -233,6 +293,7 @@ fun AddEditContactDialog(
     var name by remember { mutableStateOf(contact?.name ?: "") }
     var phone by remember { mutableStateOf(contact?.phone ?: "") }
     var relationship by remember { mutableStateOf(contact?.relationship ?: "") }
+    var isPrimary by remember { mutableStateOf(contact?.priority == 1) }
     
     val isEdit = contact != null
 
@@ -249,6 +310,7 @@ fun AddEditContactDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
+                val isPhoneValid = phone.isEmpty() || phone.matches(Regex("^[+]?[0-9\\s-]{7,15}$"))
                 OutlinedTextField(
                     value = phone,
                     onValueChange = { phone = it },
@@ -256,6 +318,8 @@ fun AddEditContactDialog(
                     leadingIcon = { Icon(Icons.Default.Phone, contentDescription = null) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                     singleLine = true,
+                    isError = !isPhoneValid,
+                    supportingText = if (!isPhoneValid) { { Text("Invalid phone number format") } } else null,
                     modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
@@ -266,6 +330,18 @@ fun AddEditContactDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Switch(
+                        checked = isPrimary,
+                        onCheckedChange = { isPrimary = it }
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Set as Primary Contact")
+                }
             }
         },
         confirmButton = {
@@ -276,18 +352,20 @@ fun AddEditContactDialog(
                             contact?.copy(
                                 name = name.trim(),
                                 phone = phone.trim(),
-                                relationship = relationship.trim()
+                                relationship = relationship.trim(),
+                                priority = if (isPrimary) 1 else 2
                             ) ?: EmergencyContact(
                                 id = "contact-${System.currentTimeMillis()}",
                                 userId = "", // Will be set by viewModel
                                 name = name.trim(),
                                 phone = phone.trim(),
-                                relationship = relationship.trim()
+                                relationship = relationship.trim(),
+                                priority = if (isPrimary) 1 else 2
                             )
                         )
                     }
                 },
-                enabled = name.isNotBlank() && phone.isNotBlank()
+                enabled = name.isNotBlank() && phone.isNotBlank() && phone.matches(Regex("^[+]?[0-9\\s-]{7,15}$"))
             ) {
                 Text("Save")
             }

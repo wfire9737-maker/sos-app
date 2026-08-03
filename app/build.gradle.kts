@@ -15,13 +15,14 @@ android {
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
   defaultConfig {
-    applicationId = "com.aistudio.guardiansos.wqzxlf"
+    applicationId = "com.example.smartsos"
     minSdk = 24
     targetSdk = 36
     versionCode = 1
     versionName = "1.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    manifestPlaceholders["MAPS_API_KEY"] = System.getenv("MAPS_API_KEY") ?: "MOCK_KEY_FOR_TESTS"
   }
 
   signingConfigs {
@@ -87,7 +88,7 @@ dependencies {
   implementation(libs.androidx.compose.ui.graphics)
   implementation(libs.androidx.compose.ui.tooling.preview)
   implementation(libs.androidx.core.ktx)
-  // implementation(libs.androidx.datastore.preferences)
+  implementation(libs.androidx.datastore.preferences)
   implementation(libs.androidx.lifecycle.runtime.compose)
   implementation(libs.androidx.lifecycle.runtime.ktx)
   implementation(libs.androidx.lifecycle.viewmodel.compose)
@@ -115,12 +116,12 @@ dependencies {
   implementation(libs.moshi.kotlin)
   implementation(libs.okhttp)
   implementation(libs.play.services.location)
+  implementation(libs.maps.compose)
+  implementation(libs.play.services.maps)
   implementation(libs.retrofit)
   implementation(libs.hilt.android)
   "ksp"(libs.hilt.compiler)
   implementation(libs.hilt.navigation.compose)
-  implementation(libs.maps.compose)
-  implementation(libs.play.services.maps)
   implementation(libs.security.crypto)
   testImplementation(libs.androidx.compose.ui.test.junit4)
   testImplementation(libs.androidx.core)

@@ -1,13 +1,24 @@
 package com.example.service
 
+import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
+import android.content.pm.PackageManager
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
 import android.util.Log
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONArray
+import java.util.Locale
 import java.util.UUID
 
 data class VoiceActivationLog(
@@ -19,10 +30,18 @@ data class VoiceActivationLog(
     val timestampMs: Long = System.currentTimeMillis()
 )
 
+sealed class VoiceCommand(val commandName: String) {
+    data class Sos(val matchedPhrase: String) : VoiceCommand("SOS")
+    data class CancelSos(val matchedPhrase: String) : VoiceCommand("CANCEL_SOS")
+    data class TrackLocation(val matchedPhrase: String) : VoiceCommand("TRACK_LOCATION")
+    data class Unknown(val spokenText: String) : VoiceCommand("UNKNOWN")
+}
+
 class VoiceSosService(
     private val context: Context
 ) {
     private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    private val mainHandler = Handler(Looper.getMainLooper())
     private val sharedPrefs: SharedPreferences = context.getSharedPreferences("guardian_sos_voice", Context.MODE_PRIVATE)
 
     // Speech states
@@ -32,25 +51,42 @@ class VoiceSosService(
     private val _voiceState = MutableStateFlow("LISTENING") // "LISTENING", "PROCESSING_SPEECH", "MATCH_FOUND", "THRESHOLD_REJECTED"
     val voiceState: StateFlow<String> = _voiceState.asStateFlow()
 
+    // Native Speech Recognizer States
+    private val _isSpeechRecognizerActive = MutableStateFlow(false)
+    val isSpeechRecognizerActive: StateFlow<Boolean> = _isSpeechRecognizerActive.asStateFlow()
+
+    private val _liveSpokenText = MutableStateFlow("")
+    val liveSpokenText: StateFlow<String> = _liveSpokenText.asStateFlow()
+
+    private val _speechStatusMessage = MutableStateFlow("Tap microphone to start listening")
+    val speechStatusMessage: StateFlow<String> = _speechStatusMessage.asStateFlow()
+
+    private val _lastRecognizedCommand = MutableStateFlow<VoiceCommand?>(null)
+    val lastRecognizedCommand: StateFlow<VoiceCommand?> = _lastRecognizedCommand.asStateFlow()
+
     // Configurable Wake Phrases
-    private val _wakePhrases = MutableStateFlow<List<String>>(listOf("Help me", "Emergency", "Save me"))
+    private val _wakePhrases = MutableStateFlow<List<String>>(
+        listOf("Help", "Emergency", "SOS", "Send SOS", "Call for help", "I'm in danger", "Track my location", "Stop SOS", "Cancel SOS")
+    )
     val wakePhrases: StateFlow<List<String>> = _wakePhrases.asStateFlow()
 
-    // Live Decibel Level (for visual wave visualization)
+    // Live Decibel Level
     private val _micDecibels = MutableStateFlow(42f)
     val micDecibels: StateFlow<Float> = _micDecibels.asStateFlow()
 
     // Configurable trigger confidence threshold
-    private val _confidenceThreshold = MutableStateFlow(80) // default 80%
+    private val _confidenceThreshold = MutableStateFlow(75)
     val confidenceThreshold: StateFlow<Int> = _confidenceThreshold.asStateFlow()
 
     // Log list of all voice detection attempts
     private val _activationLogs = MutableStateFlow<List<VoiceActivationLog>>(emptyList())
     val activationLogs: StateFlow<List<VoiceActivationLog>> = _activationLogs.asStateFlow()
 
-    // Trigger Callback for main SOS action
+    // Callbacks
     var onVoiceSosTriggered: ((String, Int) -> Unit)? = null
+    var onVoiceCommandRecognized: ((VoiceCommand, Int) -> Unit)? = null
 
+    private var speechRecognizer: SpeechRecognizer? = null
     private var micPollerJob: Job? = null
 
     init {
@@ -59,7 +95,10 @@ class VoiceSosService(
     }
 
     private fun loadPhrasesAndLogs() {
-        // Load custom wake words
+        val defaultPhrases = listOf(
+            "Help", "Emergency", "SOS", "Send SOS", "Call for help",
+            "I'm in danger", "Track my location", "Stop SOS", "Cancel SOS"
+        )
         val phrasesJson = sharedPrefs.getString("wake_phrases", null)
         if (phrasesJson != null) {
             try {
@@ -68,13 +107,17 @@ class VoiceSosService(
                 for (i in 0 until arr.length()) {
                     list.add(arr.getString(i))
                 }
+                defaultPhrases.forEach { p ->
+                    if (!list.contains(p)) list.add(p)
+                }
                 _wakePhrases.value = list
             } catch (e: Exception) {
-                Log.e("VoiceSosService", "Error parsing saved phrases", e)
+                _wakePhrases.value = defaultPhrases
             }
+        } else {
+            _wakePhrases.value = defaultPhrases
         }
 
-        // Load logs
         val logsJson = sharedPrefs.getString("activation_logs", "[]") ?: "[]"
         try {
             val arr = JSONArray(logsJson)
@@ -98,31 +141,210 @@ class VoiceSosService(
         }
     }
 
-    private fun savePhrases() {
-        try {
-            val arr = JSONArray(_wakePhrases.value)
-            sharedPrefs.edit().putString("wake_phrases", arr.toString()).apply()
-        } catch (e: Exception) {
-            Log.e("VoiceSosService", "Error saving phrases", e)
+    /**
+     * Start native Android SpeechRecognizer
+     */
+    fun startSpeechRecognition(context: Context) {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            _speechStatusMessage.value = "Microphone permission required!"
+            return
+        }
+
+        mainHandler.post {
+            try {
+                if (speechRecognizer == null) {
+                    speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context)
+                }
+
+                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
+                    putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                    putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+                }
+
+                speechRecognizer?.setRecognitionListener(object : RecognitionListener {
+                    override fun onReadyForSpeech(params: Bundle?) {
+                        _isSpeechRecognizerActive.value = true
+                        _voiceState.value = "LISTENING"
+                        _speechStatusMessage.value = "Listening for voice command... (Speak now)"
+                    }
+
+                    override fun onBeginningOfSpeech() {
+                        _speechStatusMessage.value = "Listening to speech..."
+                    }
+
+                    override fun onRmsChanged(rmsdB: Float) {
+                        val calculatedDb = (35f + rmsdB.coerceAtLeast(0f) * 4f).coerceIn(30f, 95f)
+                        _micDecibels.value = calculatedDb
+                    }
+
+                    override fun onBufferReceived(buffer: ByteArray?) {}
+
+                    override fun onEndOfSpeech() {
+                        _voiceState.value = "PROCESSING_SPEECH"
+                        _speechStatusMessage.value = "Processing command..."
+                    }
+
+                    override fun onError(error: Int) {
+                        val message = when (error) {
+                            SpeechRecognizer.ERROR_AUDIO -> "Audio recording error"
+                            SpeechRecognizer.ERROR_CLIENT -> "Client error"
+                            SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Permission missing"
+                            SpeechRecognizer.ERROR_NETWORK -> "Network error"
+                            SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Network timeout"
+                            SpeechRecognizer.ERROR_NO_MATCH -> "No speech recognized. Tap mic to try again."
+                            SpeechRecognizer.ERROR_SERVER -> "Server recognition error"
+                            SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "No speech input detected."
+                            else -> "Speech recognition error ($error)"
+                        }
+                        _speechStatusMessage.value = message
+                        _isSpeechRecognizerActive.value = false
+                        _voiceState.value = "LISTENING"
+                    }
+
+                    override fun onResults(results: Bundle?) {
+                        val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        val text = matches?.firstOrNull() ?: ""
+                        if (text.isNotBlank()) {
+                            _liveSpokenText.value = text
+                            evaluateRecognizedText(text, 95)
+                        } else {
+                            _speechStatusMessage.value = "No command recognized."
+                        }
+                        _isSpeechRecognizerActive.value = false
+                        _voiceState.value = "LISTENING"
+                    }
+
+                    override fun onPartialResults(partialResults: Bundle?) {
+                        val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        val text = matches?.firstOrNull() ?: ""
+                        if (text.isNotBlank()) {
+                            _liveSpokenText.value = text
+                            _speechStatusMessage.value = "Hearing: \"$text\""
+                            evaluateRecognizedText(text, 90, isPartial = true)
+                        }
+                    }
+
+                    override fun onEvent(eventType: Int, params: Bundle?) {}
+                })
+
+                _liveSpokenText.value = ""
+                _speechStatusMessage.value = "Starting speech recognizer..."
+                speechRecognizer?.startListening(intent)
+            } catch (e: Exception) {
+                Log.e("VoiceSosService", "Failed to start speech recognizer: ${e.message}")
+                _speechStatusMessage.value = "Speech recognizer unavailable. Standard voice mode active."
+                _isSpeechRecognizerActive.value = false
+            }
         }
     }
 
-    private fun saveLogs() {
-        try {
-            val arr = JSONArray()
-            _activationLogs.value.forEach { log ->
-                val obj = org.json.JSONObject()
-                obj.put("id", log.id)
-                obj.put("phrase", log.phrase)
-                obj.put("confidence", log.confidence)
-                obj.put("db", log.noiseFilteredDb)
-                obj.put("isActivated", log.isActivated)
-                obj.put("time", log.timestampMs)
-                arr.put(obj)
+    /**
+     * Stop native SpeechRecognizer
+     */
+    fun stopSpeechRecognition() {
+        mainHandler.post {
+            try {
+                speechRecognizer?.stopListening()
+                speechRecognizer?.destroy()
+                speechRecognizer = null
+            } catch (e: Exception) {
+                Log.e("VoiceSosService", "Error stopping speech recognizer", e)
             }
-            sharedPrefs.edit().putString("activation_logs", arr.toString()).apply()
-        } catch (e: Exception) {
-            Log.e("VoiceSosService", "Error saving logs", e)
+            _isSpeechRecognizerActive.value = false
+            _speechStatusMessage.value = "Speech listening stopped."
+        }
+    }
+
+    /**
+     * Evaluate recognized spoken text against predefined commands
+     */
+    fun evaluateRecognizedText(spokenText: String, confidence: Int, isPartial: Boolean = false) {
+        val text = spokenText.lowercase(Locale.ROOT).trim()
+
+        // 1. SOS Emergency Commands
+        val sosCommands = listOf(
+            "help", "emergency", "sos", "send sos", "call for help",
+            "i'm in danger", "im in danger", "i am in danger", "in danger"
+        )
+        val matchedSos = sosCommands.firstOrNull { text.contains(it) }
+
+        if (matchedSos != null) {
+            val matchedPhraseClean = when {
+                text.contains("send sos") -> "Send SOS"
+                text.contains("call for help") -> "Call for help"
+                text.contains("in danger") -> "I'm in danger"
+                text.contains("emergency") -> "Emergency"
+                text.contains("help") -> "Help"
+                else -> "SOS"
+            }
+            val command = VoiceCommand.Sos(matchedPhraseClean)
+            _lastRecognizedCommand.value = command
+            _speechStatusMessage.value = "Recognized Command: \"$matchedPhraseClean\" (Emergency SOS)"
+            addActivationLog(matchedPhraseClean, confidence, 85f, true)
+
+            onVoiceCommandRecognized?.invoke(command, confidence)
+            onVoiceSosTriggered?.invoke(matchedPhraseClean, confidence)
+            return
+        }
+
+        // 2. Cancellation Commands
+        val cancelCommands = listOf(
+            "stop sos", "cancel sos", "stop emergency", "cancel emergency"
+        )
+        val matchedCancel = cancelCommands.firstOrNull { text.contains(it) }
+
+        if (matchedCancel != null) {
+            val matchedPhraseClean = if (text.contains("stop")) "Stop SOS" else "Cancel SOS"
+            val command = VoiceCommand.CancelSos(matchedPhraseClean)
+            _lastRecognizedCommand.value = command
+            _speechStatusMessage.value = "Recognized Command: \"$matchedPhraseClean\" (Emergency Cancelled)"
+            addActivationLog(matchedPhraseClean, confidence, 70f, true)
+
+            onVoiceCommandRecognized?.invoke(command, confidence)
+            return
+        }
+
+        // 3. Location Tracking Command
+        val trackCommands = listOf(
+            "track my location", "track location", "start location tracking", "track me"
+        )
+        val matchedTrack = trackCommands.firstOrNull { text.contains(it) }
+
+        if (matchedTrack != null) {
+            val matchedPhraseClean = "Track my location"
+            val command = VoiceCommand.TrackLocation(matchedPhraseClean)
+            _lastRecognizedCommand.value = command
+            _speechStatusMessage.value = "Recognized Command: \"$matchedPhraseClean\" (Location Tracking Started)"
+            addActivationLog(matchedPhraseClean, confidence, 65f, true)
+
+            onVoiceCommandRecognized?.invoke(command, confidence)
+            return
+        }
+
+        // 4. Unknown / No direct action match
+        if (!isPartial) {
+            val command = VoiceCommand.Unknown(spokenText)
+            _lastRecognizedCommand.value = command
+            _speechStatusMessage.value = "Recognized: \"$spokenText\""
+            addActivationLog(spokenText, confidence, 50f, false)
+            onVoiceCommandRecognized?.invoke(command, confidence)
+        }
+    }
+
+    /**
+     * Process voice input for simulation or external voice pipeline
+     */
+    fun processVoiceInput(spokenText: String, inputConfidence: Int) {
+        if (!_isListening.value) return
+
+        serviceScope.launch {
+            _voiceState.value = "PROCESSING_SPEECH"
+            delay(400)
+            _liveSpokenText.value = spokenText
+            evaluateRecognizedText(spokenText, inputConfidence)
+            _voiceState.value = "LISTENING"
         }
     }
 
@@ -130,8 +352,7 @@ class VoiceSosService(
         micPollerJob?.cancel()
         micPollerJob = serviceScope.launch {
             while (isActive) {
-                if (_isListening.value) {
-                    // Simulate voice decibel oscillation (ambient background noise 35dB - 55dB)
+                if (_isListening.value || _isSpeechRecognizerActive.value) {
                     val base = 40f
                     val variance = (Math.sin(System.currentTimeMillis() * 0.002) * 12).toFloat()
                     val randomJitter = (Math.random() * 4 - 2).toFloat()
@@ -173,40 +394,31 @@ class VoiceSosService(
         _voiceState.value = if (enabled) "LISTENING" else "DISABLED"
     }
 
-    /**
-     * Simulate speech recognition input. This filters out background noise,
-     * checks for matches against configured wake phrases, evaluates confidence,
-     * and triggers the SOS flow if confidence matches or exceeds the threshold.
-     */
-    fun processVoiceInput(spokenText: String, inputConfidence: Int) {
-        if (!_isListening.value) return
+    private fun savePhrases() {
+        try {
+            val arr = JSONArray(_wakePhrases.value)
+            sharedPrefs.edit().putString("wake_phrases", arr.toString()).apply()
+        } catch (e: Exception) {
+            Log.e("VoiceSosService", "Error saving phrases", e)
+        }
+    }
 
-        serviceScope.launch {
-            _voiceState.value = "PROCESSING_SPEECH"
-            delay(1200) // Simulate offline neural net DSP delay
-
-            val matchedPhrase = _wakePhrases.value.firstOrNull { phrase ->
-                spokenText.contains(phrase, ignoreCase = true)
+    private fun saveLogs() {
+        try {
+            val arr = JSONArray()
+            _activationLogs.value.forEach { log ->
+                val obj = org.json.JSONObject()
+                obj.put("id", log.id)
+                obj.put("phrase", log.phrase)
+                obj.put("confidence", log.confidence)
+                obj.put("db", log.noiseFilteredDb)
+                obj.put("isActivated", log.isActivated)
+                obj.put("time", log.timestampMs)
+                arr.put(obj)
             }
-
-            val meetsThreshold = matchedPhrase != null && inputConfidence >= _confidenceThreshold.value
-            val simulatedDb = 72f // Spike indicating speech vs ambient
-
-            if (meetsThreshold && matchedPhrase != null) {
-                _voiceState.value = "MATCH_FOUND"
-                addActivationLog(spokenText, inputConfidence, simulatedDb, true)
-                delay(500)
-                // Invoke callback on main thread/ViewModel
-                withContext(Dispatchers.Main) {
-                    onVoiceSosTriggered?.invoke(matchedPhrase, inputConfidence)
-                }
-                _voiceState.value = "LISTENING"
-            } else {
-                _voiceState.value = "THRESHOLD_REJECTED"
-                addActivationLog(spokenText, inputConfidence, simulatedDb, false)
-                delay(1500)
-                _voiceState.value = "LISTENING"
-            }
+            sharedPrefs.edit().putString("activation_logs", arr.toString()).apply()
+        } catch (e: Exception) {
+            Log.e("VoiceSosService", "Error saving logs", e)
         }
     }
 
@@ -228,6 +440,7 @@ class VoiceSosService(
     }
 
     fun cleanup() {
+        stopSpeechRecognition()
         micPollerJob?.cancel()
     }
 }

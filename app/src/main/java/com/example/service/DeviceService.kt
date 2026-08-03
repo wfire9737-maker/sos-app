@@ -2,6 +2,13 @@ package com.example.service
 
 import android.content.Context
 import android.util.Log
+import android.content.Intent
+import android.content.IntentFilter
+import android.content.BroadcastReceiver
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.bluetooth.BluetoothAdapter
 import com.example.model.Device
 import com.example.model.NotificationItem
 import com.example.model.NotificationType
@@ -23,6 +30,12 @@ class DeviceService(
     private val _isRefreshing = MutableStateFlow(false)
     val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
 
+    private val _isNetworkAvailable = MutableStateFlow(true)
+    val isNetworkAvailable: StateFlow<Boolean> = _isNetworkAvailable.asStateFlow()
+
+    private val _esp32CommLogs = MutableStateFlow<List<String>>(emptyList())
+    val esp32CommLogs: StateFlow<List<String>> = _esp32CommLogs.asStateFlow()
+
     private val _diagnosticsLog = MutableStateFlow<List<String>>(emptyList())
     val diagnosticsLog: StateFlow<List<String>> = _diagnosticsLog.asStateFlow()
 
@@ -30,6 +43,10 @@ class DeviceService(
     val isDiagnosing: StateFlow<Boolean> = _isDiagnosing.asStateFlow()
 
     private var telemetryJob: Job? = null
+
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private var bluetoothReceiver: BroadcastReceiver? = null
+
     
     // Track sent warning flags to avoid spamming alerts
     private val warnedLowBatteryIds = mutableSetOf<String>()
@@ -37,6 +54,54 @@ class DeviceService(
 
     init {
         startTelemetryLoop()
+        startConnectivityMonitors()
+    }
+
+
+    fun cleanup() {
+        telemetryJob?.cancel()
+        try {
+            val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            networkCallback?.let { connectivityManager.unregisterNetworkCallback(it) }
+            bluetoothReceiver?.let { context.unregisterReceiver(it) }
+        } catch (e: Exception) {
+            Log.e("DeviceService", "Error during cleanup", e)
+        }
+    }
+
+    private fun startConnectivityMonitors() {
+        try {
+            val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            networkCallback = object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) {
+                    setNetworkAvailable(true)
+                    refreshDeviceStatus()
+                }
+                override fun onLost(network: Network) {
+                    setNetworkAvailable(false)
+                    refreshDeviceStatus()
+                }
+            }
+            connectivityManager.registerDefaultNetworkCallback(networkCallback!!)
+            
+            bluetoothReceiver = object : BroadcastReceiver() {
+                override fun onReceive(context: Context?, intent: Intent?) {
+                    if (intent?.action == BluetoothAdapter.ACTION_STATE_CHANGED) {
+                        val state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
+                        if (state == BluetoothAdapter.STATE_OFF || state == BluetoothAdapter.STATE_TURNING_OFF) {
+                            addCommLog("⚠️ Bluetooth was disabled on phone. Connection to ESP32 lost.")
+                            refreshDeviceStatus()
+                        } else if (state == BluetoothAdapter.STATE_ON) {
+                            addCommLog("✅ Bluetooth enabled. Ready to connect.")
+                            refreshDeviceStatus()
+                        }
+                    }
+                }
+            }
+            context.registerReceiver(bluetoothReceiver, IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED))
+        } catch (e: Exception) {
+            Log.e("DeviceService", "Error starting connectivity monitors", e)
+        }
     }
 
     private fun startTelemetryLoop() {
@@ -354,12 +419,6 @@ class DeviceService(
 
     // --- MODULE 16: ESP32 COMMUNICATION PLATFORM ---
 
-    private val _isNetworkAvailable = MutableStateFlow(true)
-    val isNetworkAvailable: StateFlow<Boolean> = _isNetworkAvailable.asStateFlow()
-
-    private val _esp32CommLogs = MutableStateFlow<List<String>>(emptyList())
-    val esp32CommLogs: StateFlow<List<String>> = _esp32CommLogs.asStateFlow()
-
     fun setNetworkAvailable(available: Boolean) {
         _isNetworkAvailable.value = available
         addCommLog("Network connectivity marked as " + if (available) "AVAILABLE" else "UNAVAILABLE")
@@ -594,7 +653,7 @@ class DeviceService(
         }
     }
 
-    private suspend fun handleDeviceDisconnect(deviceId: String) {
+    suspend fun handleDeviceDisconnect(deviceId: String) {
         val device = databaseService.devices.value.find { it.deviceId == deviceId } ?: return
         if (device.status != "DISCONNECTED" && device.status != "REBOOTING") {
             addCommLog("🚨 Lost contact with $deviceId. Heartbeat monitor timed out.")
@@ -611,7 +670,7 @@ class DeviceService(
         }
     }
 
-    private fun initiateAutomaticReconnection(deviceId: String) {
+    fun initiateAutomaticReconnection(deviceId: String) {
         serviceScope.launch {
             addCommLog("🔄 Reconnection: Initiating automatic background reconnect loop for $deviceId...")
             var attempt = 1

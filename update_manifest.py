@@ -1,42 +1,22 @@
-import re
+import os
 
-manifest_path = "app/src/main/AndroidManifest.xml"
-with open(manifest_path, "r") as f:
-    manifest_content = f.read()
+filepath = "app/src/main/AndroidManifest.xml"
+with open(filepath, "r") as f:
+    content = f.read()
 
-permissions_to_add = """    <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-permission android:name="android.permission.VIBRATE" />
-    
-    <!-- Location -->
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
-    
-    <!-- Bluetooth -->
-    <uses-permission android:name="android.permission.BLUETOOTH" />
-    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
-    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />
-    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-    
-    <!-- Communications -->
-    <uses-permission android:name="android.permission.SEND_SMS" />
-    <uses-permission android:name="android.permission.CALL_PHONE" />
-    <uses-permission android:name="android.permission.READ_CONTACTS" />
-    
-    <!-- Media / Hardware -->
-    <uses-permission android:name="android.permission.CAMERA" />
-    <uses-permission android:name="android.permission.RECORD_AUDIO" />
-"""
+target = """    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />"""
 
-# Replace existing permissions with the new comprehensive list
-import re
-new_manifest = re.sub(
-    r'<uses-permission android:name="android\.permission\.INTERNET" />\s*<uses-permission android:name="android\.permission\.POST_NOTIFICATIONS" />\s*<uses-permission android:name="android\.permission\.VIBRATE" />',
-    permissions_to_add.strip(),
-    manifest_content
-)
+replacement = """    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />"""
 
-with open(manifest_path, "w") as f:
-    f.write(new_manifest)
-print("Updated manifest")
+if target in content:
+    content = content.replace(target, replacement)
+    with open(filepath, "w") as f:
+        f.write(content)
+    print("Manifest updated")
+else:
+    print("Target not found")

@@ -5,8 +5,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -36,14 +34,18 @@ fun SettingsScreen(
     onNavigateToAiScreen: () -> Unit = {},
     onNavigateToTrustedPlaces: () -> Unit = {},
     onNavigateToPermissions: () -> Unit = {},
-    onNavigateToAbout: () -> Unit = {}
+    onNavigateToAbout: () -> Unit = {},
+    onNavigateToDeveloperDashboard: () -> Unit = {}
 ) {
     val themeMode by viewModel.themeMode.collectAsState()
+    val developerModeEnabled by viewModel.developerModeEnabled.collectAsState()
     val language by viewModel.language.collectAsState()
     val notificationsEnabled by viewModel.criticalAlarmsEnabled.collectAsState()
+    val sosSoundEnabled by viewModel.sosSoundEnabled.collectAsState()
     
     var showLogoutDialog by remember { mutableStateOf(false) }
     var showLanguageDialog by remember { mutableStateOf(false) }
+    var showDeveloperWarningDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -51,7 +53,7 @@ fun SettingsScreen(
                 title = { Text("Settings", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
@@ -125,7 +127,7 @@ fun SettingsScreen(
             item {
                 SettingsSection(title = "Device Settings") {
                     SettingsItem(
-                        icon = Icons.Default.DirectionsRun,
+                        icon = Icons.Filled.DirectionsRun,
                         title = "Fall Detection Calibration",
                         subtitle = "Configure sensitivity for MPU6050",
                         onClick = onNavigateToFallDetection
@@ -148,6 +150,13 @@ fun SettingsScreen(
             item {
                 SettingsSection(title = "Preferences") {
                     SettingsSwitchItem(
+                        icon = if (sosSoundEnabled) Icons.Filled.VolumeUp else Icons.Filled.VolumeOff,
+                        title = "SOS Trigger Sound",
+                        subtitle = if (sosSoundEnabled) "Sound siren automatically when SOS triggers" else "Silent SOS mode (alarm sound disabled)",
+                        checked = sosSoundEnabled,
+                        onCheckedChange = { enabled -> viewModel.setSosSoundEnabled(enabled) }
+                    )
+                    SettingsSwitchItem(
                         icon = Icons.Default.DarkMode,
                         title = "Dark Theme",
                         subtitle = "Toggle dark mode",
@@ -167,14 +176,29 @@ fun SettingsScreen(
                         subtitle = when(language) { "en" -> "English (US)"; "es" -> "Español"; "fr" -> "Français"; else -> language },
                         onClick = { showLanguageDialog = true }
                     )
+                    
+                    SettingsSwitchItem(
+                        icon = Icons.Default.Build,
+                        title = "Developer Mode",
+                        subtitle = "Enable advanced testing tools",
+                        checked = developerModeEnabled,
+                        onCheckedChange = { enabled -> 
+                            if (enabled) {
+                                showDeveloperWarningDialog = true
+                            } else {
+                                viewModel.setDeveloperModeEnabled(false)
+                            }
+                        }
+                    )
                     SettingsItem(
                         icon = Icons.Default.Info,
+
                         title = "About Smart SOS",
                         subtitle = "Version, Terms, and Privacy",
                         onClick = onNavigateToAbout
                     )
                     SettingsItem(
-                        icon = Icons.Default.Help,
+                        icon = Icons.Filled.Help,
                         title = "Help & FAQ",
                         subtitle = "Get support and read FAQs",
                         onClick = onNavigateToHelpFaq
@@ -190,7 +214,7 @@ fun SettingsScreen(
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer),
                     shape = RoundedCornerShape(16.dp)
                 ) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
+                    Icon(Icons.Filled.ArrowBack, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("Log Out", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 }
@@ -256,7 +280,30 @@ fun SettingsScreen(
             }
         )
     }
+    if (showDeveloperWarningDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeveloperWarningDialog = false },
+            title = { Text("Developer Mode") },
+            text = { Text("Warning: Developer mode is intended for testing purposes only and may affect app stability.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.setDeveloperModeEnabled(true)
+                        showDeveloperWarningDialog = false
+                    }
+                ) {
+                    Text("Enable")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeveloperWarningDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 }
+
 
 @Composable
 fun SettingsSection(title: String, content: @Composable ColumnScope.() -> Unit) {
@@ -296,7 +343,7 @@ fun SettingsItem(icon: ImageVector, title: String, subtitle: String, onClick: ()
             Text(title, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
             Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
         }
-        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Icon(Icons.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

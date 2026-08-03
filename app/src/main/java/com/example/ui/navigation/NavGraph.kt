@@ -25,15 +25,24 @@ import com.example.ui.screens.EmergencyHistoryScreen
 import com.example.ui.screens.AiDashboardScreen
 import com.example.ui.screens.DeviceMonitoringScreen
 import com.example.ui.screens.SettingsScreen
+import com.example.ui.screens.TrustedPlacesScreen
+import com.example.ui.screens.AddEditTrustedPlaceScreen
 import com.example.ui.screens.SecurityScreen
 import com.example.ui.screens.AnalyticsScreen
 import com.example.ui.screens.ReportsScreen
 import com.example.ui.screens.SplashScreen
 import com.example.ui.screens.OnboardingScreen
 import com.example.ui.screens.TrustedPlacesScreen
+import com.example.ui.screens.FallCountdownDialog
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.Modifier
 import com.example.ui.screens.SafeCheckInScreen
 import com.example.ui.screens.PermissionsScreen
 import com.example.ui.screens.AboutScreen
+import com.example.ui.screens.DeveloperDashboardScreen
 import com.example.ui.screens.AIScreen
 import com.example.ui.screens.FallDetectionScreen
 import com.example.ui.screens.VoiceSosScreen
@@ -74,6 +83,9 @@ fun NavGraph(
     val authState = viewModel.authState.value
     val startDestination = Screen.Splash.route
 
+    val fallState by viewModel.fallState.collectAsState()
+    val countdown by viewModel.fallCountdown.collectAsState()
+
     NavHost(
         navController = navController,
         startDestination = startDestination
@@ -82,7 +94,8 @@ fun NavGraph(
             SplashScreen(
                 viewModel = viewModel,
                 onNavigateToNext = {
-                    if (authState is AuthState.Success) {
+                    val currentAuth = viewModel.authState.value
+                    if (currentAuth is AuthState.Success) {
                         navController.navigate(Screen.Home.route) { popUpTo(0) { inclusive = true } }
                     } else {
                         navController.navigate(Screen.Onboarding.route) { popUpTo(0) { inclusive = true } }
@@ -108,13 +121,13 @@ fun NavGraph(
         composable(Screen.Register.route) {
             RegisterScreen(
                 viewModel = viewModel,
-                onNavigateToLogin = { navController.navigate(Screen.Login.route) }
+                onNavigateToLogin = { navController.popBackStack() }
             )
         }
         composable(Screen.ForgotPassword.route) {
             ForgotPasswordScreen(
                 viewModel = viewModel,
-                onNavigateToLogin = { navController.navigate(Screen.Login.route) }
+                onNavigateToLogin = { navController.popBackStack() }
             )
         }
         composable(Screen.Home.route) {
@@ -169,61 +182,80 @@ fun NavGraph(
         composable(Screen.Profile.route) {
             ProfileScreen(
                 viewModel = viewModel,
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = { navController.navigateUp() }
             )
         }
         composable(Screen.Contacts.route) {
             ContactsScreen(
                 viewModel = viewModel,
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = { navController.navigateUp() }
             )
         }
         composable(Screen.DevicePairing.route) {
             DevicePairingScreen(
                 viewModel = viewModel,
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = { navController.navigateUp() }
             )
         }
         composable(Screen.Map.route) {
             MapScreen(
                 viewModel = viewModel,
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = { navController.navigateUp() }
             )
         }
         composable(Screen.Emergency.route) {
             EmergencyScreen(
                 viewModel = viewModel,
-                onNavigateBack = { navController.popBackStack() },
+                onNavigateBack = { navController.navigateUp() },
                 )
         }
         composable(Screen.Notifications.route) {
             NotificationScreen(
                 viewModel = viewModel,
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = { navController.navigateUp() }
             )
         }
         composable(Screen.History.route) {
             EmergencyHistoryScreen(
                 viewModel = viewModel,
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = { navController.navigateUp() }
             )
         }
         composable(Screen.AiDashboard.route) {
             AIScreen(
                 viewModel = viewModel,
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = { navController.navigateUp() }
             )
         }
         composable(Screen.DeviceMonitoring.route) {
             DeviceMonitoringScreen(
                 viewModel = viewModel,
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = { navController.navigateUp() }
+            )
+        }
+        composable(Screen.TrustedPlaces.route) {
+            TrustedPlacesScreen(
+                viewModel = viewModel,
+                onNavigateBack = { navController.navigateUp() },
+                onNavigateToAddPlace = { navController.navigate(Screen.AddEditTrustedPlace.createRoute(null)) },
+                onNavigateToEditPlace = { placeId -> navController.navigate(Screen.AddEditTrustedPlace.createRoute(placeId)) }
+            )
+        }
+        composable(
+            route = Screen.AddEditTrustedPlace.route,
+            arguments = listOf(androidx.navigation.navArgument("placeId") { nullable = true; type = androidx.navigation.NavType.StringType })
+        ) { backStackEntry ->
+            val placeId = backStackEntry.arguments?.getString("placeId")?.takeIf { it.isNotBlank() }
+            AddEditTrustedPlaceScreen(
+                viewModel = viewModel,
+                placeId = placeId,
+                onNavigateBack = { navController.navigateUp() }
             )
         }
         composable(Screen.Settings.route) {
             SettingsScreen(
                 viewModel = viewModel,
-                onNavigateBack = { navController.popBackStack() },
+                onNavigateBack = { navController.navigateUp() },
                 onNavigateToSecurity = { navController.navigate(Screen.Security.route) },
                 onNavigateToFallDetection = { navController.navigate(Screen.FallDetection.route) },
                 onNavigateToAnalytics = { navController.navigate(Screen.Analytics.route) },
@@ -235,86 +267,96 @@ fun NavGraph(
                 onNavigateToAiScreen = { navController.navigate(Screen.AiScreen.route) },
                 onNavigateToTrustedPlaces = { navController.navigate(Screen.TrustedPlaces.route) },
                 onNavigateToPermissions = { navController.navigate(Screen.Permissions.route) },
-                onNavigateToAbout = { navController.navigate(Screen.About.route) }
+                onNavigateToAbout = { navController.navigate(Screen.About.route) },
+                onNavigateToDeveloperDashboard = { navController.navigate(Screen.DeveloperDashboard.route) }
             )
         }
         composable(Screen.Security.route) {
             SecurityScreen(
                 viewModel = viewModel,
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = { navController.navigateUp() }
             )
         }
         composable(Screen.Analytics.route) {
             AnalyticsScreen(
                 viewModel = viewModel,
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = { navController.navigateUp() }
             )
         }
         composable(Screen.Reports.route) {
             ReportsScreen(
                 viewModel = viewModel,
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = { navController.navigateUp() }
             )
         }
         composable(Screen.AiScreen.route) {
             AIScreen(
                 viewModel = viewModel,
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = { navController.navigateUp() }
             )
         }
         composable(Screen.FallDetection.route) {
             FallDetectionScreen(
                 viewModel = viewModel,
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = { navController.navigateUp() }
             )
         }
         composable(Screen.VoiceSos.route) {
             VoiceSosScreen(
                 viewModel = viewModel,
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = { navController.navigateUp() }
             )
         }
         composable(Screen.SafetyTimer.route) {
             SafetyTimerScreen(
                 viewModel = viewModel,
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = { navController.navigateUp() }
             )
         }
         composable(Screen.QRCode.route) {
             com.example.ui.screens.QRCodeScreen(
                 viewModel = viewModel,
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = { navController.navigateUp() }
             )
         }
         composable(Screen.HelpFaq.route) {
             com.example.ui.screens.HelpFaqScreen(
                 viewModel = viewModel,
-                onNavigateBack = { navController.popBackStack() }
-            )
-        }
-        composable(Screen.TrustedPlaces.route) {
-            TrustedPlacesScreen(
-                viewModel = viewModel,
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = { navController.navigateUp() }
             )
         }
         composable(Screen.SafeCheckIn.route) {
             SafeCheckInScreen(
                 viewModel = viewModel,
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = { navController.navigateUp() }
             )
         }
         composable(Screen.Permissions.route) {
             PermissionsScreen(
                 viewModel = viewModel,
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = { navController.navigateUp() }
             )
         }
         composable(Screen.About.route) {
             AboutScreen(
                 viewModel = viewModel,
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = { navController.navigateUp() }
+            )
+
+        }
+        composable(Screen.DeveloperDashboard.route) {
+            DeveloperDashboardScreen(
+                viewModel = viewModel,
+                onNavigateBack = { navController.navigateUp() }
             )
         }
     }
-}
+
+    if (fallState == "FALL_COUNTDOWN") {
+        FallCountdownDialog(
+            secondsLeft = countdown,
+            onCancel = { viewModel.fallDetectionService.cancelFallCountdown() }
+        )
+    }
+    }
+

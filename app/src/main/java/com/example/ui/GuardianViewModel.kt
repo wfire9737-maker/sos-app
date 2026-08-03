@@ -1,10 +1,15 @@
 package com.example.ui
+import com.example.model.PermissionsState
+
+import android.content.Context
+import android.util.Log
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.model.Alert
 import com.example.model.Device
+import com.example.model.DeveloperLog
 import com.example.model.EmergencyContact
 import com.example.model.EmergencySession
 import com.example.model.User
@@ -39,6 +44,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import com.example.service.DeviceService
 import com.example.model.EmergencyModel
+import com.example.model.SosWorkflowState
 import com.example.service.EmergencyService
 import com.example.service.EmergencyProvider
 import com.example.service.SafetyTimerService
@@ -83,52 +89,38 @@ class GuardianViewModel @Inject constructor(
     val emergencyProvider: EmergencyProvider,
     val safetyTimerService: SafetyTimerService,
     val analyticsService: AnalyticsService,
-    val securityService: com.example.service.SecurityService
+    val securityService: com.example.service.SecurityService,
+    val trustedPlacesService: com.example.service.TrustedPlacesService,
+    val settingsDataStore: com.example.data.SettingsDataStore
 ) : AndroidViewModel(application) {
 
-    init {
-        // Register callbacks for Fall, Voice SOS, and Safety Timer automation
-        safetyTimerService.onTimerExpiredCallback = {
-            triggerTimerSOS()
-        }
-        fallDetectionService.onSosTriggeredCallback = {
-            triggerFallDetectedSOS()
-        }
-        voiceSosService.onVoiceSosTriggered = { matchedPhrase, confidence ->
-            triggerVoiceSOS(matchedPhrase, confidence)
-        }
+    
+    val developerModeEnabled = settingsDataStore.developerModeFlow.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = false
+    )
 
+    fun setDeveloperModeEnabled(enabled: Boolean) {
         viewModelScope.launch {
-            emergencyProvider.activeEmergencyState.collect { model ->
-                if (model != null) {
-                    val alert = _emergencySession.value.activeAlert ?: Alert(
-                        id = model.emergencyId,
-                        userId = model.userId,
-                        userName = model.userName,
-                        userPhone = model.userPhone,
-                        latitude = model.latitude,
-                        longitude = model.longitude,
-                        status = "ACTIVE",
-                        triggerType = model.triggerType,
-                        timestamp = model.startTimeMs
-                    )
-                    _emergencySession.value = _emergencySession.value.copy(
-                        activeAlert = alert.copy(
-                            latitude = model.latitude,
-                            longitude = model.longitude,
-                            status = model.status
-                        ),
-                        deviceId = model.deviceId,
-                        startTimeMs = model.startTimeMs,
-                        responderStatus = model.responderStatus,
-                        emergencyLevel = if (model.triggerType == "FALL_DETECTED") "CRITICAL (LEVEL 3)" else "HIGH ALERT (LEVEL 2)",
-                        aiConfidence = model.aiConfidenceScore,
-                        isMarkedSafe = model.status == "MARKED_SAFE" || model.status == "RESOLVED" || model.status == "CANCELLED"
-                    )
-                }
-            }
+            settingsDataStore.setDeveloperMode(enabled)
         }
     }
+
+    private val _sosSoundEnabled = MutableStateFlow(
+        try {
+            application.getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE)
+                .getBoolean("sos_sound_enabled", true)
+        } catch (e: Exception) {
+            true
+        }
+    )
+    val sosSoundEnabled = _sosSoundEnabled.asStateFlow()
+
+    private val _isSirenPlaying = MutableStateFlow(false)
+    val isSirenPlaying = _isSirenPlaying.asStateFlow()
+    
+    val countdown: kotlinx.coroutines.flow.StateFlow<Int?> = emergencyService.countdown
 
     // Bridge Notification states to UI
     val notifications: StateFlow<List<NotificationItem>> = notificationService.notifications
@@ -155,6 +147,13 @@ class GuardianViewModel @Inject constructor(
     val micDecibels: StateFlow<Float> = voiceSosService.micDecibels
     val voiceConfidenceThreshold: StateFlow<Int> = voiceSosService.confidenceThreshold
     val voiceActivationLogs: StateFlow<List<VoiceActivationLog>> = voiceSosService.activationLogs
+    val isSpeechRecognizerActive: StateFlow<Boolean> = voiceSosService.isSpeechRecognizerActive
+    val liveSpokenText: StateFlow<String> = voiceSosService.liveSpokenText
+    val speechStatusMessage: StateFlow<String> = voiceSosService.speechStatusMessage
+    val lastRecognizedCommand: StateFlow<com.example.service.VoiceCommand?> = voiceSosService.lastRecognizedCommand
+
+    private val _voiceCommandConfirmation = MutableStateFlow<String?>(null)
+    val voiceCommandConfirmation: StateFlow<String?> = _voiceCommandConfirmation.asStateFlow()
     val fcmToken: StateFlow<String> = notificationService.fcmToken
     val emergencyHistory: StateFlow<List<HistoryModel>> = historyService.history
     val aiLogs: StateFlow<List<AiAnalysisResult>> = aiAnalysisService.analysisLogs
@@ -166,10 +165,13 @@ class GuardianViewModel @Inject constructor(
     val diagnosticsLog: StateFlow<List<String>> = deviceService.diagnosticsLog
     val isDiagnosingDevice: StateFlow<Boolean> = deviceService.isDiagnosing
     val isNetworkAvailable: StateFlow<Boolean> = deviceService.isNetworkAvailable
+    val trustedPlaces: StateFlow<List<com.example.model.TrustedPlace>> = trustedPlacesService.trustedPlaces
     val esp32CommLogs: StateFlow<List<String>> = deviceService.esp32CommLogs
 
     // Bridge AuthState flow from service to UI
     val authState: StateFlow<AuthState> = authService.authState
+    private val _sosWorkflowState = MutableStateFlow(com.example.model.SosWorkflowState.IDLE)
+    val sosWorkflowState: StateFlow<com.example.model.SosWorkflowState> = _sosWorkflowState.asStateFlow()
 
     // Emergency SOS State
     private val _emergencySession = MutableStateFlow(EmergencySession())
@@ -194,6 +196,37 @@ class GuardianViewModel @Inject constructor(
     private val _language = MutableStateFlow("en")
     val language: StateFlow<String> = _language.asStateFlow()
     fun setLanguage(lang: String) { _language.value = lang }
+
+    fun setSosSoundEnabled(enabled: Boolean) {
+        _sosSoundEnabled.value = enabled
+        try {
+            getApplication<Application>()
+                .getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean("sos_sound_enabled", enabled)
+                .apply()
+        } catch (e: Exception) {
+            Log.e("GuardianViewModel", "Failed to save sos_sound_enabled: ${e.message}")
+        }
+    }
+
+    fun toggleSirenAlarm() {
+        if (_isSirenPlaying.value) {
+            alarmVibratorService.stopAlarm()
+            _isSirenPlaying.value = false
+            _emergencySession.value = _emergencySession.value.copy(isMuted = true)
+            viewModelScope.launch {
+                _uiEvents.emit(UiEvent.ShowToast("Siren alarm silenced."))
+            }
+        } else {
+            alarmVibratorService.startAlarm()
+            _isSirenPlaying.value = true
+            _emergencySession.value = _emergencySession.value.copy(isMuted = false)
+            viewModelScope.launch {
+                _uiEvents.emit(UiEvent.ShowToast("Siren alarm sounding!"))
+            }
+        }
+    }
 
     private val _criticalAlarmsEnabled = MutableStateFlow(true)
     val criticalAlarmsEnabled = _criticalAlarmsEnabled.asStateFlow()
@@ -283,6 +316,35 @@ class GuardianViewModel @Inject constructor(
     // One-shot side-effect events (e.g. Navigation, Toast triggers)
     private val _uiEvents = MutableSharedFlow<UiEvent>()
     val uiEvents: SharedFlow<UiEvent> = _uiEvents.asSharedFlow()
+    
+    private val _permissionsState = MutableStateFlow(PermissionsState())
+    val permissionsState: StateFlow<PermissionsState> = _permissionsState.asStateFlow()
+    
+    fun refreshPermissions(context: android.content.Context) {
+        val location = androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_FINE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        val background = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_BACKGROUND_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        } else true
+        val calls = androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.CALL_PHONE) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        val sms = androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.SEND_SMS) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        val contacts = androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.READ_CONTACTS) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        val notifs = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.POST_NOTIFICATIONS) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        } else true
+        val audio = androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        val overlay = android.provider.Settings.canDrawOverlays(context)
+        
+        _permissionsState.value = PermissionsState(
+            locationGranted = location,
+            backgroundLocationGranted = background,
+            callsGranted = calls,
+            smsGranted = sms,
+            contactsGranted = contacts,
+            notificationsGranted = notifs,
+            audioGranted = audio,
+            overlayGranted = overlay
+        )
+    }
 
     val isDemoMode: Boolean
         get() = authService.isDemoMode
@@ -368,13 +430,62 @@ class GuardianViewModel @Inject constructor(
 
     // --- SOS TRIGGERS ---
 
-    private suspend fun initiateEmergencySequence(triggerSource: String, deviceId: String): com.example.model.EmergencyModel {
+    fun checkSystemReadiness(): Boolean {
+        val context = getApplication<Application>()
+        var isReady = true
+        val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as android.location.LocationManager
+        if (!locationManager.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER)) {
+            viewModelScope.launch { _uiEvents.emit(UiEvent.ShowToast("WARNING: GPS is disabled! Location cannot be tracked.")) }
+            isReady = false
+        }
+        val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+        val activeNetwork = connectivityManager.activeNetwork
+        val networkCapabilities = connectivityManager.getNetworkCapabilities(activeNetwork)
+        val isConnected = networkCapabilities?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+        if (!isConnected) {
+            viewModelScope.launch { _uiEvents.emit(UiEvent.ShowToast("WARNING: No Internet! Remote alerts may fail.")) }
+            isReady = false
+        }
+        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+        if (!notificationManager.areNotificationsEnabled()) {
+            viewModelScope.launch { _uiEvents.emit(UiEvent.ShowToast("WARNING: Notifications are disabled!")) }
+            isReady = false
+        }
+        return isReady
+    }
+
+    private fun getMatchedTrustedPlace(lat: Double, lng: Double): com.example.model.TrustedPlace? {
+        val results = FloatArray(1)
+        for (place in trustedPlacesService.trustedPlaces.value) {
+            android.location.Location.distanceBetween(lat, lng, place.latitude, place.longitude, results)
+            if (results[0] <= place.radius) return place
+        }
+        return null
+    }
+
+    private suspend fun initiateEmergencySequence(
+        triggerSource: String, 
+        deviceId: String, 
+        lat: Double? = null, 
+        lng: Double? = null,
+        accuracy: Float? = null,
+        altitude: Double? = null,
+        speed: Float? = null,
+        bearing: Float? = null
+    ): com.example.model.EmergencyModel {
+        checkSystemReadiness()
         val user = (authState.value as? AuthState.Success)?.user
         val userId = user?.uid ?: "user-101"
         val userName = user?.name ?: "Marcus Vance"
         val userPhone = user?.phone ?: "+1-555-0143"
 
-        alarmVibratorService.startAlarm()
+        val matchedPlace = getMatchedTrustedPlace(lat ?: locationService.currentLocation.value.latitude, lng ?: locationService.currentLocation.value.longitude)
+        if (_sosSoundEnabled.value && matchedPlace?.reduceNotificationSound != true) {
+            alarmVibratorService.startAlarm()
+            _isSirenPlaying.value = true
+        } else {
+            _isSirenPlaying.value = false
+        }
         alarmVibratorService.startVibration()
 
         return emergencyProvider.initiateEmergency(
@@ -382,7 +493,13 @@ class GuardianViewModel @Inject constructor(
             userName = userName,
             userPhone = userPhone,
             triggerSource = triggerSource,
-            deviceId = deviceId
+            deviceId = deviceId,
+            lat = lat,
+            lng = lng,
+            accuracy = accuracy,
+            altitude = altitude,
+            speed = speed,
+            bearing = bearing
         )
     }
 
@@ -399,11 +516,24 @@ class GuardianViewModel @Inject constructor(
 
     fun triggerManualSOS(lat: Double = 37.7749, lng: Double = -122.4194) {
         viewModelScope.launch {
+            if (_sosWorkflowState.value != com.example.model.SosWorkflowState.IDLE && _sosWorkflowState.value != com.example.model.SosWorkflowState.COMPLETED) {
+                return@launch
+            }
+            if (emergencyService.isEmergencyActive()) {
+                 emergencyService.activeEmergency.value?.let { model ->
+                     emergencyService.notifyEmergencyContacts(model, isUpdate = true)
+                 }
+                 _uiEvents.emit(UiEvent.ShowToast("ALERT TRANSMITTED: Contacts Notified Again!"))
+                 return@launch
+            }
+            
+            _sosWorkflowState.value = com.example.model.SosWorkflowState.IDLE
+            
             initiateEmergencySequence(
                 triggerSource = "MANUAL",
                 deviceId = "MOBILE-APP-SOS"
             )
-            _uiEvents.emit(UiEvent.ShowToast("ALERT TRANSMITTED: Manual SOS Triggered!"))
+            
             _uiEvents.emit(UiEvent.NavigateToEmergency)
         }
     }
@@ -463,6 +593,69 @@ class GuardianViewModel @Inject constructor(
             _uiEvents.emit(UiEvent.ShowToast("🚨 VOICE SOS: AUTOMATIC SOS DISPATCHED!"))
             _uiEvents.emit(UiEvent.NavigateToEmergency)
         }
+    }
+
+    fun handleVoiceCommand(command: com.example.service.VoiceCommand, confidence: Int) {
+        viewModelScope.launch {
+            when (command) {
+                is com.example.service.VoiceCommand.Sos -> {
+                    val model = initiateEmergencySequence(
+                        triggerSource = "VOICE_COMMAND_SOS",
+                        deviceId = "MOBILE-VOICE-RECOGNIZE"
+                    )
+                    val uid = (authState.value as? AuthState.Success)?.user?.uid ?: "anonymous"
+                    locationService.startLocationTracking(uid)
+                    locationService.setSimulationMode(false)
+
+                    val confirmationMsg = "🚨 Voice SOS Triggered (\"${command.matchedPhrase}\")! Emergency contacts notified and live tracking active."
+                    _voiceCommandConfirmation.value = confirmationMsg
+                    _uiEvents.emit(UiEvent.ShowToast(confirmationMsg))
+                    _uiEvents.emit(UiEvent.NavigateToEmergency)
+                }
+                is com.example.service.VoiceCommand.CancelSos -> {
+                    alarmVibratorService.stopAlarm()
+                    alarmVibratorService.stopVibration()
+                    _isSirenPlaying.value = false
+
+                    if (emergencyService.isEmergencyActive()) {
+                        emergencyService.markSafeAndClose()
+                    }
+
+                    val currentAlert = _emergencySession.value.activeAlert
+                    if (currentAlert != null) {
+                        databaseService.resolveSOS(currentAlert.id, "Voice Command", "Cancelled by voice command: ${command.matchedPhrase}")
+                    }
+
+                    val confirmationMsg = "✅ SOS Emergency cancelled via voice command: \"${command.matchedPhrase}\"."
+                    _voiceCommandConfirmation.value = confirmationMsg
+                    _uiEvents.emit(UiEvent.ShowToast(confirmationMsg))
+                }
+                is com.example.service.VoiceCommand.TrackLocation -> {
+                    val uid = (authState.value as? AuthState.Success)?.user?.uid ?: "anonymous"
+                    locationService.startLocationTracking(uid)
+                    locationService.setSimulationMode(false)
+
+                    val confirmationMsg = "📍 Live location tracking started via voice command: \"${command.matchedPhrase}\"."
+                    _voiceCommandConfirmation.value = confirmationMsg
+                    _uiEvents.emit(UiEvent.ShowToast(confirmationMsg))
+                }
+                is com.example.service.VoiceCommand.Unknown -> {
+                    _voiceCommandConfirmation.value = "Recognized: \"${command.spokenText}\" (No actionable command matched)"
+                }
+            }
+        }
+    }
+
+    fun startVoiceRecognition(context: Context) {
+        voiceSosService.startSpeechRecognition(context)
+    }
+
+    fun stopVoiceRecognition() {
+        voiceSosService.stopSpeechRecognition()
+    }
+
+    fun clearVoiceCommandConfirmation() {
+        _voiceCommandConfirmation.value = null
     }
 
     fun triggerESP32SimulatedSOS(triggerType: String) {
@@ -574,6 +767,28 @@ class GuardianViewModel @Inject constructor(
         locationService.deleteFavoritePlace(id)
     }
 
+    fun searchCoordinates(query: String): Pair<Double, Double>? = locationService.searchCoordinatesForQuery(query)
+
+    suspend fun getCurrentLocationOnce(): android.location.Location? = locationService.getCurrentLocationOnce()
+
+    fun addTrustedPlace(place: com.example.model.TrustedPlace) {
+        viewModelScope.launch {
+            trustedPlacesService.addTrustedPlace(place)
+        }
+    }
+
+    fun updateTrustedPlace(place: com.example.model.TrustedPlace) {
+        viewModelScope.launch {
+            trustedPlacesService.updateTrustedPlace(place)
+        }
+    }
+
+    fun deleteTrustedPlace(placeId: String) {
+        viewModelScope.launch {
+            trustedPlacesService.deleteTrustedPlace(placeId)
+        }
+    }
+
     fun updateMapOptions(mode: String, trafficEnabled: Boolean) {
         locationService.updateMapOptions(mode, trafficEnabled)
     }
@@ -639,6 +854,7 @@ class GuardianViewModel @Inject constructor(
 
     fun muteEmergencyAlarm() {
         alarmVibratorService.mute()
+        _isSirenPlaying.value = false
         _emergencySession.value = _emergencySession.value.copy(isMuted = true)
         viewModelScope.launch {
             _uiEvents.emit(UiEvent.ShowToast("Alarm audio muted."))
@@ -651,6 +867,7 @@ class GuardianViewModel @Inject constructor(
             if (current.activeAlert != null) {
                 alarmVibratorService.stopAlarm()
                 alarmVibratorService.stopVibration()
+                _isSirenPlaying.value = false
                 aiAnalysisService.stopSimulation()
                 
                 // End tracking and sync to cloud
@@ -872,11 +1089,170 @@ class GuardianViewModel @Inject constructor(
         deviceService.triggerManualHeartbeatCheck(deviceId)
     }
 
+
+    // --- MODULE 5: GPS TESTING ---
+    val isSimulationMode = locationService.isSimulationMode
+    val isGpsDisabled = locationService.isGpsDisabled
+    val isWeakGps = locationService.isWeakGps
+
+    fun setSimulationMode(enabled: Boolean) {
+        locationService.setSimulationMode(enabled)
+    }
+
+    fun setGpsDisabled(disabled: Boolean) {
+        locationService.setGpsDisabled(disabled)
+    }
+
+    fun setWeakGps(weak: Boolean) {
+        locationService.setWeakGps(weak)
+    }
+
+
+    // --- MODULE 6: NETWORK & FIREBASE TESTING ---
+    val isOfflineMode = databaseService.isOfflineMode
+    val isSlowNetwork = databaseService.isSlowNetwork
+
+    fun setOfflineMode(enabled: Boolean) {
+        databaseService.isOfflineMode.value = enabled
+    }
+
+    fun setSlowNetwork(enabled: Boolean) {
+        databaseService.isSlowNetwork.value = enabled
+    }
+
+    fun uploadTestSOS() {
+        viewModelScope.launch {
+            try {
+                databaseService.uploadTestSOS()
+                _uiEvents.emit(UiEvent.ShowToast("Test SOS Uploaded"))
+            } catch (e: Exception) {
+                _uiEvents.emit(UiEvent.ShowToast("Upload Failed: ${e.message}"))
+            }
+        }
+    }
+
+    fun downloadTestData() {
+        viewModelScope.launch {
+            try {
+                databaseService.downloadTestData()
+                _uiEvents.emit(UiEvent.ShowToast("Test Data Downloaded"))
+            } catch (e: Exception) {
+                _uiEvents.emit(UiEvent.ShowToast("Download Failed: ${e.message}"))
+            }
+        }
+    }
+
+
+    // --- MODULE 8: DEVELOPER LOGS ---
+    private val _developerLogs = MutableStateFlow<List<DeveloperLog>>(listOf(
+        DeveloperLog(event = "App Started", status = "SUCCESS"),
+        DeveloperLog(event = "Bluetooth Connected", status = "INFO"),
+        DeveloperLog(event = "GPS Acquired", status = "SUCCESS")
+    ))
+    val developerLogs: StateFlow<List<DeveloperLog>> = _developerLogs.asStateFlow()
+
+    fun addDeveloperLog(event: String, status: String) {
+        val currentLogs = _developerLogs.value.toMutableList()
+        currentLogs.add(0, DeveloperLog(event = event, status = status))
+        _developerLogs.value = currentLogs
+    }
+
+    fun clearDeveloperLogs() {
+        _developerLogs.value = emptyList()
+    }
+
+    fun deleteTestRecords() {
+        viewModelScope.launch {
+            try {
+                databaseService.deleteTestRecords()
+                _uiEvents.emit(UiEvent.ShowToast("Test Records Deleted"))
+            } catch (e: Exception) {
+                _uiEvents.emit(UiEvent.ShowToast("Delete Failed: ${e.message}"))
+            }
+        }
+    }
+
+    fun setCustomLocation(lat: Double, lng: Double) {
+        locationService.setCustomLocation(lat, lng)
+    }
+
+    fun disconnectSimulatedDevice(deviceId: String) {
+        viewModelScope.launch {
+            deviceService.handleDeviceDisconnect(deviceId)
+        }
+    }
+    
+    fun connectSimulatedDevice(deviceId: String) {
+        viewModelScope.launch {
+            val device = databaseService.devices.value.find { it.deviceId == deviceId }
+            if (device != null) {
+                databaseService.updateDevice(
+                    device.copy(
+                        status = "CONNECTED",
+                        connectionStatus = "ONLINE",
+                        lastSync = System.currentTimeMillis()
+                    )
+                )
+                deviceService.addCommLog("✅ Simulated DEVICE_CONNECTED message processed.")
+            }
+        }
+    }
+
+
     override fun onCleared() {
         super.onCleared()
         alarmVibratorService.cleanUp()
         fallDetectionService.cleanup()
         voiceSosService.cleanup()
         aiService.stopSimulation()
+    }
+
+
+    init {
+        // Register callbacks for Fall, Voice SOS, and Safety Timer automation
+        viewModelScope.launch { authService.authState.collect { state -> if (state is AuthState.Success) { trustedPlacesService.initialize(state.user.uid) } } }
+        safetyTimerService.onTimerExpiredCallback = {
+            triggerTimerSOS()
+        }
+        fallDetectionService.onSosTriggeredCallback = {
+            triggerFallDetectedSOS()
+        }
+        voiceSosService.onVoiceSosTriggered = { matchedPhrase, confidence ->
+            triggerVoiceSOS(matchedPhrase, confidence)
+        }
+        voiceSosService.onVoiceCommandRecognized = { command, confidence ->
+            handleVoiceCommand(command, confidence)
+        }
+
+        viewModelScope.launch {
+            emergencyProvider.activeEmergencyState.collect { model ->
+                if (model != null) {
+                    val alert = _emergencySession.value.activeAlert ?: Alert(
+                        id = model.emergencyId,
+                        userId = model.userId,
+                        userName = model.userName,
+                        userPhone = model.userPhone,
+                        latitude = model.latitude,
+                        longitude = model.longitude,
+                        status = "ACTIVE",
+                        triggerType = model.triggerType,
+                        timestamp = model.startTimeMs
+                    )
+                    _emergencySession.value = _emergencySession.value.copy(
+                        activeAlert = alert.copy(
+                            latitude = model.latitude,
+                            longitude = model.longitude,
+                            status = model.status
+                        ),
+                        deviceId = model.deviceId,
+                        startTimeMs = model.startTimeMs,
+                        responderStatus = model.responderStatus,
+                        emergencyLevel = if (model.triggerType == "FALL_DETECTED") "CRITICAL (LEVEL 3)" else "HIGH ALERT (LEVEL 2)",
+                        aiConfidence = model.aiConfidenceScore,
+                        isMarkedSafe = model.status == "MARKED_SAFE" || model.status == "RESOLVED" || model.status == "CANCELLED"
+                    )
+                }
+            }
+        }
     }
 }

@@ -2,6 +2,7 @@ package com.example.service
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.location.Geocoder
 import android.location.Location
 import android.os.Looper
 import android.util.Log
@@ -16,48 +17,52 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import kotlin.coroutines.resume
+import kotlinx.coroutines.suspendCancellableCoroutine
 import org.json.JSONObject
 import java.io.File
 import java.util.UUID
-import kotlin.math.*
+import java.util.Locale
+
+import com.example.data.local.dao.LocationDao
+import com.example.data.local.entity.LocationEntity
 
 class LocationService(
     private val context: Context,
-    private val firestore: FirebaseFirestore?
+    private val firestore: FirebaseFirestore?,
+    private val locationDao: LocationDao? = null
 ) {
     private val scope = CoroutineScope(Dispatchers.IO)
     private val fusedLocationClient: FusedLocationProviderClient by lazy {
         LocationServices.getFusedLocationProviderClient(context)
     }
-
     private val cacheFile = File(context.cacheDir, "guardian_location_cache.json")
 
-    // In-memory state of current location
     private val _currentLocation = MutableStateFlow(UserLocation())
     val currentLocation: StateFlow<UserLocation> = _currentLocation.asStateFlow()
 
-    // Recorded polyline route points
     private val _routePoints = MutableStateFlow<List<Pair<Double, Double>>>(emptyList())
     val routePoints: StateFlow<List<Pair<Double, Double>>> = _routePoints.asStateFlow()
 
-    // Simulation & tracking statuses
     private val _isTracking = MutableStateFlow(false)
     val isTracking: StateFlow<Boolean> = _isTracking.asStateFlow()
 
-    private val _isSimulationMode = MutableStateFlow(true) // Default to simulation for rich preview
+
+    private val _isSimulationMode = MutableStateFlow(false)
     val isSimulationMode: StateFlow<Boolean> = _isSimulationMode.asStateFlow()
 
-    private var locationCallback: LocationCallback? = null
-    private var simulationJob: kotlinx.coroutines.Job? = null
+    private val _isGpsDisabled = MutableStateFlow(false)
+    val isGpsDisabled: StateFlow<Boolean> = _isGpsDisabled.asStateFlow()
 
-    // Base coordinates around a lively city center (e.g. San Francisco Golden Gate/Market St or Central Park NY)
-    private var simLat = 37.7749
-    private var simLng = -122.4194
+    private val _isWeakGps = MutableStateFlow(false)
+    val isWeakGps: StateFlow<Boolean> = _isWeakGps.asStateFlow()
+
+
+    private var locationCallback: LocationCallback? = null
     private var totalDistance = 0.0
 
     init {
         loadCachedLocation()
-        // Generate standard default favorite places if none exist
         if (_currentLocation.value.favorites.isEmpty()) {
             val defaultFavorites = listOf(
                 FavoritePlace("fav-home", "My Safehouse Home", 37.7739, -122.4312, "HOME"),
@@ -75,8 +80,6 @@ class LocationService(
                 val json = JSONObject(jsonStr)
                 val userLoc = UserLocation.fromJsonObject(json)
                 _currentLocation.value = userLoc
-                simLat = userLoc.latitude
-                simLng = userLoc.longitude
                 totalDistance = userLoc.distanceTraveled
             }
         } catch (e: Exception) {
@@ -100,9 +103,25 @@ class LocationService(
     }
 
     private fun syncLocationToCloud(userLoc: UserLocation) {
-        val fs = firestore ?: return
         val uid = userLoc.userId.ifBlank { "anonymous" }
         scope.launch {
+            try {
+                locationDao?.insertLocation(
+                    LocationEntity(
+                        userId = uid,
+                        latitude = userLoc.latitude,
+                        longitude = userLoc.longitude,
+                        speed = userLoc.speed,
+                        accuracy = userLoc.accuracy,
+                        timestamp = userLoc.timestamp,
+                        address = userLoc.address
+                    )
+                )
+            } catch (e: Exception) {
+                Log.e("LocationService", "Local DB location sync failed: ${e.message}")
+            }
+            
+            val fs = firestore ?: return@launch
             try {
                 fs.collection("locations").document(uid).set(userLoc.toMap()).await()
             } catch (e: Exception) {
@@ -115,142 +134,119 @@ class LocationService(
         updateLocationState { it.copy(userId = userId) }
     }
 
+
     fun setSimulationMode(enabled: Boolean) {
         _isSimulationMode.value = enabled
-        if (_isTracking.value) {
-            // Restart tracking with new mode
-            stopLocationTracking()
-            startLocationTracking(_currentLocation.value.userId)
+        if (!enabled) {
+            _isGpsDisabled.value = false
+            _isWeakGps.value = false
         }
     }
+
+    fun setGpsDisabled(disabled: Boolean) {
+        _isGpsDisabled.value = disabled
+    }
+
+    fun setWeakGps(weak: Boolean) {
+        _isWeakGps.value = weak
+    }
+
+    fun setCustomLocation(lat: Double, lng: Double, accuracy: Float = 5.0f) {
+        if (_isSimulationMode.value) {
+            val userLoc = _currentLocation.value
+            val time = System.currentTimeMillis()
+            updateLocationState { 
+                it.copy(
+                    latitude = lat,
+                    longitude = lng,
+                    accuracy = accuracy,
+                    timestamp = time
+                )
+            }
+        }
+    }
+
 
     @SuppressLint("MissingPermission")
     fun startLocationTracking(userId: String) {
         if (_isTracking.value) return
         _isTracking.value = true
         setUserId(userId)
-
-        if (_isSimulationMode.value) {
-            startSimulation()
-        } else {
-            startRealGpsTracking()
-        }
-    }
-
-    fun stopLocationTracking() {
-        _isTracking.value = false
-        stopSimulation()
-        stopRealGpsTracking()
-    }
-
-    private fun startSimulation() {
-        stopSimulation()
-        // Initialize simulation coordinates with current state
-        simLat = _currentLocation.value.latitude
-        simLng = _currentLocation.value.longitude
-
-        // Keep current points or start clean
-        if (_routePoints.value.isEmpty()) {
-            _routePoints.value = listOf(Pair(simLat, simLng))
-        }
-
-        simulationJob = scope.launch {
-            while (_isTracking.value) {
-                kotlinx.coroutines.delay(3000) // Update every 3 seconds
-
-                // Simulate realistic vector movement
-                val speedKmh = 10.0 + (0..15).random() // 10 to 25 km/h
-                val bearingChange = (-20..20).random().toFloat()
-                val newBearing = (_currentLocation.value.bearing + bearingChange + 360f) % 360f
-
-                // Convert speed (km/h) & 3 seconds interval to delta distance
-                val distanceIn3s = (speedKmh / 3600.0) * 3.0 // km
-                totalDistance += distanceIn3s
-
-                // Simple coordinate projection based on bearing
-                val bearingRad = Math.toRadians(newBearing.toDouble())
-                // 1 degree latitude ~ 111km, 1 degree longitude ~ 111km * cos(lat)
-                val latDelta = (distanceIn3s * cos(bearingRad)) / 111.0
-                val lngDelta = (distanceIn3s * sin(bearingRad)) / (111.0 * cos(Math.toRadians(simLat)))
-
-                simLat += latDelta
-                simLng += lngDelta
-
-                val simulatedAltitude = 45.0 + (0..50).random() / 10.0 // 45 to 50 meters
-                val simulatedAccuracy = 3.0f + (0..40).random() / 10.0f // 3m to 7m accuracy
-
-                val updatedPoints = _routePoints.value.toMutableList().apply {
-                    add(Pair(simLat, simLng))
-                    if (size > 150) removeAt(0) // Cap historical polyline route points
-                }
-                _routePoints.value = updatedPoints
-
-                updateLocationState {
-                    it.copy(
-                        latitude = simLat,
-                        longitude = simLng,
-                        speed = speedKmh,
-                        bearing = newBearing,
-                        altitude = simulatedAltitude,
-                        accuracy = simulatedAccuracy,
-                        timestamp = System.currentTimeMillis(),
-                        distanceTraveled = totalDistance
-                    )
-                }
-            }
-        }
-    }
-
-    private fun stopSimulation() {
-        simulationJob?.cancel()
-        simulationJob = null
-    }
-
-    @SuppressLint("MissingPermission")
-    private fun startRealGpsTracking() {
+        
         val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 3000)
             .setWaitForAccurateLocation(false)
             .setMinUpdateIntervalMillis(2000)
             .build()
-
+            
         locationCallback = object : LocationCallback() {
             override fun onLocationResult(locationResult: LocationResult) {
-                val loc: Location = locationResult.lastLocation ?: return
+                if (_isGpsDisabled.value) return
+                var loc: Location = locationResult.lastLocation ?: return
                 
-                // Calculate distance traveled between real coordinates
+                if (_isSimulationMode.value) return // Don't use real GPS if in generic sim mode (custom location)
+
+                var lat = loc.latitude
+                var lng = loc.longitude
+                var acc = loc.accuracy
+
+                if (_isWeakGps.value) {
+                    // Inject jitter and high inaccuracy
+                    lat += (Math.random() - 0.5) * 0.005
+                    lng += (Math.random() - 0.5) * 0.005
+                    acc = 250f + (Math.random() * 200).toFloat()
+                    
+                    val weakLoc = Location(loc)
+                    weakLoc.latitude = lat
+                    weakLoc.longitude = lng
+                    weakLoc.accuracy = acc
+                    loc = weakLoc
+                }
+
+                
                 val lastLoc = _currentLocation.value
                 val results = FloatArray(1)
                 Location.distanceBetween(lastLoc.latitude, lastLoc.longitude, loc.latitude, loc.longitude, results)
                 val segmentDistanceKm = results[0] / 1000.0
                 totalDistance += segmentDistanceKm
-
-                simLat = loc.latitude
-                simLng = loc.longitude
-
+                
                 val updatedPoints = _routePoints.value.toMutableList().apply {
-                    add(Pair(simLat, simLng))
+                    add(Pair(loc.latitude, loc.longitude))
                     if (size > 150) removeAt(0)
                 }
                 _routePoints.value = updatedPoints
-
-                // Speed in km/h from m/s
+                
                 val speedKmh = loc.speed * 3.6
-
-                updateLocationState {
-                    it.copy(
-                        latitude = loc.latitude,
-                        longitude = loc.longitude,
-                        speed = speedKmh,
-                        bearing = loc.bearing,
-                        altitude = loc.altitude,
-                        accuracy = loc.accuracy,
-                        timestamp = System.currentTimeMillis(),
-                        distanceTraveled = totalDistance
-                    )
+                
+                // Get address string
+                scope.launch(Dispatchers.IO) {
+                    var addressStr = ""
+                    try {
+                        val geocoder = Geocoder(context, Locale.getDefault())
+                        val addresses = geocoder.getFromLocation(loc.latitude, loc.longitude, 1)
+                        if (!addresses.isNullOrEmpty()) {
+                            addressStr = addresses[0].getAddressLine(0) ?: ""
+                        }
+                    } catch (e: Exception) {
+                        Log.e("LocationService", "Geocoder failed", e)
+                    }
+                    
+                    updateLocationState {
+                        it.copy(
+                            latitude = loc.latitude,
+                            longitude = loc.longitude,
+                            speed = speedKmh,
+                            bearing = loc.bearing,
+                            altitude = loc.altitude,
+                            accuracy = loc.accuracy,
+                            timestamp = System.currentTimeMillis(),
+                            distanceTraveled = totalDistance,
+                            address = if (addressStr.isNotEmpty()) addressStr else it.address
+                        )
+                    }
                 }
             }
         }
-
+        
         try {
             fusedLocationClient.requestLocationUpdates(
                 locationRequest,
@@ -259,17 +255,17 @@ class LocationService(
             )
         } catch (e: Exception) {
             Log.e("LocationService", "Failed to register real GPS listeners: ${e.message}")
+            _isTracking.value = false
         }
     }
 
-    private fun stopRealGpsTracking() {
+    fun stopLocationTracking() {
+        _isTracking.value = false
         locationCallback?.let {
             fusedLocationClient.removeLocationUpdates(it)
         }
         locationCallback = null
     }
-
-    // --- FAVORITE PLACES OPERATIONS ---
 
     fun saveFavoritePlace(name: String, lat: Double, lng: Double, type: String) {
         val newFav = FavoritePlace(
@@ -281,7 +277,6 @@ class LocationService(
         )
         updateLocationState { loc ->
             val updatedList = loc.favorites.toMutableList().apply {
-                // If replacing existing matching types like HOME/WORK/COLLEGE
                 if (type.uppercase() in listOf("HOME", "WORK", "COLLEGE")) {
                     removeAll { it.type == type.uppercase() }
                 }
@@ -311,37 +306,111 @@ class LocationService(
     }
 
     fun searchCoordinatesForQuery(query: String): Pair<Double, Double>? {
-        // Mock geocoding search within San Francisco bounds for rapid responsive previews
-        return when (query.lowercase().trim()) {
-            "golden gate", "golden gate bridge" -> Pair(37.8199, -122.4783)
-            "safeway", "safeway mart" -> Pair(37.7725, -122.4310)
-            "silicon valley", "stanford" -> Pair(37.4275, -122.1697)
-            "central park", "new york" -> Pair(40.7851, -73.9683)
-            "downtown", "city hall" -> Pair(37.7793, -122.4193)
-            else -> {
-                // Return slight offset from current location as fallback search hit
-                val current = _currentLocation.value
-                val offsetLat = current.latitude + ((-5..5).random() / 1000.0)
-                val offsetLng = current.longitude + ((-5..5).random() / 1000.0)
-                Pair(offsetLat, offsetLng)
+        return try {
+            val geocoder = Geocoder(context, Locale.getDefault())
+            val addresses = geocoder.getFromLocationName(query, 1)
+            if (!addresses.isNullOrEmpty()) {
+                Pair(addresses[0].latitude, addresses[0].longitude)
+            } else {
+                null
             }
+        } catch (e: Exception) {
+            null
         }
     }
 
     fun updateCurrentLocationManually(lat: Double, lng: Double) {
-        simLat = lat
-        simLng = lng
+        // Obsolete in real GPS but keeping for compatibility if invoked
         val updatedPoints = _routePoints.value.toMutableList().apply {
-            add(Pair(simLat, simLng))
+            add(Pair(lat, lng))
         }
         _routePoints.value = updatedPoints
-
         updateLocationState {
             it.copy(
                 latitude = lat,
                 longitude = lng,
                 timestamp = System.currentTimeMillis()
             )
+        }
+    }
+    
+    @SuppressLint("MissingPermission")
+    suspend fun getCurrentLocationOnce(timeoutMs: Long = 15000): Location? {
+        if (_isGpsDisabled.value) return null
+        if (_isSimulationMode.value) {
+            val loc = Location("simulated")
+            loc.latitude = _currentLocation.value.latitude
+            loc.longitude = _currentLocation.value.longitude
+            loc.accuracy = _currentLocation.value.accuracy
+            return loc
+        }
+        var bestLocation: Location? = null
+        try {
+            val currentLoc = fusedLocationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null).await()
+            if (currentLoc != null) {
+                if (currentLoc.accuracy <= 10f && (System.currentTimeMillis() - currentLoc.time) <= 10000) {
+                    return currentLoc
+                }
+                bestLocation = currentLoc
+            }
+        } catch (e: Exception) {
+            Log.e("LocationService", "getCurrentLocation failed", e)
+        }
+
+        return suspendCancellableCoroutine { continuation ->
+            var callback: LocationCallback? = null
+            var hasResumed = false
+            
+            val timeoutJob = scope.launch(Dispatchers.Main) {
+                kotlinx.coroutines.delay(timeoutMs)
+                if (!hasResumed) {
+                    hasResumed = true
+                    callback?.let { fusedLocationClient.removeLocationUpdates(it) }
+                    continuation.resume(bestLocation)
+                }
+            }
+
+            callback = object : LocationCallback() {
+                override fun onLocationResult(locationResult: LocationResult) {
+                    for (location in locationResult.locations) {
+                        if (bestLocation == null || location.accuracy < (bestLocation?.accuracy ?: Float.MAX_VALUE)) {
+                            bestLocation = location
+                        }
+                        
+                        if (location.accuracy <= 10f) {
+                            if (!hasResumed) {
+                                hasResumed = true
+                                timeoutJob.cancel()
+                                fusedLocationClient.removeLocationUpdates(this)
+                                continuation.resume(location)
+                            }
+                            return
+                        }
+                    }
+                }
+            }
+
+            val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000)
+                .setMinUpdateIntervalMillis(500)
+                .build()
+                
+            try {
+                fusedLocationClient.requestLocationUpdates(request, callback, Looper.getMainLooper())
+            } catch (e: SecurityException) {
+                if (!hasResumed) {
+                    hasResumed = true
+                    timeoutJob.cancel()
+                    continuation.resume(null)
+                }
+            }
+
+            continuation.invokeOnCancellation {
+                if (!hasResumed) {
+                    hasResumed = true
+                    callback?.let { fusedLocationClient.removeLocationUpdates(it) }
+                    timeoutJob.cancel()
+                }
+            }
         }
     }
 }

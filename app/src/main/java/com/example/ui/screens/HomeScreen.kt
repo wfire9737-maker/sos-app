@@ -11,11 +11,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import com.example.ui.rememberLocationPermissionHandler
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
@@ -47,15 +47,52 @@ fun HomeScreen(
     onNavigateToReports: () -> Unit,
     onNavigateToSafeCheckIn: () -> Unit = {}
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val sosTriggerHandler = rememberLocationPermissionHandler {
+        viewModel.triggerManualSOS()
+        onNavigateToEmergency()
+    }
+    
     val authState by viewModel.authState.collectAsState()
     val alerts by viewModel.alerts.collectAsState()
     val devices by viewModel.devices.collectAsState()
     val emergencySession by viewModel.emergencySession.collectAsState()
     val notifications by viewModel.notifications.collectAsState()
     val currentUser = (authState as? AuthState.Success)?.user ?: User(name = "User")
+    val sosWorkflowState by viewModel.sosWorkflowState.collectAsState()
 
     var showBondDialog by remember { mutableStateOf(false) }
     var showResolveDialog by remember { mutableStateOf<Alert?>(null) }
+    
+    if (sosWorkflowState != SosWorkflowState.IDLE) {
+        androidx.compose.ui.window.Dialog(onDismissRequest = {}) {
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 8.dp
+            ) {
+                Column(
+                    modifier = Modifier.padding(24.dp).fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    CircularProgressIndicator(color = MaterialTheme.colorScheme.error)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = when (sosWorkflowState) {
+                            SosWorkflowState.OBTAINING_LOCATION -> "Obtaining high accuracy location..."
+                            SosWorkflowState.SENDING_SMS -> "Sending SMS to emergency contacts..."
+                            SosWorkflowState.CALLING_CONTACT -> "Placing emergency call..."
+                            SosWorkflowState.UPLOADING -> "Uploading SOS alert to servers..."
+                            SosWorkflowState.COMPLETED -> "SOS Completed!"
+                            else -> "Preparing SOS..."
+                        },
+                        style = MaterialTheme.typography.bodyLarge,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+        }
+    }
 
     Scaffold(
         bottomBar = {
@@ -89,9 +126,13 @@ fun HomeScreen(
             item {
                 Spacer(modifier = Modifier.height(16.dp))
                 SosButtonSection(onSosClick = {
-                    viewModel.triggerManualSOS()
-                    onNavigateToEmergency()
+                    sosTriggerHandler()
                 })
+            }
+
+            // Voice Command & Speech Recognition Section
+            item {
+                VoiceCommandSection(viewModel = viewModel)
             }
 
             // Quick Status Grid
@@ -104,7 +145,7 @@ fun HomeScreen(
                 item {
                     Text("Active Emergencies", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 }
-                items(alerts.filter { it.status == "ACTIVE" }) { alert ->
+                items(alerts.filter { it.status == "ACTIVE" }, key = { it.id }) { alert ->
                     AlertCard(alert = alert, onResolveClick = { showResolveDialog = alert })
                 }
             }
@@ -127,7 +168,7 @@ fun HomeScreen(
                     Text("No devices bonded.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 14.sp)
                 }
             } else {
-                items(devices) { device ->
+                items(devices, key = { it.deviceId }) { device ->
                     DeviceCard(
                         device = device,
                         onSimulateClick = { reason -> viewModel.triggerEsp32SOS(reason) },
@@ -406,5 +447,220 @@ fun HomeBottomNav(onNavigateToMap: () -> Unit, onNavigateToContacts: () -> Unit,
             selected = false,
             onClick = onNavigateToSettings
         )
+    }
+}
+
+@Composable
+fun VoiceCommandSection(
+    viewModel: GuardianViewModel,
+    modifier: Modifier = Modifier
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val isSpeechActive by viewModel.isSpeechRecognizerActive.collectAsState()
+    val liveSpokenText by viewModel.liveSpokenText.collectAsState()
+    val speechStatus by viewModel.speechStatusMessage.collectAsState()
+    val micDecibels by viewModel.micDecibels.collectAsState()
+    val confirmationMsg by viewModel.voiceCommandConfirmation.collectAsState()
+
+    val micPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            viewModel.startVoiceRecognition(context)
+        } else {
+            android.widget.Toast.makeText(context, "Microphone permission required for voice commands", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun toggleMic() {
+        val hasPermission = androidx.core.content.ContextCompat.checkSelfPermission(
+            context,
+            android.Manifest.permission.RECORD_AUDIO
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+        if (isSpeechActive) {
+            viewModel.stopVoiceRecognition()
+        } else {
+            if (hasPermission) {
+                viewModel.startVoiceRecognition(context)
+            } else {
+                micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+            }
+        }
+    }
+
+    Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        // Confirmation Banner
+        AnimatedVisibility(
+            visible = confirmationMsg != null,
+            enter = fadeIn() + expandVertically(),
+            exit = fadeOut() + shrinkVertically()
+        ) {
+            confirmationMsg?.let { msg ->
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (msg.contains("Triggered")) MaterialTheme.colorScheme.errorContainer
+                        else if (msg.contains("cancelled")) MaterialTheme.colorScheme.secondaryContainer
+                        else MaterialTheme.colorScheme.primaryContainer
+                    ),
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth().testTag("voice_confirmation_banner")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp).fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = if (msg.contains("Triggered")) Icons.Default.Warning
+                                else if (msg.contains("cancelled")) Icons.Default.CheckCircle
+                                else Icons.Default.MyLocation,
+                                contentDescription = null,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = msg,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        IconButton(onClick = { viewModel.clearVoiceCommandConfirmation() }) {
+                            Icon(Icons.Default.Close, contentDescription = "Dismiss")
+                        }
+                    }
+                }
+            }
+        }
+
+        // Voice Control Card
+        Card(
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+            shape = RoundedCornerShape(20.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(
+                            onClick = { toggleMic() },
+                            modifier = Modifier
+                                .size(52.dp)
+                                .background(
+                                    if (isSpeechActive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                                    CircleShape
+                                )
+                                .testTag("mic_button")
+                        ) {
+                            Icon(
+                                imageVector = if (isSpeechActive) Icons.Default.Mic else Icons.Default.MicNone,
+                                contentDescription = "Microphone",
+                                tint = Color.White,
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = if (isSpeechActive) "Listening for Command..." else "Voice Recognition",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = speechStatus,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    if (isSpeechActive) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.errorContainer,
+                            modifier = Modifier.padding(4.dp)
+                        ) {
+                            Text(
+                                text = "${micDecibels.toInt()} dB",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        }
+                    }
+                }
+
+                // Live Spoken Text Display
+                AnimatedVisibility(visible = liveSpokenText.isNotBlank()) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surface,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.RecordVoiceOver,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "\"$liveSpokenText\"",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = "Supported Voice Commands:",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+
+                val voiceCommandsList = listOf(
+                    "Help", "Emergency", "SOS", "Send SOS", "Call for help",
+                    "I'm in danger", "Track my location", "Stop SOS", "Cancel SOS"
+                )
+
+                androidx.compose.foundation.lazy.LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    items(voiceCommandsList) { cmd ->
+                        AssistChip(
+                            onClick = {
+                                viewModel.voiceSosService.processVoiceInput(cmd, 95)
+                            },
+                            label = { Text(cmd, fontSize = 11.sp, fontWeight = FontWeight.Medium) },
+                            leadingIcon = {
+                                val icon = when {
+                                    cmd.contains("Stop") || cmd.contains("Cancel") -> Icons.Default.Cancel
+                                    cmd.contains("Track") -> Icons.Default.MyLocation
+                                    else -> Icons.Default.Warning
+                                }
+                                Icon(icon, contentDescription = null, modifier = Modifier.size(14.dp))
+                            },
+                            modifier = Modifier.testTag("voice_cmd_chip_$cmd")
+                        )
+                    }
+                }
+            }
+        }
     }
 }

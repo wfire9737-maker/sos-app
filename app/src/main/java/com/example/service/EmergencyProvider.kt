@@ -19,14 +19,26 @@ class EmergencyProvider(
         userName: String,
         userPhone: String,
         triggerSource: String,
-        deviceId: String = "ESP32-SOS-BAND-81F4"
+        deviceId: String = "ESP32-SOS-BAND-81F4",
+        lat: Double? = null,
+        lng: Double? = null,
+        accuracy: Float? = null,
+        altitude: Double? = null,
+        speed: Float? = null,
+        bearing: Float? = null
     ): EmergencyModel {
         return emergencyService.startEmergency(
             userId = userId,
             userName = userName,
             userPhone = userPhone,
             triggerType = triggerSource,
-            deviceId = deviceId
+            deviceId = deviceId,
+            customLat = lat,
+            customLng = lng,
+            customAccuracy = accuracy,
+            customAltitude = altitude,
+            customSpeed = speed,
+            customBearing = bearing
         )
     }
 

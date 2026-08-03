@@ -17,7 +17,14 @@ import kotlinx.coroutines.tasks.await
 import org.json.JSONArray
 import org.json.JSONObject
 
-class DatabaseService(private val context: Context) {
+import com.example.data.local.dao.EmergencyContactDao
+import com.example.data.local.entity.EmergencyContactEntity
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+
+class DatabaseService(private val context: Context, private val contactDao: EmergencyContactDao? = null) {
     private var firestore: FirebaseFirestore? = null
 
     val firestoreInstance: FirebaseFirestore? get() = firestore
@@ -33,6 +40,11 @@ class DatabaseService(private val context: Context) {
     // Emergency Contacts State
     private val _contacts = MutableStateFlow<List<EmergencyContact>>(emptyList())
     val contacts: StateFlow<List<EmergencyContact>> = _contacts.asStateFlow()
+
+    // Network Simulation State
+    val isOfflineMode = MutableStateFlow(false)
+    val isSlowNetwork = MutableStateFlow(false)
+
 
     private val sharedPrefs: SharedPreferences = context.getSharedPreferences("guardian_sos_database", Context.MODE_PRIVATE)
     private var firestoreListener: ListenerRegistration? = null
@@ -51,7 +63,7 @@ class DatabaseService(private val context: Context) {
             if (FirebaseApp.getApps(context).isNotEmpty()) {
                 val fs = FirebaseFirestore.getInstance()
                 val settings = com.google.firebase.firestore.FirebaseFirestoreSettings.Builder()
-                    .setPersistenceEnabled(true)
+                    .setLocalCacheSettings(com.google.firebase.firestore.PersistentCacheSettings.newBuilder().build())
                     .build()
                 fs.firestoreSettings = settings
                 firestore = fs
@@ -125,6 +137,10 @@ class DatabaseService(private val context: Context) {
     }
 
     private suspend fun <T> runWithRetry(times: Int = 3, block: suspend () -> T): T {
+        if (isOfflineMode.value) throw Exception("Simulated Offline Mode: Network Unavailable")
+        if (isSlowNetwork.value) {
+            kotlinx.coroutines.delay(2000L)
+        }
         var exception: Exception? = null
         for (attempt in 1..times) {
             try {
@@ -192,6 +208,60 @@ class DatabaseService(private val context: Context) {
             }
         } else {
             resolveAlertLocally(alertId, resolvedBy, notes)
+        }
+    }
+
+
+    suspend fun uploadTestSOS(): Alert {
+        val testAlert = Alert(
+            id = "TEST-" + java.util.UUID.randomUUID().toString(),
+            userId = "test_user",
+            userName = "Test User",
+            userPhone = "555-0000",
+            latitude = 40.7128,
+            longitude = -74.0060,
+            status = "ACTIVE",
+            triggerType = "MANUAL_TEST",
+            timestamp = System.currentTimeMillis()
+        )
+        return runWithRetry {
+            firestore?.collection("alerts")?.document(testAlert.id)?.set(testAlert.toMap())?.await()
+            val list = _alerts.value.toMutableList()
+            list.add(0, testAlert)
+            _alerts.value = list
+            saveAlertsListLocally(list)
+            testAlert
+        }
+    }
+
+    suspend fun downloadTestData() {
+        runWithRetry {
+            val result = firestore?.collection("alerts")?.whereEqualTo("userId", "test_user")?.get()?.await()
+            result?.let {
+                val list = _alerts.value.toMutableList()
+                for (doc in it.documents) {
+                    val alert = Alert.fromMap(doc.data ?: emptyMap())
+                    if (list.none { existing -> existing.id == alert.id }) {
+                        list.add(alert)
+                    }
+                }
+                _alerts.value = list.sortedByDescending { a -> a.timestamp }
+                saveAlertsListLocally(_alerts.value)
+            }
+        }
+    }
+
+    suspend fun deleteTestRecords() {
+        runWithRetry {
+            val result = firestore?.collection("alerts")?.whereEqualTo("userId", "test_user")?.get()?.await()
+            result?.let {
+                for (doc in it.documents) {
+                    firestore?.collection("alerts")?.document(doc.id)?.delete()?.await()
+                }
+                val list = _alerts.value.filter { a -> a.userId != "test_user" }
+                _alerts.value = list
+                saveAlertsListLocally(list)
+            }
         }
     }
 
@@ -637,6 +707,8 @@ class DatabaseService(private val context: Context) {
         saveContactsListLocally(demoContacts)
     }
 
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
     private fun saveContactLocally(contact: EmergencyContact) {
         val currentList = _contacts.value.toMutableList()
         val index = currentList.indexOfFirst { it.id == contact.id }
@@ -646,11 +718,36 @@ class DatabaseService(private val context: Context) {
             currentList.add(contact)
         }
         saveContactsListLocally(currentList)
+        
+        // Save to Room
+        scope.launch {
+            try {
+                val entity = EmergencyContactEntity(
+                    contactId = contact.id,
+                    uid = contact.userId,
+                    name = contact.name,
+                    phone = contact.phone,
+                    relationship = contact.relationship,
+                    priority = contact.priority
+                )
+                contactDao?.insertContact(entity)
+            } catch (e: Exception) {
+                Log.e("DatabaseService", "Failed to save contact to Room", e)
+            }
+        }
     }
 
     private fun removeContactLocally(contactId: String) {
         val currentList = _contacts.value.filter { it.id != contactId }
         saveContactsListLocally(currentList)
+        
+        scope.launch {
+            try {
+                contactDao?.deleteContact(contactId)
+            } catch (e: Exception) {
+                Log.e("DatabaseService", "Failed to delete contact from Room", e)
+            }
+        }
     }
 
     private fun saveContactsListLocally(list: List<EmergencyContact>) {

@@ -4,7 +4,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -34,7 +34,7 @@ fun HelpFaqScreen(
                 title = { Text("Help & FAQ") },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
                     }
                 }
             )
@@ -47,7 +47,7 @@ fun HelpFaqScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            items(faqs) { faq ->
+            items(faqs, key = { it.first }) { faq ->
                 var expanded by remember { mutableStateOf(false) }
                 Card(
                     onClick = { expanded = !expanded },
@@ -55,7 +55,7 @@ fun HelpFaqScreen(
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Icon(Icons.Default.HelpOutline, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            Icon(Icons.Filled.HelpOutline, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                             Text(
                                 text = faq.first,
                                 fontWeight = FontWeight.Bold,

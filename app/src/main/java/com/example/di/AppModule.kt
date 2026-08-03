@@ -18,18 +18,20 @@ import com.example.service.FallDetectionService
 import com.example.service.HistoryProvider
 import com.example.service.HistoryService
 import com.example.service.LocationService
+import com.example.service.TrustedPlacesService
+import com.example.data.local.dao.TrustedPlaceDao
 import com.example.service.NotificationProvider
 import com.example.service.NotificationService
 import com.example.service.SafetyTimerService
 import com.example.service.VoiceSosService
 import com.example.repository.FallRepository
 import com.example.data.FallDatabase
-
 import androidx.room.Room
 import com.example.data.local.SmartSosDatabase
 import com.example.data.local.dao.UserDao
 import com.example.data.local.dao.EmergencyContactDao
 import com.example.data.local.dao.SosHistoryDao
+import com.example.data.SettingsDataStore
 
 import dagger.Module
 import dagger.Provides
@@ -44,15 +46,27 @@ object AppModule {
 
     @Provides
     @Singleton
+    fun provideSettingsDataStore(@ApplicationContext context: Context): SettingsDataStore = SettingsDataStore(context)
+
+    @Provides
+    @Singleton
     fun provideAuthService(@ApplicationContext context: Context): AuthService = AuthService(context)
 
     @Provides
     @Singleton
-    fun provideDatabaseService(@ApplicationContext context: Context): DatabaseService = DatabaseService(context)
+    fun provideDatabaseService(@ApplicationContext context: Context, database: com.example.data.local.SmartSosDatabase): DatabaseService = DatabaseService(context, database.emergencyContactDao())
 
     @Provides
     @Singleton
-    fun provideLocationService(@ApplicationContext context: Context, databaseService: DatabaseService): LocationService = LocationService(context, databaseService.firestoreInstance)
+    fun provideGeofenceManager(@ApplicationContext context: Context): com.example.service.GeofenceManager = com.example.service.GeofenceManager(context)
+
+    @Provides
+    @Singleton
+    fun provideTrustedPlacesService(@ApplicationContext context: Context, databaseService: DatabaseService, trustedPlaceDao: TrustedPlaceDao, geofenceManager: com.example.service.GeofenceManager): TrustedPlacesService = TrustedPlacesService(geofenceManager, context, databaseService.firestoreInstance, trustedPlaceDao)
+
+    @Provides
+    @Singleton
+    fun provideLocationService(@ApplicationContext context: Context, databaseService: DatabaseService, database: com.example.data.local.SmartSosDatabase): LocationService = LocationService(context, databaseService.firestoreInstance, database.locationDao())
 
     @Provides
     @Singleton
@@ -92,7 +106,7 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideFallRepository(database: FallDatabase): FallRepository = FallRepository(database.fallEventDao())
+    fun provideFallRepository(database: FallDatabase, databaseService: DatabaseService): FallRepository = FallRepository(database.fallEventDao(), databaseService.firestoreInstance)
 
     @Provides
     @Singleton
@@ -112,7 +126,21 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideEmergencyService(@ApplicationContext context: Context, databaseService: DatabaseService, locationService: LocationService, notificationService: NotificationService): EmergencyService = EmergencyService(context, databaseService.firestoreInstance, locationService, notificationService, databaseService)
+    fun provideEmergencyService(
+        @ApplicationContext context: Context, 
+        databaseService: DatabaseService, 
+        locationService: LocationService, 
+        notificationService: NotificationService,
+        database: com.example.data.local.SmartSosDatabase
+    ): EmergencyService = EmergencyService(
+        context, 
+        databaseService.firestoreInstance, 
+        locationService, 
+        notificationService, 
+        databaseService,
+        database.sosHistoryDao(),
+        database.emergencyContactDao()
+    )
 
     @Provides
     @Singleton
@@ -120,7 +148,11 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideSafetyTimerService(@ApplicationContext context: Context, notificationProvider: NotificationProvider): SafetyTimerService = SafetyTimerService(context, notificationProvider)
+    fun provideSafetyTimerService(@ApplicationContext context: Context, notificationProvider: NotificationProvider, databaseService: DatabaseService): SafetyTimerService = SafetyTimerService(context, notificationProvider, databaseService.firestoreInstance)
+
+    @Provides
+    @Singleton
+    fun provideFirebaseFirestore(@ApplicationContext context: Context): com.google.firebase.firestore.FirebaseFirestore = com.google.firebase.firestore.FirebaseFirestore.getInstance()
 
     @Provides
     @Singleton
@@ -137,7 +169,7 @@ object AppModule {
             context,
             SmartSosDatabase::class.java,
             "smart_sos_db"
-        ).fallbackToDestructiveMigration().build()
+        ).fallbackToDestructiveMigration(true).build()
     }
 
     @Provides
@@ -149,4 +181,7 @@ object AppModule {
     @Provides
     fun provideSosHistoryDao(database: SmartSosDatabase): SosHistoryDao = database.sosHistoryDao()
 
+    @Provides
+    @Singleton
+    fun provideTrustedPlaceDao(database: SmartSosDatabase): com.example.data.local.dao.TrustedPlaceDao = database.trustedPlaceDao()
 }

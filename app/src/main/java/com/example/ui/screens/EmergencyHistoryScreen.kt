@@ -14,9 +14,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.automirrored.filled.*
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
+import androidx.compose.material.icons.automirrored.filled.DirectionsRun
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -127,7 +128,7 @@ fun EmergencyHistoryScreen(
                         modifier = Modifier.testTag("export_csv_action")
                     ) {
                         Icon(
-                            imageVector = Icons.Default.InsertDriveFile,
+                            imageVector = Icons.AutoMirrored.Filled.InsertDriveFile,
                             contentDescription = "Export CSV",
                             tint = MaterialTheme.colorScheme.primary
                         )
@@ -262,7 +263,7 @@ fun EmergencyHistoryScreen(
                             .testTag("sort_menu_button")
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Sort,
+                            imageVector = Icons.Filled.Sort,
                             contentDescription = "Sort history logs"
                         )
                     }
@@ -515,7 +516,7 @@ fun EmergencyHistoryScreen(
             onDismissRequest = { showExportConfirmDialog = false },
             icon = {
                 Icon(
-                    imageVector = if (exportType == "CSV") Icons.Default.InsertDriveFile else Icons.Default.PictureAsPdf,
+                    imageVector = if (exportType == "CSV") Icons.AutoMirrored.Filled.InsertDriveFile else Icons.Default.PictureAsPdf,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(36.dp)
@@ -650,7 +651,7 @@ fun HistoryCard(
     }
 
     val icon = when (item.triggerType) {
-        "FALL_DETECTED" -> Icons.Default.DirectionsRun
+        "FALL_DETECTED" -> Icons.AutoMirrored.Filled.DirectionsRun
         else -> Icons.Default.Emergency
     }
 

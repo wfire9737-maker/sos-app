@@ -9,10 +9,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -91,7 +88,7 @@ fun SecurityScreen(
                         modifier = Modifier.testTag("security_back_button")
                     ) {
                         Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            imageVector = Icons.Filled.ArrowBack,
                             contentDescription = "Go Back",
                             tint = MaterialTheme.colorScheme.onPrimaryContainer
                         )
@@ -321,7 +318,7 @@ fun SecurityScreen(
                             }
 
                             Icon(
-                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                imageVector = Icons.Filled.KeyboardArrowRight,
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                                 modifier = Modifier.size(20.dp)
@@ -436,7 +433,7 @@ fun SecurityScreen(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.ExitToApp,
+                                    imageVector = Icons.Filled.ExitToApp,
                                     contentDescription = null,
                                     tint = Color(0xFFE91E63),
                                     modifier = Modifier.size(18.dp)

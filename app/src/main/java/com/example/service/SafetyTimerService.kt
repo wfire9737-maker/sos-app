@@ -1,8 +1,10 @@
 package com.example.service
 
 import android.content.Context
+import android.util.Log
 import com.example.model.NotificationCategory
 import com.example.model.NotificationModel
+import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -19,7 +21,8 @@ enum class SafetyTimerStatus {
 
 class SafetyTimerService(
     private val context: Context,
-    private val notificationProvider: NotificationProvider
+    private val notificationProvider: NotificationProvider,
+    private val firestore: FirebaseFirestore? = null
 ) {
     private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
@@ -60,6 +63,7 @@ class SafetyTimerService(
         )
 
         startCountdown()
+        syncTimerToFirestore("ACTIVE")
     }
 
     private fun startCountdown() {
@@ -77,6 +81,7 @@ class SafetyTimerService(
             }
 
             _status.value = SafetyTimerStatus.EXPIRED
+            syncTimerToFirestore("EXPIRED")
             notificationProvider.addNotification(
                 NotificationModel(
                     title = "Safety Timer EXPIRED!",
@@ -118,6 +123,7 @@ class SafetyTimerService(
         timerJob?.cancel()
         timerJob = null
         _status.value = SafetyTimerStatus.INACTIVE
+        syncTimerToFirestore("CANCELLED")
         _secondsRemaining.value = 0
         _totalDurationSeconds.value = 0
 
@@ -136,6 +142,7 @@ class SafetyTimerService(
         timerJob = null
         _status.value = SafetyTimerStatus.CHECKED_IN
         val desc = _activityDescription.value
+        syncTimerToFirestore("CHECKED_IN")
 
         notificationProvider.addNotification(
             NotificationModel(
@@ -154,6 +161,22 @@ class SafetyTimerService(
                 _totalDurationSeconds.value = 0
                 _activityDescription.value = ""
             }
+        }
+    }
+
+    private fun syncTimerToFirestore(statusStr: String) {
+        val fs = firestore ?: return
+        try {
+            val timerData = mapOf(
+                "status" to statusStr,
+                "activityDescription" to _activityDescription.value,
+                "totalDurationSeconds" to _totalDurationSeconds.value,
+                "secondsRemaining" to _secondsRemaining.value,
+                "timestamp" to System.currentTimeMillis()
+            )
+            fs.collection("safety_timers").document("timer-${System.currentTimeMillis()}").set(timerData)
+        } catch (e: Exception) {
+            Log.e("SafetyTimerService", "Failed to sync timer to Firestore: ${e.message}")
         }
     }
 

@@ -12,9 +12,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.automirrored.filled.*
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -731,7 +730,7 @@ fun DeviceCardItem(
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
-                HorizontalHorizontalDivider(color = Color(0xFFF1F3F7))
+                HorizontalDivider(color = Color(0xFFF1F3F7))
                 Spacer(modifier = Modifier.height(12.dp))
 
                 // Telemetry Details Grid
@@ -787,7 +786,7 @@ fun DeviceCardItem(
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
-                HorizontalHorizontalDivider(color = Color(0xFFF1F3F7))
+                HorizontalDivider(color = Color(0xFFF1F3F7))
                 Spacer(modifier = Modifier.height(12.dp))
 
                 // Firmware version & Last seen footer

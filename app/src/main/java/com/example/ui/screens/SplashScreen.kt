@@ -9,12 +9,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import com.example.ui.GuardianViewModel
+import com.example.service.AuthState
 
 @Composable
 fun SplashScreen(viewModel: GuardianViewModel, onNavigateToNext: () -> Unit) {
     LaunchedEffect(key1 = Unit) {
         delay(1500)
+        viewModel.authState.first { it !is AuthState.Loading }
         onNavigateToNext()
     }
     Box(
