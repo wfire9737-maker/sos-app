@@ -14,6 +14,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -50,20 +51,7 @@ fun AiDashboardScreen(
     val liveReading by viewModel.currentLiveReading.collectAsState()
     val currentAnalysis by viewModel.currentLiveAnalysis.collectAsState()
 
-    var activeSimulationPattern by remember { mutableStateOf("STILL") } // STILL, WALKING, RUNNING, FALL_DETECTED
     var selectedHistoricalResult by remember { mutableStateOf<AiAnalysisResult?>(null) }
-
-    // Synchronize simulation mode changes to our viewModel service
-    LaunchedEffect(activeSimulationPattern) {
-        viewModel.aiAnalysisService.startSensorStreamingSimulation(activeSimulationPattern)
-    }
-
-    // Safely cleanup the live simulation when leaving this screen
-    DisposableEffect(Unit) {
-        onDispose {
-            viewModel.aiAnalysisService.stopSimulation()
-        }
-    }
 
     // Determine what logs to show in the history view (excluding the live-updating active one)
     val displayLogs = remember(aiLogs, currentAnalysis) {
@@ -126,75 +114,6 @@ fun AiDashboardScreen(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
                 contentPadding = PaddingValues(bottom = 32.dp)
             ) {
-                // --- SIMULATION CONTROL CONSOLE ---
-                item {
-                    Text(
-                        text = "Interactive Sensor & Gait Simulator",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(top = 8.dp)
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Card(
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
-                        ),
-                        shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text(
-                                text = "Select a physical motion gait below to view the AI classifier algorithm update live telemetry graphs in real-time.",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                SimulationModeChip(
-                                    label = "Stillness",
-                                    icon = "💤",
-                                    selected = activeSimulationPattern == "STILL",
-                                    onClick = {
-                                        selectedHistoricalResult = null
-                                        activeSimulationPattern = "STILL"
-                                    }
-                                )
-                                SimulationModeChip(
-                                    label = "Walking",
-                                    icon = "🚶",
-                                    selected = activeSimulationPattern == "WALKING",
-                                    onClick = {
-                                        selectedHistoricalResult = null
-                                        activeSimulationPattern = "WALKING"
-                                    }
-                                )
-                                SimulationModeChip(
-                                    label = "Running",
-                                    icon = "🏃",
-                                    selected = activeSimulationPattern == "RUNNING",
-                                    onClick = {
-                                        selectedHistoricalResult = null
-                                        activeSimulationPattern = "RUNNING"
-                                    }
-                                )
-                                SimulationModeChip(
-                                    label = "Fall Event",
-                                    icon = "💥",
-                                    selected = activeSimulationPattern == "FALL_DETECTED",
-                                    onClick = {
-                                        selectedHistoricalResult = null
-                                        activeSimulationPattern = "FALL_DETECTED"
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
-
                 // --- CLASSIFIER SUMMARY BOARD ---
                 item {
                     val severityColor = when (activeDisplay.riskLevel.uppercase()) {

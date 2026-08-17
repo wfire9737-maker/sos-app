@@ -8,6 +8,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -30,6 +31,7 @@ fun DeviceMonitoringScreen(
     onNavigateBack: () -> Unit
 ) {
     val devices by viewModel.devices.collectAsState()
+    val isEsp32Connected by viewModel.isEsp32Connected.collectAsState()
     
     // Select the first device to monitor if available
     var selectedDeviceId by remember { mutableStateOf(devices.firstOrNull()?.deviceId) }
@@ -87,7 +89,7 @@ fun DeviceMonitoringScreen(
                 
                 // Status Header
                 item {
-                    DeviceStatusHeader(device = device)
+                    DeviceStatusHeader(device = device, isEsp32Connected = isEsp32Connected)
                 }
                 
                 // Telemetry Grid
@@ -97,16 +99,16 @@ fun DeviceMonitoringScreen(
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         TelemetryCard(
                             title = "Battery",
-                            value = "${device.batteryLevel}%",
-                            icon = Icons.Default.BatteryFull,
-                            color = if (device.batteryLevel > 20) SafetyGreen else EmergencyRed,
+                            value = if (device.status == "DISCONNECTED") "--" else "${device.batteryLevel}%",
+                            icon = if (device.status == "DISCONNECTED") Icons.Default.BatteryUnknown else Icons.Default.BatteryFull,
+                            color = if (device.status == "DISCONNECTED") Color.Gray else if (device.batteryLevel > 20) SafetyGreen else EmergencyRed,
                             modifier = Modifier.weight(1f)
                         )
                         TelemetryCard(
                             title = "Signal",
-                            value = "${device.signalStrength} dBm",
+                            value = if (device.status == "DISCONNECTED") "--" else "${device.signalStrength} dBm",
                             icon = Icons.Default.SignalCellularAlt,
-                            color = Color(0xFF1565C0),
+                            color = if (device.status == "DISCONNECTED") Color.Gray else Color(0xFF1565C0),
                             modifier = Modifier.weight(1f)
                         )
                     }
@@ -114,14 +116,14 @@ fun DeviceMonitoringScreen(
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         TelemetryCard(
                             title = "Temp",
-                            value = "${device.deviceTemperature}°C",
+                            value = "--",
                             icon = Icons.Default.Thermostat,
                             color = AlertOrange,
                             modifier = Modifier.weight(1f)
                         )
                         TelemetryCard(
                             title = "CPU",
-                            value = "${device.cpuUsagePercent}%",
+                            value = "--",
                             icon = Icons.Default.Memory,
                             color = Color(0xFF00BCD4),
                             modifier = Modifier.weight(1f)
@@ -139,10 +141,10 @@ fun DeviceMonitoringScreen(
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Text("Accelerometer (g)", fontWeight = FontWeight.Bold)
-                            Text("X: ${device.accelX} | Y: ${device.accelY} | Z: ${device.accelZ}", fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                            Text("X: -- | Y: -- | Z: --", fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
                             Spacer(modifier = Modifier.height(8.dp))
                             Text("Gyroscope (°/s)", fontWeight = FontWeight.Bold)
-                            Text("X: ${device.gyroX} | Y: ${device.gyroY} | Z: ${device.gyroZ}", fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                            Text("X: -- | Y: -- | Z: --", fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
                         }
                     }
                 }
@@ -175,7 +177,8 @@ fun DeviceMonitoringScreen(
 }
 
 @Composable
-fun DeviceStatusHeader(device: Device) {
+fun DeviceStatusHeader(device: Device, isEsp32Connected: Boolean) {
+    val isConnected = isEsp32Connected || device.status == "CONNECTED"
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -190,7 +193,7 @@ fun DeviceStatusHeader(device: Device) {
                 modifier = Modifier
                     .size(64.dp)
                     .background(
-                        if (device.status == "CONNECTED") SafetyGreen.copy(alpha = 0.2f) else EmergencyRed.copy(alpha = 0.2f),
+                        if (isConnected) SafetyGreen.copy(alpha = 0.2f) else EmergencyRed.copy(alpha = 0.2f),
                         CircleShape
                     ),
                 contentAlignment = Alignment.Center
@@ -199,12 +202,18 @@ fun DeviceStatusHeader(device: Device) {
                     Icons.Default.Watch,
                     contentDescription = null,
                     modifier = Modifier.size(32.dp),
-                    tint = if (device.status == "CONNECTED") SafetyGreen else EmergencyRed
+                    tint = if (isConnected) SafetyGreen else EmergencyRed
                 )
             }
             Spacer(modifier = Modifier.width(16.dp))
             Column {
                 Text(device.deviceName, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                Text(
+                    if (isConnected) "Connected to SOS Device" else "SOS Device Disconnected",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (isConnected) SafetyGreen else EmergencyRed
+                )
                 Text("MAC: ${device.macAddress}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text("Firmware: ${device.firmwareVersion}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }

@@ -1,0 +1,2 @@
+cat app/src/main/java/com/example/ui/screens/DeviceMonitoringScreen.kt | sed 's/value = "${device.batteryLevel}%"/value = if (device.status == "DISCONNECTED") "--" else "${device.batteryLevel}%"/g' | sed 's/value = "${device.signalStrength} dBm"/value = if (device.status == "DISCONNECTED") "--" else "${device.signalStrength} dBm"/g' > tmp_ui.kt
+mv tmp_ui.kt app/src/main/java/com/example/ui/screens/DeviceMonitoringScreen.kt

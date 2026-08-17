@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -63,7 +64,7 @@ fun FallDetectionScreen(
                         modifier = Modifier.testTag("fall_screen_back_button")
                     ) {
                         Icon(
-                            imageVector = Icons.Filled.ArrowBack,
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back"
                         )
                     }
@@ -116,8 +117,8 @@ fun FallDetectionScreen(
                         }
 
                         val stateIcon = when (currentState) {
-                            "WALKING" -> Icons.Filled.DirectionsWalk
-                            "RUNNING" -> Icons.Filled.DirectionsRun
+                            "WALKING" -> Icons.AutoMirrored.Filled.DirectionsWalk
+                            "RUNNING" -> Icons.AutoMirrored.Filled.DirectionsRun
                             "SITTING" -> Icons.Default.Chair
                             "STANDING" -> Icons.Default.AccessibilityNew
                             else -> Icons.Default.ReportProblem
@@ -175,50 +176,6 @@ fun FallDetectionScreen(
                         modifier = Modifier.padding(14.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Text(
-                            text = "Test Fall Emergency Workflow",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.error
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "Triggers a high-G deceleration spike simulation, launching a 15s countdown. Cancel anytime to prevent automatic SOS dispatch.",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Button(
-                            onClick = { viewModel.fallDetectionService.triggerSimulatedFall() },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.error
-                            ),
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(44.dp)
-                                .testTag("simulate_fall_btn")
-                        ) {
-                            Icon(Icons.Default.Emergency, contentDescription = null)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Simulate Hard Fall Impact", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        }
-                    }
-                }
-            }
-
-            // --- LOCAL STORAGE LOGS (ROOM) ---
-            item {
-                Text(
-                    text = "Room SQLite Database Log",
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-            }
-
             if (allEvents.isEmpty()) {
                 item {
                     Card(
@@ -233,7 +190,7 @@ fun FallDetectionScreen(
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = "Database log empty. Generate a simulated event above to register persistent Room entities.",
+                                text = "Database log empty. Fall events recorded by device telemetry will appear here.",
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 textAlign = TextAlign.Center

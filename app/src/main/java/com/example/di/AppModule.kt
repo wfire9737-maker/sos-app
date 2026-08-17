@@ -2,8 +2,6 @@ package com.example.di
 
 import android.app.Application
 import android.content.Context
-import com.example.data.DeviceDataSource
-import com.example.data.MockDeviceDataSource
 import com.example.service.AIProvider
 import com.example.service.AIService
 import com.example.service.AiAnalysisService
@@ -94,11 +92,7 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideDeviceDataSource(): DeviceDataSource = MockDeviceDataSource()
-
-    @Provides
-    @Singleton
-    fun provideDeviceService(@ApplicationContext context: Context, databaseService: DatabaseService, notificationService: NotificationService, deviceDataSource: DeviceDataSource): DeviceService = DeviceService(context, databaseService, notificationService, deviceDataSource)
+    fun provideDeviceService(@ApplicationContext context: Context, databaseService: DatabaseService, notificationService: NotificationService): DeviceService = DeviceService(context, databaseService, notificationService)
 
     @Provides
     @Singleton

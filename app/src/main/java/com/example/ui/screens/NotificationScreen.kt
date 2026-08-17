@@ -12,6 +12,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -83,7 +84,7 @@ fun NotificationScreen(
                         modifier = Modifier.testTag("notifications_back_button")
                     ) {
                         Icon(
-                            imageVector = Icons.Filled.ArrowBack,
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back"
                         )
                     }
@@ -169,87 +170,6 @@ fun NotificationScreen(
                 )
             }
 
-            // --- INTERACTIVE BROADCAST FCM SIMULATOR PANEL ---
-            Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                ),
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("fcm_simulator_panel")
-            ) {
-                Column(
-                    modifier = Modifier.padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        text = "⚡ LIVE FCM BROADCAST SIMULATOR",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-
-                    // 1st row of simulate buttons
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        SimulatorButton(
-                            label = "Emergency",
-                            color = Color(0xFFD50000),
-                            onClick = { viewModel.simulateIncomingNotificationNew(NotificationCategory.EMERGENCY_ALERTS) },
-                            modifier = Modifier.weight(1f).testTag("sim_emergency_btn")
-                        )
-                        SimulatorButton(
-                            label = "Low Battery",
-                            color = Color(0xFFFF8F00),
-                            onClick = { viewModel.simulateIncomingNotificationNew(NotificationCategory.BATTERY_ALERTS) },
-                            modifier = Modifier.weight(1f).testTag("sim_battery_btn")
-                        )
-                        SimulatorButton(
-                            label = "Offline",
-                            color = Color(0xFF757575),
-                            onClick = { viewModel.simulateIncomingNotificationNew(NotificationCategory.DEVICE_DISCONNECTED) },
-                            modifier = Modifier.weight(1f).testTag("sim_offline_btn")
-                        )
-                    }
-
-                    // 2nd row of simulate buttons
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        SimulatorButton(
-                            label = "GPS Lost",
-                            color = Color(0xFF1E88E5),
-                            onClick = { viewModel.simulateIncomingNotificationNew(NotificationCategory.GPS_UNAVAILABLE) },
-                            modifier = Modifier.weight(1f).testTag("sim_gps_btn")
-                        )
-                        SimulatorButton(
-                            label = "Firmware",
-                            color = Color(0xFF8E24AA),
-                            onClick = { viewModel.simulateIncomingNotificationNew(NotificationCategory.FIRMWARE_UPDATES) },
-                            modifier = Modifier.weight(1f).testTag("sim_firmware_btn")
-                        )
-                        SimulatorButton(
-                            label = "Safe Arrival",
-                            color = Color(0xFF43A047),
-                            onClick = { viewModel.simulateIncomingNotificationNew(NotificationCategory.SAFE_ARRIVAL) },
-                            modifier = Modifier.weight(1f).testTag("sim_arrival_btn")
-                        )
-                    }
-
-                    // 3rd row: Emergency Cancelled
-                    SimulatorButton(
-                        label = "Simulate Emergency Cancelled Alarm Reset",
-                        color = Color(0xFF00B0FF),
-                        onClick = { viewModel.simulateIncomingNotificationNew(NotificationCategory.EMERGENCY_RESOLVED) },
-                        modifier = Modifier.fillMaxWidth().height(32.dp).testTag("sim_cancel_btn")
-                    )
-                }
-            }
-
             // --- NOTIFICATIONS LIST ---
             if (filteredNotifications.isEmpty()) {
                 Box(
@@ -270,7 +190,7 @@ fun NotificationScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Text(
-                            text = "Try triggering broadcasts with the simulator deck above!",
+                            text = "Your notification history will appear here.",
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                         )
@@ -298,27 +218,6 @@ fun NotificationScreen(
                 }
             }
         }
-    }
-}
-
-@Composable
-fun SimulatorButton(
-    label: String,
-    color: Color,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Button(
-        onClick = onClick,
-        colors = ButtonDefaults.buttonColors(
-            containerColor = color,
-            contentColor = Color.White
-        ),
-        shape = RoundedCornerShape(8.dp),
-        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
-        modifier = modifier.height(34.dp)
-    ) {
-        Text(text = label, fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1)
     }
 }
 

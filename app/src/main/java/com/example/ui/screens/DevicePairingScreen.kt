@@ -13,6 +13,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -47,7 +48,7 @@ fun DevicePairingScreen(
     // Screen tabs: "My Devices" & "Pair New"
     var activeTab by remember { mutableStateOf(0) }
 
-    // Dialog & Simulation states
+    // Dialog states
     var showRenameDialog by remember { mutableStateOf<Device?>(null) }
     var showUnpairConfirm by remember { mutableStateOf<Device?>(null) }
     var showPairingWizard by remember { mutableStateOf<String?>(null) } // "BT", "QR", "WIFI", "ID"
@@ -59,11 +60,6 @@ fun DevicePairingScreen(
 
     var wifiSsid by remember { mutableStateOf("") }
     var wifiPass by remember { mutableStateOf("") }
-
-    // Simulated scanning progress
-    var isSimulatingPairing by remember { mutableStateOf(false) }
-    var simulationProgress by remember { mutableStateOf(0f) }
-    var simulatedStatusMessage by remember { mutableStateOf("") }
 
     Scaffold(
         topBar = {
@@ -203,39 +199,12 @@ fun DevicePairingScreen(
 
                     // BLE Option
                     PairingMethodCard(
-                        title = "Simulate Bluetooth Low Energy (BLE)",
+                        title = "Bluetooth Low Energy (BLE)",
                         description = "Scan for nearby broadcasting Guardian ESP32 wristbands automatically.",
                         icon = "📶",
                         tag = "pair_ble_card",
                         onClick = {
-                            showPairingWizard = "BT"
-                            isSimulatingPairing = true
-                            simulationProgress = 0f
-                            simulatedStatusMessage = "Initializing Android BLE Radio..."
-                            scope.launch {
-                                delay(600)
-                                simulatedStatusMessage = "Scanning channels (2.4GHz)..."
-                                while (simulationProgress < 1.0f) {
-                                    delay(400)
-                                    simulationProgress += 0.2f
-                                    if (simulationProgress >= 0.4f && simulationProgress < 0.8f) {
-                                        simulatedStatusMessage = "Found: Guardian Band BLE [30:AE:A4:07:0D:64] RSSI -59dB"
-                                    } else if (simulationProgress >= 0.8f) {
-                                        simulatedStatusMessage = "Bonding and establishing encrypted BLE profile..."
-                                    }
-                                }
-                                viewModel.bondDevice(
-                                    name = "Guardian Wristband ESP32",
-                                    mac = "30:AE:A4:07:0D:64",
-                                    firmware = "v1.2.8-esp32-ble",
-                                    battery = 92,
-                                    signal = -59,
-                                    health = "EXCELLENT"
-                                )
-                                isSimulatingPairing = false
-                                showPairingWizard = null
-                                activeTab = 0
-                            }
+                            viewModel.startEsp32Polling()
                         }
                     )
 
@@ -248,28 +217,15 @@ fun DevicePairingScreen(
                         icon = "📷",
                         tag = "pair_qr_card",
                         onClick = {
-                            showPairingWizard = "QR"
-                            isSimulatingPairing = true
-                            simulationProgress = 0f
-                            simulatedStatusMessage = "Requesting Camera Frame Permissions..."
-                            scope.launch {
-                                delay(800)
-                                simulatedStatusMessage = "Targeting QR bounds. Searching for ESP32 QR signature..."
-                                delay(1200)
-                                simulatedStatusMessage = "Parsed: ESP32_G_81F4 Mac: 24:0A:C4:81:8A:F4"
-                                delay(1000)
-                                viewModel.bondDevice(
-                                    name = "Guardian Smart-Band QR",
-                                    mac = "24:0A:C4:81:8A:F4",
-                                    firmware = "v1.3.1-esp32",
-                                    battery = 88,
-                                    signal = -64,
-                                    health = "EXCELLENT"
-                                )
-                                isSimulatingPairing = false
-                                showPairingWizard = null
-                                activeTab = 0
-                            }
+                            viewModel.bondDevice(
+                                name = "Guardian Smart-Band QR",
+                                mac = "24:0A:C4:81:8A:F4",
+                                firmware = "v1.3.1-esp32",
+                                battery = 100,
+                                signal = -64,
+                                health = "EXCELLENT"
+                            )
+                            activeTab = 0
                         }
                     )
 
@@ -307,53 +263,8 @@ fun DevicePairingScreen(
             }
         }
 
-        // --- PAIRING WIZARD SIMULATION DIALOG ---
-        if (showPairingWizard != null && isSimulatingPairing) {
-            AlertDialog(
-                onDismissRequest = { /* Prevent cancellation during simulation */ },
-                title = {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
-                        Text("Connecting Wearable", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                    }
-                },
-                text = {
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text(
-                            text = simulatedStatusMessage,
-                            fontSize = 13.sp,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        LinearProgressIndicator(
-                            progress = { simulationProgress },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(8.dp)
-                                .clip(RoundedCornerShape(4.dp))
-                        )
-                        Text(
-                            text = "Please keep your wearable powered on and within 3 meters.",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center
-                        )
-                    }
-                },
-                confirmButton = {}
-            )
-        }
-
         // --- WIFI PROVISIONING DIALOG ---
-        if (showPairingWizard == "WIFI" && !isSimulatingPairing) {
+        if (showPairingWizard == "WIFI") {
             AlertDialog(
                 onDismissRequest = { showPairingWizard = null },
                 title = { Text("Smart WiFi Provisioning", fontWeight = FontWeight.Bold, fontSize = 18.sp) },
@@ -384,30 +295,19 @@ fun DevicePairingScreen(
                 confirmButton = {
                     Button(
                         onClick = {
-                            isSimulatingPairing = true
-                            simulationProgress = 0f
-                            simulatedStatusMessage = "Broadcasting UDP Smart-Config beacon..."
-                            scope.launch {
-                                delay(1000)
-                                simulatedStatusMessage = "ESP32 caught broadcast! Authenticating with router..."
-                                delay(1200)
-                                simulatedStatusMessage = "ESP32 assigned IP 192.168.1.144. Syncing token..."
-                                delay(1000)
-                                viewModel.bondDevice(
-                                    name = "Guardian Smart-Band WiFi",
-                                    mac = "24:0A:C4:58:22:1A",
-                                    firmware = "v1.2.9-esp32-wifi",
-                                    battery = 99,
-                                    signal = -48,
-                                    health = "EXCELLENT"
-                                )
-                                isSimulatingPairing = false
-                                showPairingWizard = null
-                                activeTab = 0
-                            }
+                            viewModel.bondDevice(
+                                name = "Guardian Smart-Band WiFi",
+                                mac = "24:0A:C4:58:22:1A",
+                                firmware = "v1.2.9-esp32-wifi",
+                                battery = 100,
+                                signal = -48,
+                                health = "EXCELLENT"
+                            )
+                            showPairingWizard = null
+                            activeTab = 0
                         }
                     ) {
-                        Text("Broadcast Credentials")
+                        Text("Provision Credentials")
                     }
                 },
                 dismissButton = {
@@ -419,7 +319,7 @@ fun DevicePairingScreen(
         }
 
         // --- MANUAL ID PAIRING DIALOG ---
-        if (showPairingWizard == "ID" && !isSimulatingPairing) {
+        if (showPairingWizard == "ID") {
             AlertDialog(
                 onDismissRequest = { showPairingWizard = null },
                 title = { Text("Pair Using Device ID", fontWeight = FontWeight.Bold, fontSize = 18.sp) },
@@ -741,16 +641,17 @@ fun DeviceCardItem(
                     // Battery
                     TelemetryField(
                         label = "Battery",
-                        value = "${device.batteryLevel}%",
+                        value = if (device.status == "DISCONNECTED") "--" else "${device.batteryLevel}%",
                         icon = {
                             Icon(
                                 imageVector = when {
+                                    device.status == "DISCONNECTED" -> Icons.Default.BatteryUnknown
                                     device.batteryLevel > 80 -> Icons.Default.BatteryFull
                                     device.batteryLevel > 30 -> Icons.Default.BatteryChargingFull
                                     else -> Icons.Default.BatteryAlert
                                 },
                                 contentDescription = null,
-                                tint = if (device.batteryLevel > 30) Color(0xFF4CAF50) else Color(0xFFF44336),
+                                tint = if (device.status == "DISCONNECTED") Color.Gray else if (device.batteryLevel > 30) Color(0xFF4CAF50) else Color(0xFFF44336),
                                 modifier = Modifier.size(16.dp)
                             )
                         }
@@ -759,7 +660,7 @@ fun DeviceCardItem(
                     // Signal
                     TelemetryField(
                         label = "Signal (RSSI)",
-                        value = "${device.signalStrength} dBm",
+                        value = if (device.status == "DISCONNECTED") "--" else "${device.signalStrength} dBm",
                         icon = {
                             Icon(
                                 imageVector = Icons.Default.Wifi,
@@ -773,7 +674,7 @@ fun DeviceCardItem(
                     // Health
                     TelemetryField(
                         label = "Device Health",
-                        value = healthText,
+                        value = if (device.status == "DISCONNECTED") "--" else healthText,
                         icon = {
                             Icon(
                                 imageVector = Icons.Default.CheckCircle,

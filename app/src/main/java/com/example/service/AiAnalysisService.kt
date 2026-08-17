@@ -31,7 +31,6 @@ class AiAnalysisService(
 
     private val sharedPrefs: SharedPreferences = context.getSharedPreferences("guardian_sos_ai_analysis", Context.MODE_PRIVATE)
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    private var simulationJob: Job? = null
 
     init {
         loadLocalLogs()
@@ -162,121 +161,9 @@ class AiAnalysisService(
 
         _currentLiveAnalysis.value = result
         addAnalysisResult(result)
-        // Start streaming matching real-time sensor updates to represent the active status
-        startSensorStreamingSimulation(triggerType)
     }
 
-    fun startSensorStreamingSimulation(patternType: String) {
-        simulationJob?.cancel()
-        simulationJob = serviceScope.launch {
-            var tick = 0
-            val r = Random()
-            while (isActive) {
-                // Generate a continuous stream representing real-time telemetry from ESP32 MPU6050
-                val reading = when (patternType) {
-                    "FALL_DETECTED" -> {
-                        // A simulated sequence: impact at tick 5-8, stillness thereafter
-                        when {
-                            tick < 4 -> { // Normal walking before fall
-                                val cycle = tick * 0.8
-                                SensorReading(
-                                    timestampMs = System.currentTimeMillis(),
-                                    ax = (0.2 * Math.sin(cycle)).toFloat() + r.nextGaussian().toFloat() * 0.1f,
-                                    ay = 1.0f + (0.3 * Math.cos(cycle)).toFloat() + r.nextGaussian().toFloat() * 0.1f,
-                                    az = (0.1 * Math.sin(cycle)).toFloat() + r.nextGaussian().toFloat() * 0.05f,
-                                    gx = (10.0 * Math.sin(cycle)).toFloat(),
-                                    gy = (15.0 * Math.cos(cycle)).toFloat(),
-                                    gz = (5.0 * Math.sin(cycle)).toFloat()
-                                )
-                            }
-                            tick in 4..6 -> { // Freefall & Extreme Impact G-force spike
-                                SensorReading(
-                                    timestampMs = System.currentTimeMillis(),
-                                    ax = (r.nextFloat() * 4.5f) - 2.2f,
-                                    ay = (r.nextFloat() * 6.5f) - 3.2f,
-                                    az = (r.nextFloat() * 5.0f) + 1.5f, // Big impact spike
-                                    gx = (r.nextFloat() * 180f) - 90f,
-                                    gy = (r.nextFloat() * 240f) - 120f,
-                                    gz = (r.nextFloat() * 150f) - 75f
-                                )
-                            }
-                            else -> { // Motionless post-fall flatline
-                                SensorReading(
-                                    timestampMs = System.currentTimeMillis(),
-                                    ax = 0.02f + r.nextGaussian().toFloat() * 0.02f,
-                                    ay = 0.05f + r.nextGaussian().toFloat() * 0.02f,
-                                    az = -0.98f + r.nextGaussian().toFloat() * 0.02f, // Gravitational force pointing downwards
-                                    gx = 0.1f + r.nextGaussian().toFloat() * 0.2f,
-                                    gy = -0.1f + r.nextGaussian().toFloat() * 0.2f,
-                                    gz = 0.05f + r.nextGaussian().toFloat() * 0.2f
-                                )
-                            }
-                        }
-                    }
-                    "RUNNING" -> {
-                        val cycle = tick * 1.5
-                        SensorReading(
-                            timestampMs = System.currentTimeMillis(),
-                            ax = (1.2 * Math.sin(cycle)).toFloat() + r.nextGaussian().toFloat() * 0.3f,
-                            ay = 1.0f + (2.5 * Math.abs(Math.cos(cycle))).toFloat() + r.nextGaussian().toFloat() * 0.4f,
-                            az = (0.8 * Math.sin(cycle)).toFloat() + r.nextGaussian().toFloat() * 0.2f,
-                            gx = (80.0 * Math.sin(cycle)).toFloat() + r.nextGaussian().toFloat() * 5f,
-                            gy = (110.0 * Math.cos(cycle)).toFloat() + r.nextGaussian().toFloat() * 5f,
-                            gz = (45.0 * Math.sin(cycle)).toFloat() + r.nextGaussian().toFloat() * 5f
-                        )
-                    }
-                    "WALKING" -> {
-                        val cycle = tick * 0.6
-                        SensorReading(
-                            timestampMs = System.currentTimeMillis(),
-                            ax = (0.3 * Math.sin(cycle)).toFloat() + r.nextGaussian().toFloat() * 0.1f,
-                            ay = 1.0f + (0.5 * Math.abs(Math.cos(cycle))).toFloat() + r.nextGaussian().toFloat() * 0.1f,
-                            az = (0.2 * Math.sin(cycle)).toFloat() + r.nextGaussian().toFloat() * 0.05f,
-                            gx = (25.0 * Math.sin(cycle)).toFloat(),
-                            gy = (30.0 * Math.cos(cycle)).toFloat(),
-                            gz = (15.0 * Math.sin(cycle)).toFloat()
-                        )
-                    }
-                    else -> { // STATIC / STANDING / STILL
-                        SensorReading(
-                            timestampMs = System.currentTimeMillis(),
-                            ax = 0.01f + r.nextGaussian().toFloat() * 0.01f,
-                            ay = 1.0f + r.nextGaussian().toFloat() * 0.01f, // standard 1G
-                            az = 0.01f + r.nextGaussian().toFloat() * 0.01f,
-                            gx = 0.0f + r.nextGaussian().toFloat() * 0.1f,
-                            gy = 0.0f + r.nextGaussian().toFloat() * 0.1f,
-                            gz = 0.0f + r.nextGaussian().toFloat() * 0.1f
-                        )
-                    }
-                }
 
-                _currentLiveReading.value = reading
-
-                // Append reading to currently active analysis to display on the chart
-                _currentLiveAnalysis.value?.let { current ->
-                    val updatedList = (current.sensorData + reading).takeLast(30) // keep last 30 readings
-                    val updatedAnalysis = current.copy(
-                        sensorData = updatedList,
-                        // Dynamically update confidence if still or active
-                        confidenceScore = if (patternType == "FALL_DETECTED" && tick > 8) {
-                            (current.confidenceScore + 1).coerceAtMost(99)
-                        } else current.confidenceScore,
-                        falseAlarmProbability = if (patternType == "FALL_DETECTED" && tick > 8) {
-                            (current.falseAlarmProbability - 1).coerceAtLeast(1)
-                        } else current.falseAlarmProbability
-                    )
-                    _currentLiveAnalysis.value = updatedAnalysis
-                }
-
-                tick++
-                delay(300) // fast 300ms polling simulation
-            }
-        }
-    }
-
-    fun stopSimulation() {
-        simulationJob?.cancel()
-    }
 
     private fun generateSampleSensorData(triggerType: String): List<SensorReading> {
         val list = mutableListOf<SensorReading>()

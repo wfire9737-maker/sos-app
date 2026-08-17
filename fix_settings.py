@@ -1,25 +1,21 @@
-import os
+import re
 
-filepath = "app/src/main/java/com/example/ui/screens/HomeScreen.kt"
-with open(filepath, "r") as f:
+with open('app/src/main/java/com/example/ui/screens/SettingsScreen.kt', 'r') as f:
     content = f.read()
 
-old_nav = """        NavigationBarItem(
-            icon = { Icon(Icons.Default.Person, contentDescription = null) },
-            label = { Text("Profile") },
-            selected = false,
-            onClick = onNavigateToSettings
-        )"""
+# The old Voice SOS item block looks like this:
+#                    SettingsItem(
+#                        icon = Icons.Default.Mic,
+#                        title = "Voice SOS",
+#                        subtitle = "Configure voice activation",
+#                        onClick = onNavigateToVoiceSos
+#                    )
+# We want to remove it, but keep the one we just added which has:
+#                    SettingsSwitchItem(
+#                        icon = Icons.Default.Mic,
+#                        title = "Voice SOS",
 
-new_nav = """        NavigationBarItem(
-            icon = { Icon(Icons.Default.Settings, contentDescription = null) },
-            label = { Text("Settings") },
-            selected = false,
-            onClick = onNavigateToSettings
-        )"""
+content = re.sub(r'\s*SettingsItem\(\s*icon = Icons\.Default\.Mic,\s*title = "Voice SOS",\s*subtitle = "Configure voice activation",\s*onClick = onNavigateToVoiceSos\s*\)', '', content)
 
-content = content.replace(old_nav, new_nav)
-
-with open(filepath, "w") as f:
+with open('app/src/main/java/com/example/ui/screens/SettingsScreen.kt', 'w') as f:
     f.write(content)
-

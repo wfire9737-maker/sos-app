@@ -40,6 +40,8 @@ sealed class VoiceCommand(val commandName: String) {
 class VoiceSosService(
     private val context: Context
 ) {
+    var isContinuousMode = false
+
     private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private val mainHandler = Handler(Looper.getMainLooper())
     private val sharedPrefs: SharedPreferences = context.getSharedPreferences("guardian_sos_voice", Context.MODE_PRIVATE)
@@ -91,7 +93,7 @@ class VoiceSosService(
 
     init {
         loadPhrasesAndLogs()
-        startMicLevelSimulation()
+        startMicLevelMonitor()
     }
 
     private fun loadPhrasesAndLogs() {
@@ -201,6 +203,11 @@ class VoiceSosService(
                         _speechStatusMessage.value = message
                         _isSpeechRecognizerActive.value = false
                         _voiceState.value = "LISTENING"
+                        if (isContinuousMode) {
+                            mainHandler.postDelayed({
+                                if (isContinuousMode) startSpeechRecognition(context)
+                            }, 500)
+                        }
                     }
 
                     override fun onResults(results: Bundle?) {
@@ -214,6 +221,11 @@ class VoiceSosService(
                         }
                         _isSpeechRecognizerActive.value = false
                         _voiceState.value = "LISTENING"
+                        if (isContinuousMode) {
+                            mainHandler.postDelayed({
+                                if (isContinuousMode) startSpeechRecognition(context)
+                            }, 500)
+                        }
                     }
 
                     override fun onPartialResults(partialResults: Bundle?) {
@@ -261,32 +273,23 @@ class VoiceSosService(
      * Evaluate recognized spoken text against predefined commands
      */
     fun evaluateRecognizedText(spokenText: String, confidence: Int, isPartial: Boolean = false) {
-        val text = spokenText.lowercase(Locale.ROOT).trim()
-
-        // 1. SOS Emergency Commands
-        val sosCommands = listOf(
-            "help", "emergency", "sos", "send sos", "call for help",
-            "i'm in danger", "im in danger", "i am in danger", "in danger"
-        )
-        val matchedSos = sosCommands.firstOrNull { text.contains(it) }
-
-        if (matchedSos != null) {
-            val matchedPhraseClean = when {
-                text.contains("send sos") -> "Send SOS"
-                text.contains("call for help") -> "Call for help"
-                text.contains("in danger") -> "I'm in danger"
-                text.contains("emergency") -> "Emergency"
-                text.contains("help") -> "Help"
-                else -> "SOS"
+        val text = spokenText.lowercase(java.util.Locale.ROOT).trim()
+        val smartSosPrefs = context.getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE)
+        val isVoiceSosEnabled = smartSosPrefs.getBoolean("voice_sos_enabled", false)
+        
+        if (isVoiceSosEnabled) {
+            val customPhrase = smartSosPrefs.getString("voice_sos_phrase", "Emergency SOS") ?: "Emergency SOS"
+            val target = customPhrase.lowercase(java.util.Locale.ROOT).trim()
+            
+            if (text.contains(target) && target.isNotBlank()) {
+                val command = VoiceCommand.Sos(customPhrase)
+                _lastRecognizedCommand.value = command
+                _speechStatusMessage.value = "Recognized Command: \"$customPhrase\" (Emergency SOS)"
+                addActivationLog(customPhrase, confidence, 85f, true)
+                onVoiceCommandRecognized?.invoke(command, confidence)
+                onVoiceSosTriggered?.invoke(customPhrase, confidence)
+                return
             }
-            val command = VoiceCommand.Sos(matchedPhraseClean)
-            _lastRecognizedCommand.value = command
-            _speechStatusMessage.value = "Recognized Command: \"$matchedPhraseClean\" (Emergency SOS)"
-            addActivationLog(matchedPhraseClean, confidence, 85f, true)
-
-            onVoiceCommandRecognized?.invoke(command, confidence)
-            onVoiceSosTriggered?.invoke(matchedPhraseClean, confidence)
-            return
         }
 
         // 2. Cancellation Commands
@@ -334,7 +337,7 @@ class VoiceSosService(
     }
 
     /**
-     * Process voice input for simulation or external voice pipeline
+     * Process voice input
      */
     fun processVoiceInput(spokenText: String, inputConfidence: Int) {
         if (!_isListening.value) return
@@ -348,7 +351,7 @@ class VoiceSosService(
         }
     }
 
-    private fun startMicLevelSimulation() {
+    private fun startMicLevelMonitor() {
         micPollerJob?.cancel()
         micPollerJob = serviceScope.launch {
             while (isActive) {

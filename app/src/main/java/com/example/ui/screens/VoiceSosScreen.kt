@@ -13,6 +13,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -57,8 +58,6 @@ fun VoiceSosScreen(
     }
 
     var customPhraseInput by remember { mutableStateOf("") }
-    var spokenSimulatedInput by remember { mutableStateOf("Help me") }
-    var simulatedConfidence by remember { mutableFloatStateOf(85f) }
 
     Scaffold(
         topBar = {
@@ -76,7 +75,7 @@ fun VoiceSosScreen(
                         modifier = Modifier.testTag("voice_screen_back_button")
                     ) {
                         Icon(
-                            imageVector = Icons.Filled.ArrowBack,
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back"
                         )
                     }
@@ -217,101 +216,56 @@ fun VoiceSosScreen(
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text(
-                            text = "Say or type a phrase to feed into the offline neural speech classifier. Accidental triggers are automatically rejected below your confidence limit.",
+                            text = "Speak into the microphone to trigger offline neural speech classification. Accidental triggers are automatically rejected below your confidence limit.",
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Spacer(modifier = Modifier.height(14.dp))
 
-                        // Spoken input choice
-                        OutlinedTextField(
-                            value = spokenSimulatedInput,
-                            onValueChange = { spokenSimulatedInput = it },
-                            label = { Text("Spoken Phrase Input") },
-                            leadingIcon = { Icon(Icons.Default.Mic, contentDescription = null) },
-                            singleLine = true,
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.fillMaxWidth().testTag("voice_input_field")
-                        )
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        // Confidence Slider
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text("Simulated confidence: ${simulatedConfidence.toInt()}%", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                            Text("Filter threshold: $threshold%", fontSize = 11.sp, color = Color.Red, fontWeight = FontWeight.SemiBold)
+                            Text("Speech Confidence Filter Threshold", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+                            Text("$threshold%", fontSize = 11.sp, color = Color.Red, fontWeight = FontWeight.SemiBold)
                         }
-                        Slider(
-                            value = simulatedConfidence,
-                            onValueChange = { simulatedConfidence = it },
-                            valueRange = 40f..100f,
-                            modifier = Modifier.testTag("confidence_slider")
-                        )
 
                         Spacer(modifier = Modifier.height(10.dp))
 
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Button(
-                                onClick = {
-                                    val hasPermission = androidx.core.content.ContextCompat.checkSelfPermission(
-                                        context,
-                                        android.Manifest.permission.RECORD_AUDIO
-                                    ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                        Button(
+                            onClick = {
+                                val hasPermission = androidx.core.content.ContextCompat.checkSelfPermission(
+                                    context,
+                                    android.Manifest.permission.RECORD_AUDIO
+                                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
 
-                                    if (isSpeechActive) {
-                                        viewModel.stopVoiceRecognition()
+                                if (isSpeechActive) {
+                                    viewModel.stopVoiceRecognition()
+                                } else {
+                                    if (hasPermission) {
+                                        viewModel.startVoiceRecognition(context)
                                     } else {
-                                        if (hasPermission) {
-                                            viewModel.startVoiceRecognition(context)
-                                        } else {
-                                            micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
-                                        }
+                                        micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
                                     }
-                                },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (isSpeechActive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.tertiary
-                                ),
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(44.dp)
-                                    .testTag("voice_screen_live_mic_btn")
-                            ) {
-                                Icon(
-                                    imageVector = if (isSpeechActive) Icons.Default.MicOff else Icons.Default.Mic,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(if (isSpeechActive) "Stop Mic" else "Live Mic", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                            }
-
-                            Button(
-                                onClick = {
-                                    viewModel.voiceSosService.processVoiceInput(
-                                        spokenSimulatedInput,
-                                        simulatedConfidence.toInt()
-                                    )
-                                },
-                                enabled = isListening,
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = MaterialTheme.colorScheme.primary
-                                ),
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier
-                                    .weight(1.2f)
-                                    .height(44.dp)
-                                    .testTag("sim_voice_speak_btn")
-                            ) {
-                                Text("Simulate Input", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                            }
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isSpeechActive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.tertiary
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(44.dp)
+                                .testTag("voice_screen_live_mic_btn")
+                        ) {
+                            Icon(
+                                imageVector = if (isSpeechActive) Icons.Default.MicOff else Icons.Default.Mic,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(if (isSpeechActive) "Stop Mic" else "Live Mic", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         }
 
                         if (liveSpokenText.isNotBlank() || speechStatusMessage.isNotBlank()) {

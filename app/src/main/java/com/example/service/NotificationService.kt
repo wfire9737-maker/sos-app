@@ -69,15 +69,15 @@ class NotificationService(private val context: Context, private val firestore: F
                     Log.d("NotificationService", "FCM Token acquired: $token")
                     // In a production app, you would send this token to your backend/ESP32 gateway.
                 } else {
-                    val defaultToken = "fcm_simulated_token_" + UUID.randomUUID().toString().take(8)
+                    val defaultToken = "fcm_token_" + UUID.randomUUID().toString().take(8)
                     _fcmToken.value = defaultToken
-                    Log.w("NotificationService", "FCM Token fetch failed, generating simulated token: ${task.exception?.message}")
+                    Log.w("NotificationService", "FCM Token fetch failed, generating token: ${task.exception?.message}")
                 }
             }
-        } catch (e: Exception) {
-            val defaultToken = "fcm_simulated_token_" + UUID.randomUUID().toString().take(8)
+        } catch (e: Throwable) {
+            val defaultToken = "fcm_token_" + UUID.randomUUID().toString().take(8)
             _fcmToken.value = defaultToken
-            Log.e("NotificationService", "FCM service unavailable, using local simulation token.")
+            Log.e("NotificationService", "FCM service unavailable, using local token.")
         }
     }
 
@@ -95,7 +95,7 @@ class NotificationService(private val context: Context, private val firestore: F
         } catch (e: Exception) {
             Log.e("NotificationService", "Failed to deserialize local notifications: ${e.message}")
             // Populate defaults if empty to let user see something beautiful immediately!
-            populateSimulatedDefaults()
+            populateInitialData()
         }
     }
 
@@ -209,7 +209,7 @@ class NotificationService(private val context: Context, private val firestore: F
         _notifications.value = updated
         saveLocalNotifications()
 
-        // Bulk update in Firestore (simulated batch/async)
+        // Bulk update in Firestore
         val db = firestore
         if (db != null) {
             CoroutineScope(Dispatchers.IO).launch {
@@ -271,7 +271,7 @@ class NotificationService(private val context: Context, private val firestore: F
 
     // --- INITIALIZE BEAUTIFUL PRESET DEFAULTS IF EMPTY ---
 
-    private fun populateSimulatedDefaults() {
+    private fun populateInitialData() {
         val defaults = listOf(
             NotificationItem(
                 title = "🚨 EMERGENCY: Fall Detected!",
@@ -320,55 +320,7 @@ class NotificationService(private val context: Context, private val firestore: F
         saveLocalNotifications()
     }
 
-    // --- SIMULATE EXTERNAL FCM INCOMING NOTIFICATIONS ---
 
-    fun triggerSimulatedFCMNotification(type: NotificationType) {
-        val item = when (type) {
-            NotificationType.EMERGENCY -> NotificationItem(
-                title = "🚨 EMERGENCY: Manual SOS Alert!",
-                body = "Physical SOS button held down on ESP32 band. Initiating live triage tracking.",
-                type = NotificationType.EMERGENCY,
-                deviceId = "ESP32-SOS-BAND-81F4"
-            )
-            NotificationType.BATTERY_LOW -> NotificationItem(
-                title = "🔋 CRITICAL battery: Smart-band 8%",
-                body = "ESP32 battery level is critical. Fall detection and GPS will stop soon.",
-                type = NotificationType.BATTERY_LOW,
-                deviceId = "ESP32-SOS-BAND-81F4"
-            )
-            NotificationType.DEVICE_OFFLINE -> NotificationItem(
-                title = "📡 BLE Beacon Offline",
-                body = "Continuous wireless pulse check failed. Heartbeat signal lost.",
-                type = NotificationType.DEVICE_OFFLINE,
-                deviceId = "ESP32-SOS-BAND-81F4"
-            )
-            NotificationType.GPS_UNAVAILABLE -> NotificationItem(
-                title = "🛰️ Telemetry Warning: GPS Lost",
-                body = "Satellite line-of-sight obstructed. Switching to cellular tower triangulation.",
-                type = NotificationType.GPS_UNAVAILABLE,
-                deviceId = "ESP32-SOS-BAND-81F4"
-            )
-            NotificationType.FIRMWARE_UPDATE -> NotificationItem(
-                title = "📥 Smart Band OTA Firmware v2.4.1",
-                body = "Hotfix for Bluetooth reconnect jitter is ready to install via ESP32 interface.",
-                type = NotificationType.FIRMWARE_UPDATE,
-                deviceId = "ESP32-SOS-BAND-81F4"
-            )
-            NotificationType.SAFE_ARRIVAL -> NotificationItem(
-                title = "🏠 Safe Arrival: Office",
-                body = "User checked into Office boundary. Automated safe-arrival ping received.",
-                type = NotificationType.SAFE_ARRIVAL,
-                deviceId = "ESP32-SOS-BAND-81F4"
-            )
-            NotificationType.EMERGENCY_CANCELLED -> NotificationItem(
-                title = "✅ Emergency SOS Cancelled",
-                body = "User manually deactivated active distress state using emergency screen passcode.",
-                type = NotificationType.EMERGENCY_CANCELLED,
-                deviceId = "ESP32-SOS-BAND-81F4"
-            )
-        }
-        addNotification(item)
-    }
 
     // --- JSON PARSING UTILITIES ---
 

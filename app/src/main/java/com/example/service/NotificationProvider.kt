@@ -49,10 +49,7 @@ class NotificationProvider(
         notificationService.markAllAsRead()
     }
 
-    fun triggerFCMNotification(category: NotificationCategory) {
-        val typeLegacy = mapCategoryToType(category)
-        notificationService.triggerSimulatedFCMNotification(typeLegacy)
-    }
+
 
     companion object {
         fun mapItemToModel(item: NotificationItem): NotificationModel {

@@ -156,74 +156,33 @@ fun DeveloperDashboardScreen(
             }
             StatusItemCustomColor("Last SOS Time", timeString, Color.Green)
 
-            val sosTriggerHandler = rememberLocationPermissionHandler {
-                viewModel.triggerManualSOS()
-            }
-            
-            Button(
-                onClick = { sosTriggerHandler() },
-                modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-            ) {
-                Text("Simulate SOS Button Press", color = Color.White)
-            }
+
 
             Spacer(modifier = Modifier.height(16.dp))
-            Text("Bluetooth Simulator", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text("BLE Diagnostics (Real)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+
+            val isEsp32Connected by viewModel.isEsp32Connected.collectAsState()
+            val activeEmergency by viewModel.activeEmergency.collectAsState()
+            
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    StatusItemCustomColor("BLE Status", if (isEsp32Connected) "Connected" else "Disconnected", if (isEsp32Connected) Color.Green else Color.Red)
+                    StatusItemCustomColor("SOS State", if (activeEmergency != null) "ACTIVE" else "INACTIVE", if (activeEmergency != null) Color.Red else Color.Green)
+                }
+            }
             
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { 
-                    firstDevice?.deviceId?.let { viewModel.connectSimulatedDevice(it) }
-                }, modifier = Modifier.weight(1f)) {
-                    Text("Connect Device")
+                Button(onClick = { viewModel.startEsp32Polling() }, modifier = Modifier.weight(1f)) {
+                    Text("Start Scan", maxLines = 1, style = MaterialTheme.typography.labelSmall)
                 }
-                Button(onClick = { 
-                    firstDevice?.deviceId?.let { viewModel.disconnectSimulatedDevice(it) }
-                }, modifier = Modifier.weight(1f)) {
-                    Text("Disconnect Device")
+                Button(onClick = { viewModel.stopEsp32Polling() }, modifier = Modifier.weight(1f)) {
+                    Text("Disconnect", maxLines = 1, style = MaterialTheme.typography.labelSmall)
                 }
-            }
-
-            Button(onClick = { 
-                firstDevice?.deviceId?.let { viewModel.triggerEsp32IncomingSos(it, "ESP32_BUTTON") }
-            }, modifier = Modifier.fillMaxWidth()) {
-                Text("Send SOS_PRESS")
-            }
-
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { 
-                    firstDevice?.deviceId?.let { viewModel.connectSimulatedDevice(it) }
-                }, modifier = Modifier.weight(1f)) {
-                    Text("Send DEVICE_CONNECTED")
-                }
-                Button(onClick = { 
-                    firstDevice?.deviceId?.let { viewModel.disconnectSimulatedDevice(it) }
-                }, modifier = Modifier.weight(1f)) {
-                    Text("Send DEVICE_DISCONNECTED")
-                }
-            }
-
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { 
-                    firstDevice?.let { 
-                        viewModel.sendSimulatedTelemetry(
-                            deviceId = it.deviceId,
-                            battery = 85,
-                            isCharging = false,
-                            latitude = it.latitude,
-                            longitude = it.longitude,
-                            ax = it.accelX, ay = it.accelY, az = it.accelZ,
-                            gx = it.gyroX, gy = it.gyroY, gz = it.gyroZ,
-                            firmware = it.firmwareVersion
-                        )
-                    }
-                }, modifier = Modifier.weight(1f)) {
-                    Text("Send BATTERY:85")
-                }
-                Button(onClick = { 
-                    firstDevice?.deviceId?.let { viewModel.triggerManualHeartbeatCheck(it) }
-                }, modifier = Modifier.weight(1f)) {
-                    Text("Send HEARTBEAT")
+                Button(onClick = { viewModel.resetEsp32() }, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) {
+                    Text("Reset ESP32", maxLines = 1, style = MaterialTheme.typography.labelSmall)
                 }
             }
 
@@ -290,9 +249,6 @@ fun DeveloperDashboardScreen(
                 Text("Open App Settings")
             }
 
-        }
-    }
-
             Spacer(modifier = Modifier.height(24.dp))
             Text("Module 8 - Developer Logs", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
 
@@ -323,7 +279,7 @@ fun DeveloperDashboardScreen(
                 }
             }
 
-            // Simulated events to generate logs for testing
+            // Manual event triggers to generate logs for testing
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = { viewModel.addDeveloperLog("Bluetooth Connected", "SUCCESS") }, modifier = Modifier.weight(1f)) {
                     Text("BT Event", style = MaterialTheme.typography.labelSmall)
@@ -435,21 +391,6 @@ fun DeveloperDashboardScreen(
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
                     onClick = { 
-                        resetTitle = "Reset Simulations"
-                        resetMessage = "Are you sure you want to disconnect simulated devices?"
-                        resetAction = {
-                            devices.forEach { viewModel.disconnectSimulatedDevice(it.deviceId) }
-                        }
-                        showResetDialog = true
-                    }, 
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                ) {
-                    Text("Reset All Simulations", maxLines = 1, style = MaterialTheme.typography.labelSmall)
-                }
-                
-                Button(
-                    onClick = { 
                         resetTitle = "Clear Test Data"
                         resetMessage = "Are you sure you want to delete all test records?"
                         resetAction = {
@@ -460,7 +401,7 @@ fun DeveloperDashboardScreen(
                         }
                         showResetDialog = true
                     }, 
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                 ) {
                     Text("Clear Test Data", maxLines = 1, style = MaterialTheme.typography.labelSmall)
@@ -487,7 +428,6 @@ fun DeveloperDashboardScreen(
                         resetTitle = "Restart Test Environment"
                         resetMessage = "Are you sure you want to restart the test environment?"
                         resetAction = {
-                            devices.forEach { viewModel.disconnectSimulatedDevice(it.deviceId) }
                             viewModel.deleteTestRecords()
                             viewModel.clearDeveloperLogs()
                             viewModel.cleanDiagnosticsLog()
@@ -500,9 +440,9 @@ fun DeveloperDashboardScreen(
                     Text("Restart Test Environment", maxLines = 1, style = MaterialTheme.typography.labelSmall)
                 }
             }
-
         }
-    
+    }
+}
 
 
 

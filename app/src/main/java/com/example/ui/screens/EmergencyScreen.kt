@@ -14,6 +14,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
@@ -48,6 +49,7 @@ fun EmergencyScreen(
     onNavigateBack: () -> Unit
 ) {
     val emergencySession by viewModel.emergencySession.collectAsState()
+    val activeEmergency by viewModel.activeEmergency.collectAsState()
     val isSirenPlaying by viewModel.isSirenPlaying.collectAsState()
     val sosSoundEnabled by viewModel.sosSoundEnabled.collectAsState()
     val countdown by viewModel.countdown.collectAsState()
@@ -55,6 +57,16 @@ fun EmergencyScreen(
     val sosWorkflowState by viewModel.sosWorkflowState.collectAsState()
     val context = LocalContext.current
     val primaryContactPhone = contacts.firstOrNull()?.phone ?: "911"
+    
+    val permissionHandler = rememberLocationPermissionHandler {
+        // Just trigger the permissions, the background service will pick up the GPS location
+    }
+
+    LaunchedEffect(countdown) {
+        if (countdown == null && activeEmergency != null) {
+            permissionHandler()
+        }
+    }
     
     val sosTriggerHandler = rememberLocationPermissionHandler {
         viewModel.triggerManualSOS()
@@ -184,57 +196,96 @@ fun EmergencyScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // Action Cards
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                ActionCard(
-                    title = "Call Emergency Contact",
-                    subtitle = "Instantly dials the primary emergency contact or 911",
-                    icon = Icons.Default.Phone,
-                    color = MaterialTheme.colorScheme.error,
-                    onClick = {
-                        if (ContextCompat.checkSelfPermission(context, Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED) {
-                            val intent = Intent(Intent.ACTION_CALL).apply { data = Uri.parse("tel:$primaryContactPhone") }
-                            context.startActivity(intent)
-                        } else {
-                            callPermissionLauncher.launch(Manifest.permission.CALL_PHONE)
+            if (countdown == null) {
+                val lat = activeEmergency?.latitude ?: emergencySession.activeAlert?.latitude ?: 0.0
+                val lng = activeEmergency?.longitude ?: emergencySession.activeAlert?.longitude ?: 0.0
+                val accuracy = activeEmergency?.accuracy ?: 8.0f
+
+                if (lat != 0.0 || lng != 0.0) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    Icons.Default.MyLocation,
+                                    contentDescription = "Location",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    "Location Details",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 16.sp
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text("Latitude: $lat", fontSize = 14.sp)
+                            Text("Longitude: $lng", fontSize = 14.sp)
+                            Text("Accuracy: ${accuracy.toInt()} m", fontSize = 14.sp)
                         }
                     }
-                )
-                
-                ActionCard(
-                    title = "Notify Contacts Again",
-                    subtitle = "Resends SOS SMS with your live location",
-                    icon = Icons.Default.Sms,
-                    color = AlertOrange,
-                    onClick = {
-                        val message = "🚨 EMERGENCY SOS: I need help! Location: https://maps.google.com/?q=${emergencySession?.activeAlert?.latitude ?: 0.0},${emergencySession?.activeAlert?.longitude ?: 0.0}"
-                        val intent = Intent(Intent.ACTION_SENDTO).apply {
-                            data = Uri.parse("smsto:$primaryContactPhone")
-                            putExtra("sms_body", message)
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+            }
+
+            if (countdown == null) {
+                // Action Cards
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    ActionCard(
+                        title = "Call Emergency Contact",
+                        subtitle = "Instantly dials the primary emergency contact or 911",
+                        icon = Icons.Default.Phone,
+                        color = MaterialTheme.colorScheme.error,
+                        onClick = {
+                            if (ContextCompat.checkSelfPermission(context, Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED) {
+                                val intent = Intent(Intent.ACTION_CALL).apply { data = Uri.parse("tel:$primaryContactPhone") }
+                                context.startActivity(intent)
+                            } else {
+                                callPermissionLauncher.launch(Manifest.permission.CALL_PHONE)
+                            }
                         }
-                        try {
-                            context.startActivity(intent)
-                        } catch (e: Exception) {
-                            // Fallback
+                    )
+                    
+                    ActionCard(
+                        title = "Notify Contacts Again",
+                        subtitle = "Resends SOS SMS with your live location",
+                        icon = Icons.Default.Sms,
+                        color = AlertOrange,
+                        onClick = {
+                            val message = "🚨 EMERGENCY SOS: I need help! Location: https://maps.google.com/?q=${emergencySession?.activeAlert?.latitude ?: 0.0},${emergencySession?.activeAlert?.longitude ?: 0.0}"
+                            val intent = Intent(Intent.ACTION_SENDTO).apply {
+                                data = Uri.parse("smsto:$primaryContactPhone")
+                                putExtra("sms_body", message)
+                            }
+                            try {
+                                context.startActivity(intent)
+                            } catch (e: Exception) {
+                                // Fallback
+                            }
+                            sosTriggerHandler()
                         }
-                        sosTriggerHandler()
-                    }
-                )
-                
-                ActionCard(
-                    title = if (isSirenPlaying) "Silence Siren Alarm" else "Sound Siren Alarm",
-                    subtitle = if (isSirenPlaying) "Alarm is currently sounding. Tap to silence." else if (!sosSoundEnabled) "SOS sound is OFF in Settings (Tap to start manually)" else "Plays a loud alarm to attract attention",
-                    icon = if (isSirenPlaying) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
-                    color = if (isSirenPlaying) MaterialTheme.colorScheme.error else Color(0xFF00BCD4),
-                    onClick = {
-                        viewModel.toggleSirenAlarm()
-                    }
-                )
+                    )
+                    
+                    ActionCard(
+                        title = if (isSirenPlaying) "Silence Siren Alarm" else "Sound Siren Alarm",
+                        subtitle = if (isSirenPlaying) "Alarm is currently sounding. Tap to silence." else if (!sosSoundEnabled) "SOS sound is OFF in Settings (Tap to start manually)" else "Plays a loud alarm to attract attention",
+                        icon = if (isSirenPlaying) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
+                        color = if (isSirenPlaying) MaterialTheme.colorScheme.error else Color(0xFF00BCD4),
+                        onClick = {
+                            viewModel.toggleSirenAlarm()
+                        }
+                    )
+                }
             }
             
             Spacer(modifier = Modifier.height(32.dp))

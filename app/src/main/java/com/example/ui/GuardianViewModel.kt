@@ -109,13 +109,32 @@ class GuardianViewModel @Inject constructor(
 
     private val _sosSoundEnabled = MutableStateFlow(
         try {
-            application.getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE)
+            getApplication<Application>().getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE)
                 .getBoolean("sos_sound_enabled", true)
         } catch (e: Exception) {
             true
         }
     )
     val sosSoundEnabled = _sosSoundEnabled.asStateFlow()
+    private val _voiceSosEnabled = MutableStateFlow(
+        try {
+            getApplication<Application>().getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE)
+                .getBoolean("voice_sos_enabled", false)
+        } catch (e: Exception) {
+            false
+        }
+    )
+    val voiceSosEnabled = _voiceSosEnabled.asStateFlow()
+
+    private val _voiceSosPhrase = MutableStateFlow(
+        try {
+            getApplication<Application>().getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE)
+                .getString("voice_sos_phrase", "Emergency SOS") ?: "Emergency SOS"
+        } catch (e: Exception) {
+            "Emergency SOS"
+        }
+    )
+    val voiceSosPhrase = _voiceSosPhrase.asStateFlow()
 
     private val _isSirenPlaying = MutableStateFlow(false)
     val isSirenPlaying = _isSirenPlaying.asStateFlow()
@@ -162,6 +181,8 @@ class GuardianViewModel @Inject constructor(
     
     // Bridge Device service states
     val isRefreshingDevices: StateFlow<Boolean> = deviceService.isRefreshing
+    val isEsp32Connected: StateFlow<Boolean> = deviceService.isEsp32Connected
+    val activeEmergency: StateFlow<EmergencyModel?> = emergencyService.activeEmergency
     val diagnosticsLog: StateFlow<List<String>> = deviceService.diagnosticsLog
     val isDiagnosingDevice: StateFlow<Boolean> = deviceService.isDiagnosing
     val isNetworkAvailable: StateFlow<Boolean> = deviceService.isNetworkAvailable
@@ -186,7 +207,6 @@ class GuardianViewModel @Inject constructor(
     val currentLocation = locationService.currentLocation
     val routePoints = locationService.routePoints
     val isTrackingLocation = locationService.isTracking
-    val isLocationSimulation = locationService.isSimulationMode
 
     // Settings & Security Custom States
     private val _themeMode = MutableStateFlow("SYSTEM")
@@ -230,6 +250,42 @@ class GuardianViewModel @Inject constructor(
 
     private val _criticalAlarmsEnabled = MutableStateFlow(true)
     val criticalAlarmsEnabled = _criticalAlarmsEnabled.asStateFlow()
+    fun setVoiceSosEnabled(enabled: Boolean) {
+        _voiceSosEnabled.value = enabled
+        try {
+            getApplication<Application>().getSharedPreferences("smart_sos_settings", android.content.Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean("voice_sos_enabled", enabled)
+                .apply()
+                
+            val intent = android.content.Intent(getApplication(), com.example.service.VoiceSosForegroundService::class.java)
+            if (enabled) {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                    getApplication<Application>().startForegroundService(intent)
+                } else {
+                    getApplication<Application>().startService(intent)
+                }
+            } else {
+                intent.action = "STOP"
+                getApplication<Application>().startService(intent)
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("GuardianViewModel", "Failed to save/start voice_sos_enabled: ${e.message}")
+        }
+    }
+
+    fun setVoiceSosPhrase(phrase: String) {
+        _voiceSosPhrase.value = phrase
+        try {
+            getApplication<Application>().getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE)
+                .edit()
+                .putString("voice_sos_phrase", phrase)
+                .apply()
+        } catch (e: Exception) {
+            Log.e("GuardianViewModel", "Failed to save voice_sos_phrase: ${e.message}")
+        }
+    }
+
     fun setCriticalAlarmsEnabled(enabled: Boolean) { _criticalAlarmsEnabled.value = enabled }
 
     private val _arrivalAlertsEnabled = MutableStateFlow(true)
@@ -510,7 +566,6 @@ class GuardianViewModel @Inject constructor(
                 deviceId = "MOBILE-APP-TIMER"
             )
             _uiEvents.emit(UiEvent.ShowToast("🚨 SAFETY TIMER EXPIRED: AUTOMATIC SOS DISPATCHED!"))
-            _uiEvents.emit(UiEvent.NavigateToEmergency)
         }
     }
 
@@ -534,7 +589,6 @@ class GuardianViewModel @Inject constructor(
                 deviceId = "MOBILE-APP-SOS"
             )
             
-            _uiEvents.emit(UiEvent.NavigateToEmergency)
         }
     }
 
@@ -563,7 +617,6 @@ class GuardianViewModel @Inject constructor(
             aiService.addAnalysisLog(analysis)
 
             _uiEvents.emit(UiEvent.ShowToast("🚨 FALL DETECTED: AUTOMATIC SOS DISPATCHED!"))
-            _uiEvents.emit(UiEvent.NavigateToEmergency)
         }
     }
 
@@ -590,8 +643,6 @@ class GuardianViewModel @Inject constructor(
             )
             aiService.addAnalysisLog(analysis)
 
-            _uiEvents.emit(UiEvent.ShowToast("🚨 VOICE SOS: AUTOMATIC SOS DISPATCHED!"))
-            _uiEvents.emit(UiEvent.NavigateToEmergency)
         }
     }
 
@@ -599,18 +650,10 @@ class GuardianViewModel @Inject constructor(
         viewModelScope.launch {
             when (command) {
                 is com.example.service.VoiceCommand.Sos -> {
-                    val model = initiateEmergencySequence(
-                        triggerSource = "VOICE_COMMAND_SOS",
-                        deviceId = "MOBILE-VOICE-RECOGNIZE"
-                    )
-                    val uid = (authState.value as? AuthState.Success)?.user?.uid ?: "anonymous"
-                    locationService.startLocationTracking(uid)
-                    locationService.setSimulationMode(false)
-
-                    val confirmationMsg = "🚨 Voice SOS Triggered (\"${command.matchedPhrase}\")! Emergency contacts notified and live tracking active."
+                    triggerVoiceSOS(command.matchedPhrase, confidence)
+                    val confirmationMsg = "🚨 Voice SOS: Countdown Initiated (\"${command.matchedPhrase}\")"
                     _voiceCommandConfirmation.value = confirmationMsg
                     _uiEvents.emit(UiEvent.ShowToast(confirmationMsg))
-                    _uiEvents.emit(UiEvent.NavigateToEmergency)
                 }
                 is com.example.service.VoiceCommand.CancelSos -> {
                     alarmVibratorService.stopAlarm()
@@ -620,6 +663,9 @@ class GuardianViewModel @Inject constructor(
                     if (emergencyService.isEmergencyActive()) {
                         emergencyService.markSafeAndClose()
                     }
+                    
+                    android.util.Log.d("SOS_ESP32", "SOS CANCELLED")
+                    deviceService.resetEsp32()
 
                     val currentAlert = _emergencySession.value.activeAlert
                     if (currentAlert != null) {
@@ -633,7 +679,6 @@ class GuardianViewModel @Inject constructor(
                 is com.example.service.VoiceCommand.TrackLocation -> {
                     val uid = (authState.value as? AuthState.Success)?.user?.uid ?: "anonymous"
                     locationService.startLocationTracking(uid)
-                    locationService.setSimulationMode(false)
 
                     val confirmationMsg = "📍 Live location tracking started via voice command: \"${command.matchedPhrase}\"."
                     _voiceCommandConfirmation.value = confirmationMsg
@@ -656,10 +701,6 @@ class GuardianViewModel @Inject constructor(
 
     fun clearVoiceCommandConfirmation() {
         _voiceCommandConfirmation.value = null
-    }
-
-    fun triggerESP32SimulatedSOS(triggerType: String) {
-        triggerEsp32SOS(triggerType)
     }
 
     fun resolveAlert(alertId: String, notes: String) {
@@ -755,10 +796,6 @@ class GuardianViewModel @Inject constructor(
         locationService.stopLocationTracking()
     }
 
-    fun toggleLocationSimulation(enabled: Boolean) {
-        locationService.setSimulationMode(enabled)
-    }
-
     fun saveFavoritePlace(name: String, lat: Double, lng: Double, type: String) {
         locationService.saveFavoritePlace(name, lat, lng, type)
     }
@@ -824,8 +861,6 @@ class GuardianViewModel @Inject constructor(
             aiAnalysisService.generateAnalysisForAlert(model.emergencyId, triggerType)
 
             // Emit Navigation event to automatically redirect to the emergency screen!
-            _uiEvents.emit(UiEvent.ShowToast("🚨 ESP32 SOS ALERT TRIGGERED!"))
-            _uiEvents.emit(UiEvent.NavigateToEmergency)
         }
     }
 
@@ -868,7 +903,6 @@ class GuardianViewModel @Inject constructor(
                 alarmVibratorService.stopAlarm()
                 alarmVibratorService.stopVibration()
                 _isSirenPlaying.value = false
-                aiAnalysisService.stopSimulation()
                 
                 // End tracking and sync to cloud
                 emergencyProvider.markEmergencySafe()
@@ -892,9 +926,10 @@ class GuardianViewModel @Inject constructor(
             val expectedPin = securityService.getEmergencyPin()
             val success = emergencyProvider.cancelEmergency(pin, expectedPin, "Cancelled securely with PIN verification.")
             if (success) {
+                Log.d("SOS_ESP32", "SOS CANCELLED")
+                deviceService.resetEsp32()
                 alarmVibratorService.stopAlarm()
                 alarmVibratorService.stopVibration()
-                aiAnalysisService.stopSimulation()
                 alarmVibratorService.cleanUp()
                 
                 _emergencySession.value = EmergencySession() // Reset legacy state
@@ -914,7 +949,6 @@ class GuardianViewModel @Inject constructor(
             if (alertId != null) {
                 val userName = (authState.value as? AuthState.Success)?.user?.name ?: "Operator"
                 databaseService.resolveSOS(alertId, userName, notes)
-                aiAnalysisService.stopSimulation()
                 
                 // End tracking loop
                 emergencyProvider.markEmergencySafe()
@@ -983,14 +1017,6 @@ class GuardianViewModel @Inject constructor(
         notificationProvider.deleteNotification(id)
     }
 
-    fun simulateIncomingNotification(type: NotificationType) {
-        notificationService.triggerSimulatedFCMNotification(type)
-    }
-
-    fun simulateIncomingNotificationNew(category: NotificationCategory) {
-        notificationProvider.triggerFCMNotification(category)
-    }
-
     fun refreshDeviceStatus() {
         deviceService.refreshDeviceStatus()
     }
@@ -1047,64 +1073,25 @@ class GuardianViewModel @Inject constructor(
         }
     }
 
-    fun sendSimulatedTelemetry(
-        deviceId: String,
-        battery: Int,
-        isCharging: Boolean,
-        latitude: Double,
-        longitude: Double,
-        ax: Float, ay: Float, az: Float,
-        gx: Float, gy: Float, gz: Float,
-        firmware: String
-    ) {
+
+    fun resetEsp32() {
         viewModelScope.launch {
-            deviceService.receiveTelemetry(
-                deviceId = deviceId,
-                batteryLevel = battery,
-                isCharging = isCharging,
-                latitude = latitude,
-                longitude = longitude,
-                ax = ax, ay = ay, az = az,
-                gx = gx, gy = gy, gz = gz,
-                firmwareVersion = firmware
-            )
+            deviceService.resetEsp32()
         }
-    }
-
-    fun triggerEsp32IncomingSos(deviceId: String, triggerType: String) {
-        val currentUser = (authState.value as? AuthState.Success)?.user
-        val uid = currentUser?.uid ?: "user-101"
-        val name = currentUser?.name ?: "Marcus Vance"
-        val phone = currentUser?.phone ?: "+1-555-0143"
-        deviceService.handleIncomingEsp32Sos(
-            deviceId = deviceId,
-            triggerType = triggerType,
-            userId = uid,
-            userName = name,
-            userPhone = phone
-        )
-    }
-
-    fun triggerManualHeartbeatCheck(deviceId: String) {
-        deviceService.triggerManualHeartbeatCheck(deviceId)
     }
 
 
     // --- MODULE 5: GPS TESTING ---
-    val isSimulationMode = locationService.isSimulationMode
     val isGpsDisabled = locationService.isGpsDisabled
     val isWeakGps = locationService.isWeakGps
 
-    fun setSimulationMode(enabled: Boolean) {
-        locationService.setSimulationMode(enabled)
-    }
 
     fun setGpsDisabled(disabled: Boolean) {
-        locationService.setGpsDisabled(disabled)
+        // No-op
     }
 
     fun setWeakGps(weak: Boolean) {
-        locationService.setWeakGps(weak)
+        // No-op
     }
 
 
@@ -1176,13 +1163,13 @@ class GuardianViewModel @Inject constructor(
         locationService.setCustomLocation(lat, lng)
     }
 
-    fun disconnectSimulatedDevice(deviceId: String) {
+    fun disconnectDevice(deviceId: String) {
         viewModelScope.launch {
             deviceService.handleDeviceDisconnect(deviceId)
         }
     }
     
-    fun connectSimulatedDevice(deviceId: String) {
+    fun connectDevice(deviceId: String) {
         viewModelScope.launch {
             val device = databaseService.devices.value.find { it.deviceId == deviceId }
             if (device != null) {
@@ -1193,7 +1180,7 @@ class GuardianViewModel @Inject constructor(
                         lastSync = System.currentTimeMillis()
                     )
                 )
-                deviceService.addCommLog("✅ Simulated DEVICE_CONNECTED message processed.")
+                deviceService.addCommLog("✅ DEVICE_CONNECTED message processed.")
             }
         }
     }
@@ -1204,11 +1191,28 @@ class GuardianViewModel @Inject constructor(
         alarmVibratorService.cleanUp()
         fallDetectionService.cleanup()
         voiceSosService.cleanup()
-        aiService.stopSimulation()
+        deviceService.stopEsp32Polling()
     }
 
 
+    
     init {
+        // Voice SOS background setup
+        try {
+            val prefs = getApplication<Application>().getSharedPreferences("smart_sos_settings", android.content.Context.MODE_PRIVATE)
+            val isVoiceEnabled = prefs.getBoolean("voice_sos_enabled", false)
+            if (isVoiceEnabled) {
+                val intent = android.content.Intent(getApplication(), com.example.service.VoiceSosForegroundService::class.java)
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                    getApplication<Application>().startForegroundService(intent)
+                } else {
+                    getApplication<Application>().startService(intent)
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("GuardianViewModel", "Failed to start Voice SOS on init: ${e.message}")
+        }
+
         // Register callbacks for Fall, Voice SOS, and Safety Timer automation
         viewModelScope.launch { authService.authState.collect { state -> if (state is AuthState.Success) { trustedPlacesService.initialize(state.user.uid) } } }
         safetyTimerService.onTimerExpiredCallback = {
@@ -1222,6 +1226,15 @@ class GuardianViewModel @Inject constructor(
         }
         voiceSosService.onVoiceCommandRecognized = { command, confidence ->
             handleVoiceCommand(command, confidence)
+        }
+
+        viewModelScope.launch {
+            deviceService.incomingEsp32SosEvent.collect { triggerType ->
+                if (triggerType != null) {
+                    triggerEsp32SOS(triggerType)
+                    deviceService.clearIncomingEsp32SosEvent()
+                }
+            }
         }
 
         viewModelScope.launch {
@@ -1254,5 +1267,16 @@ class GuardianViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    fun startEsp32Polling() {
+        deviceService.startEsp32Polling()
+    }
+
+    fun stopEsp32Polling() {
+        deviceService.stopEsp32Polling()
+    }
+    fun triggerManualHeartbeatCheck(deviceId: String) {
+        deviceService.triggerManualHeartbeatCheck(deviceId)
     }
 }

@@ -41,7 +41,7 @@ class DatabaseService(private val context: Context, private val contactDao: Emer
     private val _contacts = MutableStateFlow<List<EmergencyContact>>(emptyList())
     val contacts: StateFlow<List<EmergencyContact>> = _contacts.asStateFlow()
 
-    // Network Simulation State
+    // Network State
     val isOfflineMode = MutableStateFlow(false)
     val isSlowNetwork = MutableStateFlow(false)
 
@@ -137,7 +137,7 @@ class DatabaseService(private val context: Context, private val contactDao: Emer
     }
 
     private suspend fun <T> runWithRetry(times: Int = 3, block: suspend () -> T): T {
-        if (isOfflineMode.value) throw Exception("Simulated Offline Mode: Network Unavailable")
+        if (isOfflineMode.value) throw Exception("Offline Mode: Network Unavailable")
         if (isSlowNetwork.value) {
             kotlinx.coroutines.delay(2000L)
         }
@@ -423,17 +423,7 @@ class DatabaseService(private val context: Context, private val contactDao: Emer
     }
 
     private fun preloadDemoDevices() {
-        val demoDevices = listOf(
-            Device(
-                deviceId = "demo-esp32-safety-band",
-                userId = "user-101",
-                deviceName = "Guardian Wristband ESP32",
-                status = "CONNECTED",
-                batteryLevel = 84,
-                macAddress = "30:AE:A4:07:0D:64",
-                lastSync = System.currentTimeMillis() - 60000
-            )
-        )
+        val demoDevices = emptyList<Device>()
         saveDevicesListLocally(demoDevices)
     }
 

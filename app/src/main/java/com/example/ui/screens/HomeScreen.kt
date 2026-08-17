@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -56,6 +57,7 @@ fun HomeScreen(
     val authState by viewModel.authState.collectAsState()
     val alerts by viewModel.alerts.collectAsState()
     val devices by viewModel.devices.collectAsState()
+    val isEsp32Connected by viewModel.isEsp32Connected.collectAsState()
     val emergencySession by viewModel.emergencySession.collectAsState()
     val notifications by viewModel.notifications.collectAsState()
     val currentUser = (authState as? AuthState.Success)?.user ?: User(name = "User")
@@ -171,7 +173,7 @@ fun HomeScreen(
                 items(devices, key = { it.deviceId }) { device ->
                     DeviceCard(
                         device = device,
-                        onSimulateClick = { reason -> viewModel.triggerEsp32SOS(reason) },
+                        isEsp32Connected = isEsp32Connected,
                         onMonitorClick = onNavigateToDeviceMonitoring
                     )
                 }
@@ -267,22 +269,22 @@ fun SosButtonSection(onSosClick: () -> Unit) {
 
 @Composable
 fun StatusGrid(devices: List<Device>) {
-    val isBleConnected = devices.any { it.status == "CONNECTED" }
-    val maxBattery = devices.maxOfOrNull { it.batteryLevel } ?: 0
+    val isBleConnected = devices.any { it.status == "CONNECTED" || it.status == "ALERTing" }
+    val maxBattery = devices.filter { it.status == "CONNECTED" || it.status == "ALERTing" }.maxOfOrNull { it.batteryLevel } ?: 0
     
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         StatusCard(
             modifier = Modifier.weight(1f),
             icon = Icons.Default.Bluetooth,
             label = "Bluetooth",
-            value = if (isBleConnected) "Connected" else "Not Paired",
+            value = if (isBleConnected) "Connected" else "Disconnected",
             statusColor = if (isBleConnected) SafetyGreen else MaterialTheme.colorScheme.onSurfaceVariant
         )
         StatusCard(
             modifier = Modifier.weight(1f),
             icon = Icons.Default.BatteryFull,
             label = "Battery",
-            value = if (devices.isNotEmpty()) "$maxBattery%" else "--",
+            value = if (isBleConnected) "$maxBattery%" else "--",
             statusColor = if (maxBattery > 20) SafetyGreen else if (maxBattery > 0) AlertOrange else MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
@@ -309,7 +311,8 @@ fun StatusCard(modifier: Modifier = Modifier, icon: androidx.compose.ui.graphics
 }
 
 @Composable
-fun DeviceCard(device: Device, onSimulateClick: (String) -> Unit, onMonitorClick: () -> Unit) {
+fun DeviceCard(device: Device, isEsp32Connected: Boolean, onMonitorClick: () -> Unit) {
+    val isConnected = isEsp32Connected || device.status == "CONNECTED"
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -319,28 +322,27 @@ fun DeviceCard(device: Device, onSimulateClick: (String) -> Unit, onMonitorClick
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
-                    modifier = Modifier.size(40.dp).background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
+                    modifier = Modifier.size(40.dp).background(if (isConnected) SafetyGreen.copy(alpha = 0.2f) else MaterialTheme.colorScheme.errorContainer, CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(Icons.Default.Watch, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Icon(Icons.Default.Watch, contentDescription = null, tint = if (isConnected) SafetyGreen else MaterialTheme.colorScheme.error)
                 }
                 Spacer(modifier = Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(device.deviceName, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                     Text(device.macAddress, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                Badge(containerColor = if (device.status == "CONNECTED") SafetyGreen else AlertOrange) {
-                    Text(if (device.status == "CONNECTED") "Online" else "Offline", modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                Badge(containerColor = if (isConnected) SafetyGreen else MaterialTheme.colorScheme.error) {
+                    Text(
+                        if (isConnected) "Connected to SOS Device" else "SOS Device Disconnected",
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
             Spacer(modifier = Modifier.height(16.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { onSimulateClick("FALL_DETECTED") }, modifier = Modifier.weight(1f)) {
-                    Text("Simulate Fall", fontSize = 11.sp)
-                }
-                Button(onClick = onMonitorClick, modifier = Modifier.weight(1f)) {
-                    Text("Diagnostics", fontSize = 11.sp)
-                }
+            Button(onClick = onMonitorClick, modifier = Modifier.fillMaxWidth()) {
+                Text("Diagnostics", fontSize = 11.sp)
             }
         }
     }

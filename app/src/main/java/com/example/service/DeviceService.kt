@@ -2,6 +2,12 @@ package com.example.service
 
 import android.content.Context
 import android.util.Log
+
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import org.json.JSONObject
+import java.util.concurrent.TimeUnit
+
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.BroadcastReceiver
@@ -9,6 +15,7 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.bluetooth.BluetoothAdapter
+import com.example.config.Esp32Config
 import com.example.model.Device
 import com.example.model.NotificationItem
 import com.example.model.NotificationType
@@ -16,14 +23,15 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import java.util.UUID
 
 class DeviceService(
     private val context: Context,
     private val databaseService: DatabaseService,
-    private val notificationService: NotificationService,
-    private val deviceDataSource: com.example.data.DeviceDataSource = com.example.data.MockDeviceDataSource()
+    private val notificationService: NotificationService
 ) {
+    val bleManager = com.example.ble.BleManager(context)
     private val deviceProvider = DeviceProvider(context)
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     
@@ -32,6 +40,9 @@ class DeviceService(
 
     private val _isNetworkAvailable = MutableStateFlow(true)
     val isNetworkAvailable: StateFlow<Boolean> = _isNetworkAvailable.asStateFlow()
+
+    private val _isEsp32Connected = MutableStateFlow(false)
+    val isEsp32Connected: StateFlow<Boolean> = _isEsp32Connected.asStateFlow()
 
     private val _esp32CommLogs = MutableStateFlow<List<String>>(emptyList())
     val esp32CommLogs: StateFlow<List<String>> = _esp32CommLogs.asStateFlow()
@@ -42,7 +53,18 @@ class DeviceService(
     private val _isDiagnosing = MutableStateFlow(false)
     val isDiagnosing: StateFlow<Boolean> = _isDiagnosing.asStateFlow()
 
+    
     private var telemetryJob: Job? = null
+    private var esp32PollingJob: Job? = null
+
+    private val _incomingEsp32SosEvent = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+    val incomingEsp32SosEvent: kotlinx.coroutines.flow.StateFlow<String?> = _incomingEsp32SosEvent.asStateFlow()
+
+    fun clearIncomingEsp32SosEvent() {
+        _incomingEsp32SosEvent.value = null
+    }
+
+
 
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private var bluetoothReceiver: BroadcastReceiver? = null
@@ -52,14 +74,23 @@ class DeviceService(
     private val warnedLowBatteryIds = mutableSetOf<String>()
     private val warnedOfflineIds = mutableSetOf<String>()
 
+    private val sharedOkHttpClient = OkHttpClient.Builder()
+        .connectTimeout(2, TimeUnit.SECONDS)
+        .readTimeout(2, TimeUnit.SECONDS)
+        .writeTimeout(2, TimeUnit.SECONDS)
+        .connectionPool(okhttp3.ConnectionPool(5, 5, TimeUnit.MINUTES))
+        .build()
+
     init {
         startTelemetryLoop()
         startConnectivityMonitors()
+        startEsp32Polling()
     }
 
 
     fun cleanup() {
         telemetryJob?.cancel()
+        esp32PollingJob?.cancel()
         try {
             val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
             networkCallback?.let { connectivityManager.unregisterNetworkCallback(it) }
@@ -125,7 +156,7 @@ class DeviceService(
         }
 
         currentDevices.forEach { device ->
-            // Skip updating devices that are actively in simulated REBOOTING state
+            // Skip updating devices that are actively in REBOOTING state
             if (device.status == "REBOOTING") return@forEach
 
             val updatedDevice = if (device.macAddress == "00:00:00:00:00:00" || device.deviceId.contains("local")) {
@@ -167,19 +198,7 @@ class DeviceService(
                     lastSync = System.currentTimeMillis()
                 )
             } else {
-                // Simulated Wearable band v1 telemetry fluctuations!
-                val randomChange = (-2..2).random()
-                val newBatt = (device.batteryLevel - 1).coerceIn(1, 100) // Drain battery gradually
-                val newTemp = (35.8f + (Math.random().toFloat() * 1.5f))
-                val newCpu = (5..35).random()
-                val newMem = (38..48).random()
-                val wifiStrength = (-75..-50).random()
-                
-                // Keep simulated connection status stable unless critical battery
-                val connStat = if (newBatt <= 2) "OFFLINE" else "ONLINE"
-                val deviceStatus = if (newBatt <= 2) "DISCONNECTED" else "CONNECTED"
-                
-                val score = calculateHealthScore(newBatt, newTemp, newMem, newCpu, "CONNECTED")
+                val score = calculateHealthScore(device.batteryLevel, device.deviceTemperature, device.memoryUsagePercent, device.cpuUsagePercent, device.bluetoothStatus)
                 val health = when {
                     score >= 90 -> "EXCELLENT"
                     score >= 70 -> "GOOD"
@@ -188,16 +207,8 @@ class DeviceService(
                 }
 
                 device.copy(
-                    batteryLevel = newBatt,
-                    deviceTemperature = newTemp,
-                    cpuUsagePercent = newCpu,
-                    memoryUsagePercent = newMem,
-                    wifiSignal = wifiStrength,
-                    uptimeSeconds = device.uptimeSeconds + 12,
                     healthScore = score,
                     deviceHealth = health,
-                    connectionStatus = connStat,
-                    status = deviceStatus,
                     lastSync = System.currentTimeMillis()
                 )
             }
@@ -325,7 +336,7 @@ class DeviceService(
                 )
             )
 
-            // Step 2: Simulate boot timer
+            // Step 2: Wait for boot timer
             delay(5000)
 
             // Step 3: Online state restore
@@ -547,7 +558,7 @@ class DeviceService(
 
         addCommLog("📥 Parsing incoming UDP/BLE packet from $deviceId...")
         
-        // Auto network retry simulation wrapper
+        // Auto network retry wrapper
         try {
             runWithNetworkRetry(1) {
                 val score = calculateHealthScore(batteryLevel, device.deviceTemperature, device.memoryUsagePercent, device.cpuUsagePercent, "CONNECTED")
@@ -602,26 +613,13 @@ class DeviceService(
         serviceScope.launch {
             addCommLog("🚨 SOS Event received from ESP32 [$deviceId]: Type: $triggerType")
             val device = databaseService.devices.value.find { it.deviceId == deviceId }
-            
-            val lat = device?.latitude ?: 37.7749
-            val lng = device?.longitude ?: -122.4194
 
-            // Trigger Firestore SOS Alert
-            databaseService.triggerSOS(
-                userId = userId,
-                userName = userName,
-                userPhone = userPhone,
-                lat = lat,
-                lng = lng,
-                triggerType = triggerType
-            )
-
-            // Update Device Status
+            // Update Device Status locally to ALERTing
             device?.let {
                 databaseService.updateDevice(it.copy(status = "ALERTing"))
             }
 
-            addCommLog("📢 SOS Broadcast dispatched to security contacts!")
+            addCommLog("⏱️ SOS 5-second countdown initiated. Awaiting user cancellation or dispatch...")
         }
     }
 
@@ -702,5 +700,89 @@ class DeviceService(
             }
             addCommLog("❌ Reconnection: Background reconnect loop terminated after $maxAttempts failed attempts. Please inspect hardware.")
         }
+    }
+
+    fun resetEsp32() {
+        serviceScope.launch(Dispatchers.IO) {
+            try {
+                Log.d("SOS_ESP32", "RESETTING ESP32")
+                bleManager.sendCommand(com.example.ble.BleProtocol.CMD_RESET_SOS)
+                addCommLog("📡 Sent RESET command via BLE to ESP32")
+            } catch (e: Exception) {
+                Log.w("SOS_ESP32", "ESP32 RESET ERROR: ${e.message}")
+            }
+        }
+    }
+
+    fun startEsp32Polling() {
+        if (esp32PollingJob?.isActive == true) return
+        esp32PollingJob = serviceScope.launch {
+            launch {
+                bleManager.sosEvent.collect { isSosActive ->
+                    if (isSosActive) {
+                        Log.d("DeviceService", "ESP32 SOS Button pressed via BLE!")
+                        addCommLog("🚨 ESP32 Hardware SOS Button Activated via BLE!")
+                        _incomingEsp32SosEvent.value = "ESP32_BUTTON"
+                        handleIncomingEsp32Sos(
+                            deviceId = "ESP32-SOS-BAND-81F4",
+                            triggerType = "ESP32_BUTTON"
+                        )
+                    } else {
+                        Log.d("DeviceService", "ESP32 SOS Button reset via BLE.")
+                    }
+                }
+            }
+            
+            launch {
+                kotlinx.coroutines.flow.combine(
+                    bleManager.connectionState,
+                    bleManager.batteryLevel,
+                    bleManager.rssi,
+                    bleManager.deviceName,
+                    bleManager.deviceMac
+                ) { state, battery, rssi, name, mac ->
+                    val connected = state == com.example.ble.BleManager.BleState.READY || state == com.example.ble.BleManager.BleState.CONNECTED
+                    if (_isEsp32Connected.value != connected) {
+                        _isEsp32Connected.value = connected
+                        if (connected) {
+                            addCommLog("🟢 Connected to SOS Device: ${name ?: "Unknown ESP32"}")
+                        } else {
+                            addCommLog("🔴 SOS Device Disconnected")
+                        }
+                    }
+
+                    val existingDevice = databaseService.devices.value.find { it.deviceId == "ESP32-SOS-BAND-81F4" }
+                    if (connected) {
+                        val newDevice = com.example.model.Device(
+                            deviceId = "ESP32-SOS-BAND-81F4",
+                            userId = existingDevice?.userId ?: "local-user",
+                            deviceName = name ?: existingDevice?.deviceName ?: "ESP32 SOS Band",
+                            status = if (existingDevice?.status == "ALERTing") "ALERTing" else "CONNECTED",
+                            batteryLevel = battery ?: existingDevice?.batteryLevel ?: 0,
+                            macAddress = mac ?: existingDevice?.macAddress ?: "00:00:00:00:00:00",
+                            signalStrength = rssi ?: existingDevice?.signalStrength ?: -67,
+                            lastSync = System.currentTimeMillis()
+                        )
+                        databaseService.updateDevice(newDevice)
+                    } else {
+                        existingDevice?.let {
+                            if (it.status != "ALERTing" && it.status != "DISCONNECTED") {
+                                databaseService.updateDevice(it.copy(status = "DISCONNECTED", batteryLevel = 0, signalStrength = 0))
+                            } else if (it.status == "DISCONNECTED" && (it.batteryLevel != 0 || it.signalStrength != 0)) {
+                                databaseService.updateDevice(it.copy(batteryLevel = 0, signalStrength = 0))
+                            }
+                        }
+                    }
+                }.collect {}
+            }
+        }
+        bleManager.scanAndConnect()
+        addCommLog("📡 BLE Scanning started for ESP32 Hardware SOS Device.")
+    }
+
+    fun stopEsp32Polling() {
+        esp32PollingJob?.cancel()
+        bleManager.disconnect()
+        addCommLog("⏹️ BLE Scanning / Connection Closed.")
     }
 }

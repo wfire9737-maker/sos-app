@@ -2,6 +2,10 @@ package com.example.service
 
 import android.content.Context
 import android.util.Log
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.example.model.EmergencyModel
 import com.example.model.NotificationItem
 import com.example.model.NotificationType
@@ -70,14 +74,9 @@ class EmergencyService(
         // Create a unique Emergency ID
         val emergencyId = "EMG-" + UUID.randomUUID().toString().take(8).uppercase()
 
-        // Get current coordinates
-        val currentLoc = locationService.currentLocation.value
-        val lat = customLat ?: currentLoc.latitude
-        val lng = customLng ?: currentLoc.longitude
-        val accuracy = customAccuracy ?: currentLoc.accuracy
-        val altitude = customAltitude ?: currentLoc.altitude
-        val speed = customSpeed ?: currentLoc.speed.toFloat()
-        val bearing = customBearing ?: currentLoc.bearing
+        // Create pending model for the countdown window without requesting GPS or uploading to cloud
+        val initialLat = customLat ?: 0.0
+        val initialLng = customLng ?: 0.0
 
         val pendingModel = EmergencyModel(
             emergencyId = emergencyId,
@@ -85,12 +84,12 @@ class EmergencyService(
             userName = userName,
             userPhone = userPhone,
             startTimeMs = System.currentTimeMillis(),
-            latitude = lat,
-            longitude = lng,
-            accuracy = accuracy,
-            altitude = altitude,
-            speed = speed,
-            bearing = bearing,
+            latitude = initialLat,
+            longitude = initialLng,
+            accuracy = customAccuracy ?: 0f,
+            altitude = customAltitude ?: 0.0,
+            speed = customSpeed ?: 0f,
+            bearing = customBearing ?: 0f,
             status = "COUNTDOWN",
             triggerType = triggerType,
             aiConfidenceScore = if (triggerType == "FALL_DETECTED") 96 else 90,
@@ -102,45 +101,74 @@ class EmergencyService(
         _activeEmergency.value = pendingModel
         
         countdownJob = serviceScope.launch {
+            Log.d("SOS_ESP32", "SOS COUNTDOWN STARTED")
             for (i in 5 downTo 1) {
+                Log.d("SOS_ESP32", "SOS COUNTDOWN: $i")
                 _countdown.value = i
                 delay(1000)
             }
+            Log.d("SOS_ESP32", "SOS COUNTDOWN FINISHED")
+            Log.d("SOS_ESP32", "STARTING EMERGENCY WORKFLOW")
             _countdown.value = null
             
-            val model = pendingModel.copy(status = "ACTIVE", responderStatus = "SOS TRIGGERED - BROADCASTING")
+            // Immediate UI update first
+            val currentLoc = locationService.currentLocation.value // Fallback
+            var model = pendingModel.copy(
+                latitude = customLat ?: currentLoc.latitude,
+                longitude = customLng ?: currentLoc.longitude,
+                accuracy = customAccuracy ?: currentLoc.accuracy,
+                altitude = customAltitude ?: currentLoc.altitude,
+                speed = customSpeed ?: currentLoc.speed.toFloat(),
+                bearing = customBearing ?: currentLoc.bearing,
+                status = "ACTIVE",
+                responderStatus = "SOS TRIGGERED - BROADCASTING"
+            )
             _activeEmergency.value = model
 
-            // Record event & timestamp in Firestore
-            saveEmergencyToCloud(model)
+            // Concurrently get location and execute actions
+            launch {
+                val highAccuracyLoc = locationService.getCurrentLocationOnce(3000)
+                if (highAccuracyLoc != null) {
+                    model = model.copy(
+                        latitude = customLat ?: highAccuracyLoc.latitude,
+                        longitude = customLng ?: highAccuracyLoc.longitude,
+                        accuracy = customAccuracy ?: highAccuracyLoc.accuracy,
+                        altitude = customAltitude ?: highAccuracyLoc.altitude,
+                        speed = customSpeed ?: highAccuracyLoc.speed.toFloat(),
+                        bearing = customBearing ?: highAccuracyLoc.bearing
+                    )
+                    _activeEmergency.value = model
+                }
 
-            // Send push notification
-            notificationService.addNotification(
-                NotificationItem(
-                    id = UUID.randomUUID().toString(),
-                    title = "🚨 EMERGENCY SOS ACTIVE",
-                    body = "SOS triggered by $userName ($triggerType). Location broadcasting live.",
-                    type = NotificationType.EMERGENCY,
-                    deviceId = deviceId
-                )
-            )
+                // Do independent actions concurrently
+                launch { saveEmergencyToCloud(model) }
+                launch { notifyEmergencyContacts(model) }
+                launch {
+                    notificationService.addNotification(
+                        NotificationItem(
+                            id = UUID.randomUUID().toString(),
+                            title = "🚨 EMERGENCY SOS ACTIVE",
+                            body = "SOS triggered by $userName ($triggerType). Location broadcasting live.",
+                            type = NotificationType.EMERGENCY,
+                            deviceId = deviceId
+                        )
+                    )
+                }
 
-            // Notify emergency contacts
-            notifyEmergencyContacts(model)
-            
-            // Make an automated real-time phone call to the first contact or 911
-            withContext(Dispatchers.Main) {
-                if (ContextCompat.checkSelfPermission(context, Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED) {
-                    val primaryContact = databaseService.contacts.value.firstOrNull()
-                    val phoneToCall = primaryContact?.phone ?: "911"
-                    val callIntent = Intent(Intent.ACTION_CALL).apply {
-                        data = Uri.parse("tel:$phoneToCall")
-                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                    }
-                    try {
-                        context.startActivity(callIntent)
-                    } catch (e: Exception) {
-                        Log.e("EmergencyService", "Failed to initiate real-time call: ${e.message}")
+                // Call
+                launch(Dispatchers.Main) {
+                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED) {
+                        val primaryContact = databaseService.contacts.value.firstOrNull()
+                        val phoneToCall = primaryContact?.phone ?: "911"
+                        val callIntent = Intent(Intent.ACTION_CALL).apply {
+                            data = Uri.parse("tel:$phoneToCall")
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                        }
+                        try {
+                            context.startActivity(callIntent)
+                        } catch (e: Exception) {
+                            Log.e("EmergencyService", "Failed to initiate real-time call: ${e.message}")
+                        }
                     }
                 }
             }
@@ -264,6 +292,7 @@ class EmergencyService(
             countdownJob?.cancel()
             _countdown.value = null
             _activeEmergency.value = null
+            closeActiveSession()
             return true
         }
         

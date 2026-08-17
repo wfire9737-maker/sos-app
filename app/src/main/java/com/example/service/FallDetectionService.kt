@@ -25,39 +25,18 @@ class FallDetectionService(
     val countdownSeconds: StateFlow<Int> = _countdownSeconds.asStateFlow()
 
     private var countdownJob: Job? = null
-    private var simulationJob: Job? = null
 
     // Callback when SOS is fully triggered via fall expiry
     var onSosTriggeredCallback: (() -> Unit)? = null
 
     init {
-        // Start MPU6050 polling simulation
-        startMpuPolling()
+        // Standby monitoring initialized
     }
 
-    private fun startMpuPolling() {
-        simulationJob?.cancel()
-        simulationJob = serviceScope.launch {
-            while (isActive) {
-                // If we are not currently in a fall countdown, let's keep simulating general states
-                val state = _currentState.value
-                if (state != "FALL_COUNTDOWN" && state != "FALL_SOS_AUTO_TRIGGER") {
-                    // Random passive transitions to keep the simulation visually dynamic
-                    delay(8000)
-                    val states = listOf("STANDING", "SITTING", "WALKING", "RUNNING")
-                    val randomState = states.random()
-                    setGaitState(randomState, "Simulated gait change from passive IMU filter.")
-                } else {
-                    delay(1000)
-                }
-            }
-        }
-    }
-
-    fun triggerSimulatedFall() {
+    fun triggerFall() {
         setGaitState(
             "SUDDEN_FALL_DETECTED",
-            "High impact IMU spike: ax=3.8G, ay=-2.4G, az=0.15G. Yaw tilt 84 degrees."
+            "High impact IMU spike detected."
         )
         startFallCountdown()
     }
@@ -115,7 +94,6 @@ class FallDetectionService(
     }
 
     fun cleanup() {
-        simulationJob?.cancel()
         countdownJob?.cancel()
     }
 }

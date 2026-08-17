@@ -13,6 +13,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -47,18 +48,7 @@ fun AIScreen(
     val liveReading by viewModel.currentLiveReadingNew.collectAsState()
     val currentAnalysis by viewModel.currentLiveAnalysisNew.collectAsState()
 
-    var activeSimulationPattern by remember { mutableStateOf("STILL") }
     var selectedHistoricalResult by remember { mutableStateOf<AIAnalysisModel?>(null) }
-
-    LaunchedEffect(activeSimulationPattern) {
-        viewModel.aiProvider.startSimulation(activeSimulationPattern)
-    }
-
-    DisposableEffect(Unit) {
-        onDispose {
-            viewModel.aiProvider.stopSimulation()
-        }
-    }
 
     val displayLogs = remember(aiLogs, currentAnalysis) {
         aiLogs.filter { it.id != currentAnalysis?.id }
@@ -119,68 +109,6 @@ fun AIScreen(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
                 contentPadding = PaddingValues(bottom = 32.dp)
             ) {
-                // --- GAIT MOTION SELECTOR ---
-                item {
-                    Text(
-                        text = "Real-Time Sensor Gait & Fall Simulator",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(top = 8.dp)
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Card(
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
-                        ),
-                        shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text(
-                                text = "Simulate accelerometer & gyro vectors to test our advanced gait classifier and automated neural fallback alerts.",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                listOf("STILL", "WALKING", "RUNNING", "FALL_DETECTED").forEach { pat ->
-                                    val isSelected = activeSimulationPattern == pat
-                                    val btnColor = if (pat == "FALL_DETECTED") Color(0xFFD50000) else MaterialTheme.colorScheme.primary
-                                    Button(
-                                        onClick = {
-                                            selectedHistoricalResult = null
-                                            activeSimulationPattern = pat
-                                        },
-                                        colors = ButtonDefaults.buttonColors(
-                                            containerColor = if (isSelected) btnColor else MaterialTheme.colorScheme.surface,
-                                            contentColor = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface
-                                        ),
-                                        shape = RoundedCornerShape(8.dp),
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .height(38.dp)
-                                            .testTag("sim_pat_$pat"),
-                                        contentPadding = PaddingValues(0.dp)
-                                    ) {
-                                        Text(
-                                            text = when(pat) {
-                                                "FALL_DETECTED" -> "FALL"
-                                                else -> pat
-                                            },
-                                            fontSize = 10.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
                 // --- CLASSIFICATION TELEMETRY HEADER ---
                 item {
                     Row(

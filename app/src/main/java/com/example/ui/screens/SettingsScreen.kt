@@ -6,6 +6,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -41,6 +42,10 @@ fun SettingsScreen(
     val developerModeEnabled by viewModel.developerModeEnabled.collectAsState()
     val language by viewModel.language.collectAsState()
     val notificationsEnabled by viewModel.criticalAlarmsEnabled.collectAsState()
+    val voiceSosEnabled by viewModel.voiceSosEnabled.collectAsState()
+    val voiceSosPhrase by viewModel.voiceSosPhrase.collectAsState()
+    var showVoicePhraseDialog by remember { mutableStateOf(false) }
+    var tempPhrase by remember { mutableStateOf("") }
     val sosSoundEnabled by viewModel.sosSoundEnabled.collectAsState()
     
     var showLogoutDialog by remember { mutableStateOf(false) }
@@ -53,7 +58,7 @@ fun SettingsScreen(
                 title = { Text("Settings", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
@@ -97,12 +102,24 @@ fun SettingsScreen(
 
             item {
                 SettingsSection(title = "Features") {
-                    SettingsItem(
+                    SettingsSwitchItem(
                         icon = Icons.Default.Mic,
                         title = "Voice SOS",
-                        subtitle = "Configure voice activation",
-                        onClick = onNavigateToVoiceSos
+                        subtitle = if (voiceSosEnabled) "Listening for wake phrase" else "Disabled",
+                        checked = voiceSosEnabled,
+                        onCheckedChange = { viewModel.setVoiceSosEnabled(it) }
                     )
+                    if (voiceSosEnabled) {
+                        SettingsItem(
+                            icon = Icons.Default.TextFields,
+                            title = "Emergency Phrase",
+                            subtitle = "\"" + voiceSosPhrase + "\"",
+                            onClick = { 
+                                tempPhrase = voiceSosPhrase
+                                showVoicePhraseDialog = true 
+                            }
+                        )
+                    }
                     SettingsItem(
                         icon = Icons.Default.Timer,
                         title = "Safety Timer",
@@ -127,7 +144,7 @@ fun SettingsScreen(
             item {
                 SettingsSection(title = "Device Settings") {
                     SettingsItem(
-                        icon = Icons.Filled.DirectionsRun,
+                        icon = Icons.AutoMirrored.Filled.DirectionsRun,
                         title = "Fall Detection Calibration",
                         subtitle = "Configure sensitivity for MPU6050",
                         onClick = onNavigateToFallDetection
@@ -150,7 +167,7 @@ fun SettingsScreen(
             item {
                 SettingsSection(title = "Preferences") {
                     SettingsSwitchItem(
-                        icon = if (sosSoundEnabled) Icons.Filled.VolumeUp else Icons.Filled.VolumeOff,
+                        icon = if (sosSoundEnabled) Icons.AutoMirrored.Filled.VolumeUp else Icons.AutoMirrored.Filled.VolumeOff,
                         title = "SOS Trigger Sound",
                         subtitle = if (sosSoundEnabled) "Sound siren automatically when SOS triggers" else "Silent SOS mode (alarm sound disabled)",
                         checked = sosSoundEnabled,
@@ -198,7 +215,7 @@ fun SettingsScreen(
                         onClick = onNavigateToAbout
                     )
                     SettingsItem(
-                        icon = Icons.Filled.Help,
+                        icon = Icons.AutoMirrored.Filled.Help,
                         title = "Help & FAQ",
                         subtitle = "Get support and read FAQs",
                         onClick = onNavigateToHelpFaq
@@ -214,7 +231,7 @@ fun SettingsScreen(
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer),
                     shape = RoundedCornerShape(16.dp)
                 ) {
-                    Icon(Icons.Filled.ArrowBack, contentDescription = null)
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("Log Out", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 }
@@ -223,6 +240,37 @@ fun SettingsScreen(
         }
     }
 
+    if (showVoicePhraseDialog) {
+        AlertDialog(
+            onDismissRequest = { showVoicePhraseDialog = false },
+            title = { Text("Emergency Phrase") },
+            text = {
+                Column {
+                    Text("Enter the phrase to trigger SOS:", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    androidx.compose.material3.OutlinedTextField(
+                        value = tempPhrase,
+                        onValueChange = { tempPhrase = it },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    if (tempPhrase.isNotBlank()) {
+                        viewModel.setVoiceSosPhrase(tempPhrase.trim())
+                    }
+                    showVoicePhraseDialog = false
+                }) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showVoicePhraseDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
     if (showLanguageDialog) {
         AlertDialog(
             onDismissRequest = { showLanguageDialog = false },
@@ -343,7 +391,7 @@ fun SettingsItem(icon: ImageVector, title: String, subtitle: String, onClick: ()
             Text(title, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
             Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
         }
-        Icon(Icons.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

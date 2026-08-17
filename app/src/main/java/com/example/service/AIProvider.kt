@@ -17,13 +17,7 @@ class AIProvider(
         return aiService.analysisLogs.value
     }
 
-    fun startSimulation(pattern: String) {
-        aiService.startSensorStreamingSimulation(pattern)
-    }
 
-    fun stopSimulation() {
-        aiService.stopSimulation()
-    }
 
     fun addLog(log: AIAnalysisModel) {
         aiService.addAnalysisLog(log)

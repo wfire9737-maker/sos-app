@@ -1,261 +1,248 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SOS Alert Monitor</title>
-    <style>
-        body {
-            font-family: system-ui, -apple-system, sans-serif;
-            margin: 0;
-            padding: 0;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            height: 100vh;
-            background-color: #f5f5f5;
-        }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SOS Alert Monitor</title>
 
-        #main-screen {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            width: 100%;
-            height: 100%;
-        }
+<style>
+body{
+    margin:0;
+    font-family:Arial,Helvetica,sans-serif;
+    background:#f5f5f5;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    height:100vh;
+}
 
-        #emergency-screen {
-            display: none;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            width: 100%;
-            height: 100%;
-            background-color: #d32f2f;
-            color: white;
-            position: absolute;
-            top: 0;
-            left: 0;
-            z-index: 100;
-        }
+#main-screen{
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+}
 
-        .siren {
-            font-size: 100px;
-            margin-bottom: 20px;
-            animation: pulse 1s infinite;
-        }
+#emergency-screen{
+    display:none;
+    position:fixed;
+    inset:0;
+    background:#d32f2f;
+    color:white;
+    justify-content:center;
+    align-items:center;
+    flex-direction:column;
+}
 
-        @keyframes pulse {
-            0% { transform: scale(1); }
-            50% { transform: scale(1.15); }
-            100% { transform: scale(1); }
-        }
+.siren{
+    font-size:100px;
+    animation:pulse 1s infinite;
+}
 
-        .alert-text {
-            font-size: 36px;
-            font-weight: 900;
-            margin-bottom: 40px;
-            text-align: center;
-            letter-spacing: 2px;
-        }
+@keyframes pulse{
+0%{transform:scale(1);}
+50%{transform:scale(1.1);}
+100%{transform:scale(1);}
+}
 
-        #reset-button {
-            padding: 20px 48px;
-            font-size: 22px;
-            font-weight: bold;
-            color: #d32f2f;
-            background-color: white;
-            border: none;
-            border-radius: 40px;
-            cursor: pointer;
-            box-shadow: 0 6px 16px rgba(0,0,0,0.3);
-            transition: transform 0.1s, box-shadow 0.1s;
-        }
+button{
+    padding:18px 40px;
+    font-size:20px;
+    border:none;
+    border-radius:30px;
+    cursor:pointer;
+    margin-top:30px;
+}
 
-        #reset-button:active {
-            transform: scale(0.95);
-            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-        }
+.dot{
+    width:15px;
+    height:15px;
+    border-radius:50%;
+    background:red;
+    display:inline-block;
+}
 
-        #connection-status {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 16px 24px;
-            background: white;
-            border-radius: 30px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-            color: #555;
-            font-size: 16px;
-        }
+.connected{
+    background:green;
+}
 
-        .dot {
-            width: 14px;
-            height: 14px;
-            border-radius: 50%;
-            background-color: #ccc;
-        }
+.disconnected{
+    background:red;
+}
 
-        .dot.connected {
-            background-color: #4caf50;
-        }
+#status-banner{
+    margin-top:20px;
+    color:#666;
+}
+</style>
 
-        .dot.disconnected {
-            background-color: #f44336;
-        }
-        
-        #status-banner {
-            margin-top: 24px;
-            font-size: 14px;
-            color: #666;
-            min-height: 20px;
-            text-align: center;
-        }
-        
-        h2 {
-            color: #333;
-            margin-bottom: 24px;
-        }
-    </style>
 </head>
 <body>
 
-    <!-- Main Idle Screen -->
-    <div id="main-screen">
-        <h2>SOS Monitor</h2>
-        <div id="connection-status">
-            <div id="connection-dot" class="dot disconnected"></div>
-            <span id="connection-text">Checking device connection...</span>
-        </div>
-        <div id="status-banner"></div>
-    </div>
+<div id="main-screen">
 
-    <!-- Full Screen Emergency Alert -->
-    <div id="emergency-screen">
-        <div class="siren">🚨</div>
-        <div class="alert-text">EMERGENCY ACTIVE</div>
-        <button id="reset-button">I'm Safe Now</button>
-    </div>
+<h2>SOS Monitor</h2>
 
-    <script>
-        const ESP32_BASE_URL = "http://127.0.0.1:8080";
-        const POLL_INTERVAL_MS = 2000;
+<div>
+<span id="connection-dot" class="dot disconnected"></span>
+<span id="connection-text">Checking...</span>
+</div>
 
-        let pollTimer = null;
-        let wasEmergencyActive = false;
+<div id="status-banner"></div>
 
-        function startPolling() {
-            if (pollTimer) return;
-            pollTimer = setInterval(checkDeviceStatus, POLL_INTERVAL_MS);
-            console.log("Started polling ESP32 for SOS button state.");
-        }
+</div>
 
-        function stopPolling() {
-            clearInterval(pollTimer);
-            pollTimer = null;
-        }
+<div id="emergency-screen">
 
-        async function checkDeviceStatus() {
-            try {
-                const response = await fetch(`${ESP32_BASE_URL}/status`, {
-                    method: "GET",
-                    signal: AbortSignal.timeout(3000)
-                });
-                const data = await response.json();
+<div class="siren">🚨</div>
 
-                updateConnectionIndicator(true);
+<h1>EMERGENCY ACTIVE</h1>
 
-                if (data.sosActive && !wasEmergencyActive) {
-                    wasEmergencyActive = true;
-                    showEmergencyAlert();
-                } else if (!data.sosActive) {
-                    wasEmergencyActive = false;
-                    hideEmergencyAlert(); // In case device was reset physically
-                }
+<h3 id="gps-coordinates">
+Waiting...
+</h3>
 
-                return data;
-            } catch (error) {
-                updateConnectionIndicator(false);
-                return null;
-            }
-        }
+<button id="reset-button">
+I'm Safe Now
+</button>
 
-        async function resetSOS() {
-            try {
-                // Optimistically hide the UI immediately
-                hideEmergencyAlert();
-                wasEmergencyActive = false; 
-                
-                const response = await fetch(`${ESP32_BASE_URL}/reset`, {
-                    method: "GET",
-                    signal: AbortSignal.timeout(3000)
-                });
-                const data = await response.json();
-                
-                showStatus("SOS reset successfully.", "success");
-                return data;
-            } catch (error) {
-                showStatus("Could not reach device to reset.", "error");
-                return null;
-            }
-        }
+</div>
 
-        function showEmergencyAlert() {
-            console.log("EMERGENCY: physical button was pressed!");
-            showStatus("Emergency button pressed! Alert is active.", "emergency");
-            document.getElementById('main-screen').style.display = 'none';
-            document.getElementById('emergency-screen').style.display = 'flex';
-        }
+<script>
 
-        function hideEmergencyAlert() {
-            document.getElementById('main-screen').style.display = 'flex';
-            document.getElementById('emergency-screen').style.display = 'none';
-        }
+const ESP32_BASE_URL="http://10.63.183.90:8080";
+const POLL_INTERVAL=2000;
 
-        function updateConnectionIndicator(isConnected) {
-            const dot = document.getElementById('connection-dot');
-            const text = document.getElementById('connection-text');
-            
-            if (isConnected) {
-                dot.className = 'dot connected';
-                text.textContent = 'Connected to SOS Device';
-            } else {
-                dot.className = 'dot disconnected';
-                text.textContent = 'Disconnected from SOS Device';
-            }
-        }
+let wasEmergencyActive=false;
 
-        function showStatus(message, type) {
-            console.log(`[${type.toUpperCase()}] ${message}`);
-            const banner = document.getElementById('status-banner');
-            banner.textContent = message;
-            
-            if (type === 'error') {
-                banner.style.color = '#d32f2f';
-            } else if (type === 'success') {
-                banner.style.color = '#4caf50';
-            } else {
-                banner.style.color = '#666';
-            }
-            
-            // clear success/error messages after a few seconds
-            if (type !== 'emergency') {
-                setTimeout(() => {
-                    if (banner.textContent === message) banner.textContent = '';
-                }, 4000);
-            }
-        }
+function updateConnectionIndicator(ok){
 
-        // Initialize when app loads
-        window.addEventListener('load', () => {
-            startPolling();
-            // Initial check so we don't wait 2 seconds for the first update
-            checkDeviceStatus();
-        });
+const dot=document.getElementById("connection-dot");
+const text=document.getElementById("connection-text");
 
-        document.getElementById('reset-button').addEventListener('click', resetSOS);
-    </script>
+if(ok){
+dot.className="dot connected";
+text.textContent="Connected";
+}else{
+dot.className="dot disconnected";
+text.textContent="Disconnected";
+}
+
+}
+
+function showStatus(msg){
+document.getElementById("status-banner").textContent=msg;
+}
+
+function showEmergencyAlert(){
+
+console.log("SHOW ALERT");
+
+document.getElementById("main-screen").style.display="none";
+document.getElementById("emergency-screen").style.display="flex";
+
+}
+
+function hideEmergencyAlert(){
+
+document.getElementById("main-screen").style.display="flex";
+document.getElementById("emergency-screen").style.display="none";
+
+}
+
+async function checkDeviceStatus(){
+
+console.log("Polling...");
+
+try{
+
+const response=await fetch(
+`${ESP32_BASE_URL}/status?t=${Date.now()}`,
+{
+cache:"no-store"
+}
+);
+
+console.log("HTTP",response.status);
+
+const data=await response.json();
+
+console.log("Received",data);
+
+updateConnectionIndicator(true);
+
+if(data.sosActive===true){
+
+console.log("SOS ACTIVE");
+
+if(!wasEmergencyActive){
+
+wasEmergencyActive=true;
+
+showEmergencyAlert();
+
+document.getElementById("gps-coordinates").textContent=
+"Waiting for GPS...";
+
+}
+
+}else{
+
+if(wasEmergencyActive){
+
+console.log("SOS CLEARED");
+
+}
+
+wasEmergencyActive=false;
+
+hideEmergencyAlert();
+
+}
+
+}catch(e){
+
+console.error(e);
+
+updateConnectionIndicator(false);
+
+}
+
+}
+
+async function resetSOS(){
+
+try{
+
+await fetch(
+`${ESP32_BASE_URL}/reset?t=${Date.now()}`,
+{
+cache:"no-store"
+}
+);
+
+wasEmergencyActive=false;
+
+hideEmergencyAlert();
+
+showStatus("SOS Reset");
+
+}catch(e){
+
+console.error(e);
+
+}
+
+}
+
+document
+.getElementById("reset-button")
+.addEventListener("click",resetSOS);
+
+checkDeviceStatus();
+
+setInterval(checkDeviceStatus,POLL_INTERVAL);
+
+</script>
+
 </body>
 </html>

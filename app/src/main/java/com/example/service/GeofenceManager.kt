@@ -12,7 +12,9 @@ import com.google.android.gms.location.GeofencingRequest
 import com.google.android.gms.location.LocationServices
 
 class GeofenceManager(private val context: Context) {
-    private val geofencingClient: GeofencingClient = LocationServices.getGeofencingClient(context)
+    private val geofencingClient: GeofencingClient by lazy {
+        LocationServices.getGeofencingClient(context)
+    }
     
     private val geofencePendingIntent: PendingIntent by lazy {
         val intent = Intent(context, GeofenceBroadcastReceiver::class.java)
@@ -58,7 +60,7 @@ class GeofenceManager(private val context: Context) {
                     Log.e("GeofenceManager", "Failed to add geofences", it)
                 }
             }
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             Log.e("GeofenceManager", "Geofencing failed: ${e.message}")
         }
     }
@@ -66,7 +68,7 @@ class GeofenceManager(private val context: Context) {
     fun removeGeofences() {
         try {
             geofencingClient.removeGeofences(geofencePendingIntent)
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             Log.e("GeofenceManager", "Failed to remove geofences", e)
         }
     }

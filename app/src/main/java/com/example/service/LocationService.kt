@@ -48,8 +48,6 @@ class LocationService(
     val isTracking: StateFlow<Boolean> = _isTracking.asStateFlow()
 
 
-    private val _isSimulationMode = MutableStateFlow(false)
-    val isSimulationMode: StateFlow<Boolean> = _isSimulationMode.asStateFlow()
 
     private val _isGpsDisabled = MutableStateFlow(false)
     val isGpsDisabled: StateFlow<Boolean> = _isGpsDisabled.asStateFlow()
@@ -135,34 +133,16 @@ class LocationService(
     }
 
 
-    fun setSimulationMode(enabled: Boolean) {
-        _isSimulationMode.value = enabled
-        if (!enabled) {
-            _isGpsDisabled.value = false
-            _isWeakGps.value = false
-        }
-    }
-
-    fun setGpsDisabled(disabled: Boolean) {
-        _isGpsDisabled.value = disabled
-    }
-
-    fun setWeakGps(weak: Boolean) {
-        _isWeakGps.value = weak
-    }
-
     fun setCustomLocation(lat: Double, lng: Double, accuracy: Float = 5.0f) {
-        if (_isSimulationMode.value) {
-            val userLoc = _currentLocation.value
-            val time = System.currentTimeMillis()
-            updateLocationState { 
-                it.copy(
-                    latitude = lat,
-                    longitude = lng,
-                    accuracy = accuracy,
-                    timestamp = time
-                )
-            }
+        val userLoc = _currentLocation.value
+        val time = System.currentTimeMillis()
+        updateLocationState { 
+            it.copy(
+                latitude = lat,
+                longitude = lng,
+                accuracy = accuracy,
+                timestamp = time
+            )
         }
     }
 
@@ -173,17 +153,17 @@ class LocationService(
         _isTracking.value = true
         setUserId(userId)
         
-        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 3000)
+        // Use balanced power for continuous tracking to save battery.
+        // High accuracy is only requested during emergencies via getCurrentLocationOnce.
+        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_BALANCED_POWER_ACCURACY, 10000)
             .setWaitForAccurateLocation(false)
-            .setMinUpdateIntervalMillis(2000)
+            .setMinUpdateIntervalMillis(5000)
             .build()
             
         locationCallback = object : LocationCallback() {
             override fun onLocationResult(locationResult: LocationResult) {
                 if (_isGpsDisabled.value) return
                 var loc: Location = locationResult.lastLocation ?: return
-                
-                if (_isSimulationMode.value) return // Don't use real GPS if in generic sim mode (custom location)
 
                 var lat = loc.latitude
                 var lng = loc.longitude
@@ -253,7 +233,7 @@ class LocationService(
                 locationCallback!!,
                 Looper.getMainLooper()
             )
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             Log.e("LocationService", "Failed to register real GPS listeners: ${e.message}")
             _isTracking.value = false
         }
@@ -337,23 +317,18 @@ class LocationService(
     @SuppressLint("MissingPermission")
     suspend fun getCurrentLocationOnce(timeoutMs: Long = 15000): Location? {
         if (_isGpsDisabled.value) return null
-        if (_isSimulationMode.value) {
-            val loc = Location("simulated")
-            loc.latitude = _currentLocation.value.latitude
-            loc.longitude = _currentLocation.value.longitude
-            loc.accuracy = _currentLocation.value.accuracy
-            return loc
-        }
         var bestLocation: Location? = null
         try {
-            val currentLoc = fusedLocationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null).await()
+            val currentLoc = kotlinx.coroutines.withTimeoutOrNull(2000) {
+                fusedLocationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null).await()
+            }
             if (currentLoc != null) {
                 if (currentLoc.accuracy <= 10f && (System.currentTimeMillis() - currentLoc.time) <= 10000) {
                     return currentLoc
                 }
                 bestLocation = currentLoc
             }
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             Log.e("LocationService", "getCurrentLocation failed", e)
         }
 

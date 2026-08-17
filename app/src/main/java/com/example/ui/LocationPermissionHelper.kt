@@ -41,32 +41,38 @@ fun rememberLocationPermissionHandler(
         }
         
         if (activity != null) {
-            val locationRequest = com.google.android.gms.location.LocationRequest.Builder(
-                com.google.android.gms.location.Priority.PRIORITY_HIGH_ACCURACY, 10000
-            ).build()
-            
-            val builder = com.google.android.gms.location.LocationSettingsRequest.Builder()
-                .addLocationRequest(locationRequest)
-                .setAlwaysShow(true)
+            try {
+                val locationRequest = com.google.android.gms.location.LocationRequest.Builder(
+                    com.google.android.gms.location.Priority.PRIORITY_HIGH_ACCURACY, 10000
+                ).build()
                 
-            val client = com.google.android.gms.location.LocationServices.getSettingsClient(activity)
-            val task = client.checkLocationSettings(builder.build())
-            
-            task.addOnFailureListener { exception ->
-                if (exception is com.google.android.gms.common.api.ResolvableApiException) {
-                    try {
-                        val intentSenderRequest = androidx.activity.result.IntentSenderRequest.Builder(exception.resolution).build()
-                        resolutionLauncher.launch(intentSenderRequest)
-                    } catch (sendEx: Exception) {
+                val builder = com.google.android.gms.location.LocationSettingsRequest.Builder()
+                    .addLocationRequest(locationRequest)
+                    .setAlwaysShow(true)
+                    
+                val client = com.google.android.gms.location.LocationServices.getSettingsClient(activity)
+                val task = client.checkLocationSettings(builder.build())
+                
+                task.addOnFailureListener { exception ->
+                    if (exception is com.google.android.gms.common.api.ResolvableApiException) {
+                        try {
+                            val intentSenderRequest = androidx.activity.result.IntentSenderRequest.Builder(exception.resolution).build()
+                            resolutionLauncher.launch(intentSenderRequest)
+                        } catch (sendEx: Throwable) {
+                            try {
+                                activity.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+                            } catch (e: Throwable) {}
+                        }
+                    } else {
                         try {
                             activity.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
-                        } catch (e: Exception) {}
+                        } catch (e: Throwable) {}
                     }
-                } else {
-                    try {
-                        activity.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
-                    } catch (e: Exception) {}
                 }
+            } catch (e: Throwable) {
+                try {
+                    activity.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+                } catch (ex: Throwable) {}
             }
         }
     }

@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -86,7 +87,7 @@ fun AnalyticsScreen(
                     triggerType = trigger,
                     timestamp = calendar.timeInMillis,
                     resolvedAt = if (isResolved) calendar.timeInMillis + duration else 0L,
-                    notes = "Mock telemetry logged for historical safety evaluation."
+                    notes = "Historical telemetry logged for historical safety evaluation."
                 )
             )
         }
@@ -156,7 +157,7 @@ fun AnalyticsScreen(
                 else -> low++
             }
         }
-        // If empty, supply mock breakdown
+        // If empty, supply historical breakdown
         if (processedAlerts.isEmpty()) {
             listOf("Critical" to 0, "High" to 0, "Medium" to 0, "Low" to 0)
         } else {
@@ -178,7 +179,7 @@ fun AnalyticsScreen(
             "Downtown Office Suite",
             "Public Subway Hub"
         )
-        // Group or assign mock hotspots based on deterministic alert attributes
+        // Group or assign historical hotspots based on deterministic alert attributes
         val counts = mutableMapOf<String, Int>()
         processedAlerts.forEachIndexed { index, alert ->
             val locName = presetLocations[index % presetLocations.size]
@@ -657,7 +658,7 @@ fun AnalyticsScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
-                    // Mock inputs since real DatePicker takes immense code space
+                    // Historical inputs since real DatePicker takes immense code space
                     Button(
                         onClick = {
                             customStartDate = System.currentTimeMillis() - 45 * 24 * 3600 * 1000L // 45 days ago

@@ -21,6 +21,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -71,7 +72,7 @@ fun PermissionsScreen(viewModel: GuardianViewModel, onNavigateBack: () -> Unit) 
                 title = { Text("Permission Manager", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 }
             )
@@ -133,7 +134,7 @@ fun PermissionsScreen(viewModel: GuardianViewModel, onNavigateBack: () -> Unit) 
                 activity = activity,
                 title = "SMS Messages",
                 description = "Required to send automatic SOS text messages with your live location.",
-                icon = Icons.Filled.Message,
+                icon = Icons.AutoMirrored.Filled.Message,
                 permissions = listOf(Manifest.permission.SEND_SMS),
                 isGranted = permissionsState.smsGranted,
                 onUpdate = { viewModel.refreshPermissions(context) }
@@ -183,7 +184,7 @@ fun PermissionsScreen(viewModel: GuardianViewModel, onNavigateBack: () -> Unit) 
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
             ) {
                 Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(32.dp), tint = MaterialTheme.colorScheme.primary)
+                    Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(32.dp), tint = MaterialTheme.colorScheme.primary)
                     Spacer(modifier = Modifier.width(16.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text("Background Calls & Alerts", fontWeight = FontWeight.Bold)

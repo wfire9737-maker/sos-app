@@ -8,6 +8,7 @@ import com.google.firebase.messaging.RemoteMessage
 import java.util.UUID
 
 class GuardianFirebaseMessagingService : FirebaseMessagingService() {
+    @Suppress("DEPRECATION")
 
     override fun onNewToken(token: String) {
         super.onNewToken(token)

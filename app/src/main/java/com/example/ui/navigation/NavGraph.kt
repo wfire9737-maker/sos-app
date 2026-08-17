@@ -33,6 +33,7 @@ import com.example.ui.screens.ReportsScreen
 import com.example.ui.screens.SplashScreen
 import com.example.ui.screens.OnboardingScreen
 import com.example.ui.screens.TrustedPlacesScreen
+import com.example.ui.screens.SosCountdownDialog
 import com.example.ui.screens.FallCountdownDialog
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -84,7 +85,17 @@ fun NavGraph(
     val startDestination = Screen.Splash.route
 
     val fallState by viewModel.fallState.collectAsState()
-    val countdown by viewModel.fallCountdown.collectAsState()
+    val fallCountdown by viewModel.fallCountdown.collectAsState()
+    val sosCountdown by viewModel.countdown.collectAsState()
+    val activeEmergency by viewModel.activeEmergency.collectAsState()
+    LaunchedEffect(activeEmergency) {
+        if (activeEmergency != null) {
+            val currentRoute = navController.currentBackStackEntry?.destination?.route
+            if (currentRoute != Screen.Emergency.route) {
+                navController.navigate(Screen.Emergency.route)
+            }
+        }
+    }
 
     NavHost(
         navController = navController,
@@ -222,7 +233,7 @@ fun NavGraph(
             )
         }
         composable(Screen.AiDashboard.route) {
-            AIScreen(
+            AiDashboardScreen(
                 viewModel = viewModel,
                 onNavigateBack = { navController.navigateUp() }
             )
@@ -354,9 +365,16 @@ fun NavGraph(
 
     if (fallState == "FALL_COUNTDOWN") {
         FallCountdownDialog(
-            secondsLeft = countdown,
+            secondsLeft = fallCountdown,
             onCancel = { viewModel.fallDetectionService.cancelFallCountdown() }
         )
     }
+
+    if (sosCountdown != null) {
+        SosCountdownDialog(
+            secondsLeft = sosCountdown!!,
+            onCancel = { viewModel.cancelEmergencyWithPin("") {} }
+        )
     }
+}
 
