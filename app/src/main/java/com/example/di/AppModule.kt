@@ -146,8 +146,9 @@ object AppModule {
         aiService: AIService,
         alarmVibratorService: AlarmVibratorService,
         deviceService: DeviceService,
-        voiceSosService: VoiceSosService
-    ): EmergencyProvider = EmergencyProvider(context, emergencyService, authService, locationService, aiService, alarmVibratorService, deviceService, voiceSosService)
+        voiceSosService: VoiceSosService,
+        settingsDataStore: SettingsDataStore
+    ): EmergencyProvider = EmergencyProvider(context, emergencyService, authService, locationService, aiService, alarmVibratorService, deviceService, voiceSosService, settingsDataStore)
 
     @Provides
     @Singleton

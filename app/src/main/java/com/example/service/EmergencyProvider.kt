@@ -7,6 +7,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.SupervisorJob
 import com.example.model.EmergencyModel
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 class EmergencyProvider(
     private val context: Context,
@@ -16,12 +18,32 @@ class EmergencyProvider(
     private val aiService: AIService,
     private val alarmVibratorService: AlarmVibratorService,
     private val deviceService: DeviceService,
-    private val voiceSosService: VoiceSosService
+    private val voiceSosService: VoiceSosService,
+    private val settingsDataStore: com.example.data.SettingsDataStore
 ) {
     val activeEmergencyState: StateFlow<EmergencyModel?> = emergencyService.activeEmergency
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     init {
+        scope.launch {
+            combine(
+                activeEmergencyState,
+                settingsDataStore.sosSoundEnabledFlow,
+                settingsDataStore.sosVibrationEnabledFlow
+            ) { activeEmergency, soundEnabled, vibrationEnabled ->
+                Triple(activeEmergency != null, soundEnabled, vibrationEnabled)
+            }
+            .distinctUntilChanged()
+            .collect { (isActive, soundEnabled, vibrationEnabled) ->
+                if (isActive) {
+                    if (soundEnabled) alarmVibratorService.startAlarm() else alarmVibratorService.stopAlarm()
+                    if (vibrationEnabled) alarmVibratorService.startVibration() else alarmVibratorService.stopVibration()
+                } else {
+                    alarmVibratorService.cleanUp()
+                }
+            }
+        }
+
         scope.launch {
             deviceService.bleManager.sosEvents.collect { sosEvent ->
                 android.util.Log.d("BleManager", "EMERGENCY: activating from PHYSICAL_BLE_BUTTON (Event #${sosEvent.eventId})")
@@ -95,8 +117,6 @@ class EmergencyProvider(
                 emergencyService.activeEmergency.value?.let { model ->
                     emergencyService.notifyEmergencyContacts(model, isUpdate = true)
                 }
-                alarmVibratorService.startAlarm()
-                alarmVibratorService.startVibration()
                 return@launch
             }
             
@@ -104,10 +124,6 @@ class EmergencyProvider(
             val userId = user?.uid ?: "user-101"
             val userName = user?.name ?: "Marcus Vance"
             val userPhone = user?.phone ?: "+1-555-0143"
-
-            // Trigger alarm/vibrator (assuming sound is enabled globally for emergencies)
-            alarmVibratorService.startAlarm()
-            alarmVibratorService.startVibration()
 
             val model = emergencyService.startEmergency(
                 userId = userId,

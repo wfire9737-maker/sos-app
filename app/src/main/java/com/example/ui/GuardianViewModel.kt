@@ -121,15 +121,29 @@ class GuardianViewModel @Inject constructor(
         }
     }
 
-    private val _sosSoundEnabled = MutableStateFlow(
-        try {
-            getApplication<Application>().getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE)
-                .getBoolean("sos_sound_enabled", true)
-        } catch (e: Exception) {
-            true
-        }
+    val sosSoundEnabled: StateFlow<Boolean> = settingsDataStore.sosSoundEnabledFlow.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = true
     )
-    val sosSoundEnabled = _sosSoundEnabled.asStateFlow()
+
+    val sosVibrationEnabled: StateFlow<Boolean> = settingsDataStore.sosVibrationEnabledFlow.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = true
+    )
+
+    fun setSosSoundEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsDataStore.setSosSoundEnabled(enabled)
+        }
+    }
+
+    fun setSosVibrationEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsDataStore.setSosVibrationEnabled(enabled)
+        }
+    }
     private val _voiceSosEnabled = MutableStateFlow(
         try {
             getApplication<Application>().getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE)
@@ -238,11 +252,6 @@ class GuardianViewModel @Inject constructor(
     private val _language = MutableStateFlow(try { getApplication<Application>().getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE).getString("language", "en") ?: "en" } catch(e:Exception) { "en" })
     val language: StateFlow<String> = _language.asStateFlow()
     fun setLanguage(lang: String) { _language.value = lang; databaseService.saveUserSetting("language", lang) }
-
-    fun setSosSoundEnabled(enabled: Boolean) {
-        _sosSoundEnabled.value = enabled
-        databaseService.saveUserSetting("sos_sound_enabled", enabled)
-    }
 
     fun toggleSirenAlarm() {
         if (_isSirenPlaying.value) {
@@ -543,13 +552,8 @@ class GuardianViewModel @Inject constructor(
         val userPhone = user?.phone ?: "+1-555-0143"
 
         val matchedPlace = getMatchedTrustedPlace(lat ?: locationService.currentLocation.value.latitude, lng ?: locationService.currentLocation.value.longitude)
-        if (_sosSoundEnabled.value && matchedPlace?.reduceNotificationSound != true) {
-            alarmVibratorService.startAlarm()
-            _isSirenPlaying.value = true
-        } else {
-            _isSirenPlaying.value = false
-        }
-        alarmVibratorService.startVibration()
+        
+        _isSirenPlaying.value = (sosSoundEnabled.value && matchedPlace?.reduceNotificationSound != true)
 
         return emergencyProvider.initiateEmergency(
             userId = userId,

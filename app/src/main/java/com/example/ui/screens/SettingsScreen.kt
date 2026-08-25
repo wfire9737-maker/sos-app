@@ -50,6 +50,7 @@ fun SettingsScreen(
     var showVoicePhraseDialog by remember { mutableStateOf(false) }
     var tempPhrase by remember { mutableStateOf("") }
     val sosSoundEnabled by viewModel.sosSoundEnabled.collectAsState()
+    val sosVibrationEnabled by viewModel.sosVibrationEnabled.collectAsState()
     
     var showLogoutDialog by remember { mutableStateOf(false) }
     var showLanguageDialog by remember { mutableStateOf(false) }
@@ -172,14 +173,26 @@ fun SettingsScreen(
             }
 
             item {
-                SettingsSection(title = "Preferences") {
+                SettingsSection(title = "Emergency") {
                     SettingsSwitchItem(
                         icon = if (sosSoundEnabled) Icons.AutoMirrored.Filled.VolumeUp else Icons.AutoMirrored.Filled.VolumeOff,
-                        title = "SOS Trigger Sound",
-                        subtitle = if (sosSoundEnabled) "Sound siren automatically when SOS triggers" else "Silent SOS mode (alarm sound disabled)",
+                        title = "SOS Sound",
+                        subtitle = "Play an alarm sound when SOS is active",
                         checked = sosSoundEnabled,
                         onCheckedChange = { enabled -> viewModel.setSosSoundEnabled(enabled) }
                     )
+                    SettingsSwitchItem(
+                        icon = Icons.Default.Vibration,
+                        title = "SOS Vibration",
+                        subtitle = "Vibrate the phone when SOS is active",
+                        checked = sosVibrationEnabled,
+                        onCheckedChange = { enabled -> viewModel.setSosVibrationEnabled(enabled) }
+                    )
+                }
+            }
+
+            item {
+                SettingsSection(title = "Preferences") {
                     SettingsSwitchItem(
                         icon = Icons.Default.DarkMode,
                         title = "Dark Theme",
