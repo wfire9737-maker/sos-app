@@ -32,4 +32,5 @@ sealed class Screen(val route: String) {
     object Permissions : Screen("permissions")
     object About : Screen("about")
     object DeveloperDashboard : Screen("developer_dashboard")
+    object BleTest : Screen("ble_test")
 }

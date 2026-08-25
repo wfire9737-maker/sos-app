@@ -26,6 +26,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
+@Suppress("DEPRECATION")
 class NotificationService(private val context: Context, private val firestore: FirebaseFirestore?) {
     
     private val _notifications = MutableStateFlow<List<NotificationItem>>(emptyList())

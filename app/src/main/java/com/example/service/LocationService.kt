@@ -27,6 +27,7 @@ import java.util.Locale
 import com.example.data.local.dao.LocationDao
 import com.example.data.local.entity.LocationEntity
 
+@Suppress("DEPRECATION")
 class LocationService(
     private val context: Context,
     private val firestore: FirebaseFirestore?,

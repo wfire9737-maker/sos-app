@@ -645,7 +645,7 @@ fun DeviceCardItem(
                         icon = {
                             Icon(
                                 imageVector = when {
-                                    device.status == "DISCONNECTED" -> Icons.Default.BatteryUnknown
+                                    device.status == "DISCONNECTED" -> Icons.AutoMirrored.Filled.BatteryUnknown
                                     device.batteryLevel > 80 -> Icons.Default.BatteryFull
                                     device.batteryLevel > 30 -> Icons.Default.BatteryChargingFull
                                     else -> Icons.Default.BatteryAlert

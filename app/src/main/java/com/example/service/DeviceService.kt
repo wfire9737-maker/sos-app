@@ -716,20 +716,58 @@ class DeviceService(
 
     fun startEsp32Polling() {
         if (esp32PollingJob?.isActive == true) return
+        try {
+            com.example.service.BleForegroundService.start(context)
+        } catch (e: Exception) {
+            Log.e("DeviceService", "Could not start BleForegroundService: ${e.message}")
+        }
         esp32PollingJob = serviceScope.launch {
             launch {
-                bleManager.sosEvent.collect { isSosActive ->
-                    if (isSosActive) {
-                        Log.d("DeviceService", "ESP32 SOS Button pressed via BLE!")
-                        addCommLog("🚨 ESP32 Hardware SOS Button Activated via BLE!")
-                        _incomingEsp32SosEvent.value = "ESP32_BUTTON"
-                        handleIncomingEsp32Sos(
-                            deviceId = "ESP32-SOS-BAND-81F4",
-                            triggerType = "ESP32_BUTTON"
-                        )
-                    } else {
-                        Log.d("DeviceService", "ESP32 SOS Button reset via BLE.")
+                bleManager.latestHardwareGpsLocation.collect { loc ->
+                    if (loc != null) {
+                        addCommLog("🛰️ NEO-6M GPS Fix: LAT:${loc.latitude}, LON:${loc.longitude}")
                     }
+                }
+            }
+
+            launch {
+                bleManager.latestMpuReading.collect { mpu ->
+                    if (mpu != null) {
+                        val existingDevice = databaseService.devices.value.find { it.deviceId == "ESP32-SOS-BAND-81F4" }
+                        existingDevice?.let { dev ->
+                            val updated = dev.copy(
+                                accelX = mpu.accelerationX,
+                                accelY = mpu.accelerationY,
+                                accelZ = mpu.accelerationZ,
+                                gyroX = mpu.gyroX,
+                                gyroY = mpu.gyroY,
+                                gyroZ = mpu.gyroZ,
+                                lastSync = System.currentTimeMillis()
+                            )
+                            databaseService.updateDevice(updated)
+                        }
+                    }
+                }
+            }
+
+            launch {
+                bleManager.motionState.collect { state ->
+                    if (state == com.example.ble.MotionState.POSSIBLE_FALL) {
+                        addCommLog("⚠️ MPU6050 Motion Engine: Possible Fall Pattern Detected!")
+                    }
+                }
+            }
+
+            launch {
+                bleManager.sosEvents.collect { sosEvent ->
+                    Log.d("BleManager", "BLE: physical SOS event ${sosEvent.eventId} received")
+                    Log.d("BleManager", "EMERGENCY: activating from PHYSICAL_BLE_BUTTON")
+                    addCommLog("🚨 ESP32 Hardware SOS Button Event Received: ${sosEvent.rawPayload} (Event #${sosEvent.eventId})")
+                    _incomingEsp32SosEvent.value = "PHYSICAL_BLE_BUTTON_${sosEvent.eventId}_${System.currentTimeMillis()}"
+                    handleIncomingEsp32Sos(
+                        deviceId = "ESP32-SOS-BAND-81F4",
+                        triggerType = "PHYSICAL_BLE_BUTTON_${sosEvent.eventId}"
+                    )
                 }
             }
             

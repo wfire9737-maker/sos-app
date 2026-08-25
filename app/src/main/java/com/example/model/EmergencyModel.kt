@@ -20,7 +20,8 @@ data class EmergencyModel(
     val contactsNotified: List<String> = emptyList(),
     val responderStatus: String = "DISPATCHING FIRST RESPONDERS",
     val notes: String = "",
-    val deviceId: String = "ESP32-SOS-BAND-81F4"
+    val deviceId: String = "ESP32-SOS-BAND-81F4",
+    val locationSource: String = "PHONE_GPS"
 ) {
     fun toMap(): Map<String, Any?> {
         return mapOf(
@@ -43,7 +44,8 @@ data class EmergencyModel(
             "contactsNotified" to contactsNotified,
             "responderStatus" to responderStatus,
             "notes" to notes,
-            "deviceId" to deviceId
+            "deviceId" to deviceId,
+            "locationSource" to locationSource
         )
     }
 
@@ -69,7 +71,8 @@ data class EmergencyModel(
                 contactsNotified = (map["contactsNotified"] as? List<*>)?.map { it.toString() } ?: emptyList(),
                 responderStatus = map["responderStatus"] as? String ?: "DISPATCHING FIRST RESPONDERS",
                 notes = map["notes"] as? String ?: "",
-                deviceId = map["deviceId"] as? String ?: "ESP32-SOS-BAND-81F4"
+                deviceId = map["deviceId"] as? String ?: "ESP32-SOS-BAND-81F4",
+                locationSource = map["locationSource"] as? String ?: "PHONE_GPS"
             )
         }
     }

@@ -34,7 +34,7 @@ class VoiceSosForegroundService : Service() {
             Log.d("VoiceSosFgService", "Stopping Foreground Service")
             voiceSosService.isContinuousMode = false
             voiceSosService.stopSpeechRecognition()
-            stopForeground(true)
+            stopForeground(android.app.Service.STOP_FOREGROUND_REMOVE)
             stopSelf()
             return START_NOT_STICKY
         }
@@ -79,7 +79,7 @@ class VoiceSosForegroundService : Service() {
     private fun createNotification(): Notification {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Voice SOS Active")
-            .setContentText("Listening for emergency phrase...")
+            .setContentText("Listening for your emergency phrase")
             .setSmallIcon(android.R.drawable.ic_btn_speak_now) // We can use this or any existing app icon
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)

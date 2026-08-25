@@ -38,6 +38,7 @@ fun HomeScreen(
     onNavigateToContacts: () -> Unit,
     onNavigateToDevicePairing: () -> Unit,
     onNavigateToMap: () -> Unit = {},
+    onNavigateToBleTest: () -> Unit = {},
     onNavigateToEmergency: () -> Unit,
     onNavigateToNotifications: () -> Unit,
     onNavigateToHistory: () -> Unit,
@@ -139,7 +140,7 @@ fun HomeScreen(
 
             // Quick Status Grid
             item {
-                StatusGrid(devices = devices)
+                StatusGrid(devices = devices, onBluetoothClick = onNavigateToBleTest)
             }
 
             // Active Alerts
@@ -268,13 +269,13 @@ fun SosButtonSection(onSosClick: () -> Unit) {
 }
 
 @Composable
-fun StatusGrid(devices: List<Device>) {
+fun StatusGrid(devices: List<Device>, onBluetoothClick: () -> Unit = {}) {
     val isBleConnected = devices.any { it.status == "CONNECTED" || it.status == "ALERTing" }
     val maxBattery = devices.filter { it.status == "CONNECTED" || it.status == "ALERTing" }.maxOfOrNull { it.batteryLevel } ?: 0
     
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         StatusCard(
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.weight(1f).clickable { onBluetoothClick() },
             icon = Icons.Default.Bluetooth,
             label = "Bluetooth",
             value = if (isBleConnected) "Connected" else "Disconnected",
@@ -623,43 +624,6 @@ fun VoiceCommandSection(
                                 color = MaterialTheme.colorScheme.primary
                             )
                         }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                    text = "Supported Voice Commands:",
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-
-                val voiceCommandsList = listOf(
-                    "Help", "Emergency", "SOS", "Send SOS", "Call for help",
-                    "I'm in danger", "Track my location", "Stop SOS", "Cancel SOS"
-                )
-
-                androidx.compose.foundation.lazy.LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    items(voiceCommandsList) { cmd ->
-                        AssistChip(
-                            onClick = {
-                                viewModel.voiceSosService.processVoiceInput(cmd, 95)
-                            },
-                            label = { Text(cmd, fontSize = 11.sp, fontWeight = FontWeight.Medium) },
-                            leadingIcon = {
-                                val icon = when {
-                                    cmd.contains("Stop") || cmd.contains("Cancel") -> Icons.Default.Cancel
-                                    cmd.contains("Track") -> Icons.Default.MyLocation
-                                    else -> Icons.Default.Warning
-                                }
-                                Icon(icon, contentDescription = null, modifier = Modifier.size(14.dp))
-                            },
-                            modifier = Modifier.testTag("voice_cmd_chip_$cmd")
-                        )
                     }
                 }
             }

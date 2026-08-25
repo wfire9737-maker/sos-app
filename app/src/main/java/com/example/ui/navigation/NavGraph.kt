@@ -187,6 +187,9 @@ fun NavGraph(
                 },
                 onNavigateToMap = {
                     navController.navigate(Screen.Map.route)
+                },
+                onNavigateToBleTest = {
+                    navController.navigate(Screen.BleTest.route)
                 }
             )
         }
@@ -358,6 +361,12 @@ fun NavGraph(
         composable(Screen.DeveloperDashboard.route) {
             DeveloperDashboardScreen(
                 viewModel = viewModel,
+                onNavigateBack = { navController.navigateUp() }
+            )
+        }
+        composable(Screen.BleTest.route) {
+            com.example.ui.screens.BleTestScreen(
+                bleManager = viewModel.deviceService.bleManager,
                 onNavigateBack = { navController.navigateUp() }
             )
         }

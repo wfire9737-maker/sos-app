@@ -6,6 +6,7 @@ import android.util.Log
 import com.example.model.Alert
 import com.example.model.Device
 import com.example.model.EmergencyContact
+import com.example.model.DeveloperLog
 import com.google.firebase.FirebaseApp
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
@@ -24,7 +25,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
-class DatabaseService(private val context: Context, private val contactDao: EmergencyContactDao? = null) {
+class DatabaseService(private val context: Context, private val authService: AuthService? = null, private val contactDao: EmergencyContactDao? = null) {
     private var firestore: FirebaseFirestore? = null
 
     val firestoreInstance: FirebaseFirestore? get() = firestore
@@ -41,6 +42,22 @@ class DatabaseService(private val context: Context, private val contactDao: Emer
     private val _contacts = MutableStateFlow<List<EmergencyContact>>(emptyList())
     val contacts: StateFlow<List<EmergencyContact>> = _contacts.asStateFlow()
 
+    // Developer Diagnostics Logs
+    private val _developerLogs = MutableStateFlow<List<DeveloperLog>>(listOf(
+        DeveloperLog(event = "System Diagnostics Initialized", status = "SUCCESS")
+    ))
+    val developerLogs: StateFlow<List<DeveloperLog>> = _developerLogs.asStateFlow()
+
+    fun addDeveloperLog(event: String, status: String) {
+        val currentLogs = _developerLogs.value.toMutableList()
+        currentLogs.add(0, DeveloperLog(event = event, status = status))
+        _developerLogs.value = currentLogs.take(100)
+    }
+
+    fun clearDeveloperLogs() {
+        _developerLogs.value = emptyList()
+    }
+
     // Network State
     val isOfflineMode = MutableStateFlow(false)
     val isSlowNetwork = MutableStateFlow(false)
@@ -49,6 +66,7 @@ class DatabaseService(private val context: Context, private val contactDao: Emer
     private val sharedPrefs: SharedPreferences = context.getSharedPreferences("guardian_sos_database", Context.MODE_PRIVATE)
     private var firestoreListener: ListenerRegistration? = null
     private var contactsListener: ListenerRegistration? = null
+    private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     val isDemoMode: Boolean
         get() = firestore == null
@@ -89,7 +107,6 @@ class DatabaseService(private val context: Context, private val contactDao: Emer
                         loadLocalAlerts() // Fallback
                         return@addSnapshotListener
                     }
-
                     if (snapshot != null) {
                         val alertList = mutableListOf<Alert>()
                         for (doc in snapshot) {
@@ -111,23 +128,51 @@ class DatabaseService(private val context: Context, private val contactDao: Emer
                     }
                 }
 
-            // Load and Sync Contacts
-            contactsListener?.remove()
-            contactsListener = fs.collection("contacts")
-                .addSnapshotListener { snapshot, e ->
-                    if (e != null) {
-                        Log.e("DatabaseService", "Contacts listen failed.", e)
-                        loadLocalContacts()
-                        return@addSnapshotListener
-                    }
-                    if (snapshot != null) {
-                        val list = mutableListOf<EmergencyContact>()
-                        for (doc in snapshot) {
-                            list.add(EmergencyContact.fromMap(doc.data))
+            // Sync Contacts and Settings with current User
+            if (authService != null) {
+                serviceScope.launch {
+                    authService.authState.collect { state ->
+                        contactsListener?.remove()
+                        if (state is com.example.service.AuthState.Success) {
+                            val uid = state.user.uid
+                            contactsListener = fs.collection("users").document(uid).collection("contacts")
+                                .addSnapshotListener { snapshot, e ->
+                                    if (e != null) {
+                                        Log.e("DatabaseService", "Contacts listen failed.", e)
+                                        loadLocalContacts()
+                                        return@addSnapshotListener
+                                    }
+                                    if (snapshot != null) {
+                                        val list = mutableListOf<EmergencyContact>()
+                                        for (doc in snapshot) {
+                                            list.add(EmergencyContact.fromMap(doc.data))
+                                        }
+                                        _contacts.value = list.sortedWith(compareBy({ it.priority }, { it.name }))
+                                    }
+                                }
+                        } else {
+                            loadLocalContacts()
                         }
-                        _contacts.value = list.sortedWith(compareBy({ it.priority }, { it.name }))
                     }
                 }
+            } else {
+                contactsListener?.remove()
+                contactsListener = fs.collection("contacts")
+                    .addSnapshotListener { snapshot, e ->
+                        if (e != null) {
+                            Log.e("DatabaseService", "Contacts listen failed.", e)
+                            loadLocalContacts()
+                            return@addSnapshotListener
+                        }
+                        if (snapshot != null) {
+                            val list = mutableListOf<EmergencyContact>()
+                            for (doc in snapshot) {
+                                list.add(EmergencyContact.fromMap(doc.data))
+                            }
+                            _contacts.value = list.sortedWith(compareBy({ it.priority }, { it.name }))
+                        }
+                    }
+            }
         } else {
             // Load from persistent local JSON
             loadLocalAlerts()
@@ -604,7 +649,15 @@ class DatabaseService(private val context: Context, private val contactDao: Emer
         if (fs != null) {
             try {
                 runWithRetry {
-                    fs.collection("contacts").document(finalContact.id).set(finalContact.toMap()).await()
+                    var documentRef = fs.collection("contacts").document(finalContact.id)
+                    if (authService != null) {
+                        val state = authService.authState.value
+                        if (state is com.example.service.AuthState.Success) {
+                            documentRef = fs.collection("users").document(state.user.uid)
+                                .collection("contacts").document(finalContact.id)
+                        }
+                    }
+                    documentRef.set(finalContact.toMap()).await()
                 }
             } catch (e: Exception) {
                 Log.e("DatabaseService", "Failed to save contact on Firestore after multiple attempts, saving locally: ${e.message}")
@@ -613,7 +666,44 @@ class DatabaseService(private val context: Context, private val contactDao: Emer
         } else {
             saveContactLocally(finalContact)
         }
+
         return finalContact
+    }
+
+        // --- USER SETTINGS OPERATIONS ---
+    fun saveUserSetting(key: String, value: Any) {
+        val fs = firestore
+        val authState = authService?.authState?.value
+        
+        // Save locally first
+        try {
+            val prefs = context.getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE).edit()
+            when (value) {
+                is Boolean -> prefs.putBoolean(key, value)
+                is String -> prefs.putString(key, value)
+                is Int -> prefs.putInt(key, value)
+                is Float -> prefs.putFloat(key, value)
+                is Long -> prefs.putLong(key, value)
+            }
+            prefs.apply()
+        } catch (e: Exception) {
+            Log.e("DatabaseService", "Failed to save setting locally: ${e.message}")
+        }
+        
+        // Save to Firestore
+        if (fs != null && authState is com.example.service.AuthState.Success) {
+            serviceScope.launch {
+                try {
+                    val updates = mapOf(key to value)
+                    fs.collection("users").document(authState.user.uid)
+                        .collection("settings").document("preferences")
+                        .set(updates, com.google.firebase.firestore.SetOptions.merge())
+                        .await()
+                } catch (e: Exception) {
+                    Log.e("DatabaseService", "Failed to save setting to Firestore: ${e.message}")
+                }
+            }
+        }
     }
 
     suspend fun deleteContact(contactId: String) {
@@ -621,7 +711,15 @@ class DatabaseService(private val context: Context, private val contactDao: Emer
         if (fs != null) {
             try {
                 runWithRetry {
-                    fs.collection("contacts").document(contactId).delete().await()
+                    var documentRef = fs.collection("contacts").document(contactId)
+                    if (authService != null) {
+                        val state = authService.authState.value
+                        if (state is com.example.service.AuthState.Success) {
+                            documentRef = fs.collection("users").document(state.user.uid)
+                                .collection("contacts").document(contactId)
+                        }
+                    }
+                    documentRef.delete().await()
                 }
             } catch (e: Exception) {
                 Log.e("DatabaseService", "Failed to delete contact from Firestore after multiple attempts, updating locally: ${e.message}")

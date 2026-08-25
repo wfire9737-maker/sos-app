@@ -7,6 +7,7 @@ import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import java.util.UUID
 
+@Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
 class GuardianFirebaseMessagingService : FirebaseMessagingService() {
     @Suppress("DEPRECATION")
 

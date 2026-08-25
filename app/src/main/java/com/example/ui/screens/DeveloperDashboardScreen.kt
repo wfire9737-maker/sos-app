@@ -95,7 +95,7 @@ fun DeveloperDashboardScreen(
     val alerts by viewModel.alerts.collectAsState(initial = emptyList())
     
     // Calculated Statuses
-    val bluetoothAdapter = BluetoothAdapter.getDefaultAdapter()
+    val bluetoothAdapter = context.getSystemService(android.bluetooth.BluetoothManager::class.java)?.adapter
     val isBluetoothEnabled = bluetoothAdapter?.isEnabled == true
     
     val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager

@@ -52,7 +52,7 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideDatabaseService(@ApplicationContext context: Context, database: com.example.data.local.SmartSosDatabase): DatabaseService = DatabaseService(context, database.emergencyContactDao())
+    fun provideDatabaseService(@ApplicationContext context: Context, database: com.example.data.local.SmartSosDatabase, authService: AuthService): DatabaseService = DatabaseService(context, authService, database.emergencyContactDao())
 
     @Provides
     @Singleton
@@ -138,7 +138,16 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideEmergencyProvider(@ApplicationContext context: Context, emergencyService: EmergencyService): EmergencyProvider = EmergencyProvider(context, emergencyService)
+    fun provideEmergencyProvider(
+        @ApplicationContext context: Context,
+        emergencyService: EmergencyService,
+        authService: AuthService,
+        locationService: LocationService,
+        aiService: AIService,
+        alarmVibratorService: AlarmVibratorService,
+        deviceService: DeviceService,
+        voiceSosService: VoiceSosService
+    ): EmergencyProvider = EmergencyProvider(context, emergencyService, authService, locationService, aiService, alarmVibratorService, deviceService, voiceSosService)
 
     @Provides
     @Singleton
@@ -146,7 +155,13 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideFirebaseFirestore(@ApplicationContext context: Context): com.google.firebase.firestore.FirebaseFirestore = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+    fun provideFirebaseFirestore(@ApplicationContext context: Context): com.google.firebase.firestore.FirebaseFirestore? {
+        return try {
+            com.google.firebase.firestore.FirebaseFirestore.getInstance()
+        } catch (e: Exception) {
+            null
+        }
+    }
 
     @Provides
     @Singleton
@@ -163,7 +178,7 @@ object AppModule {
             context,
             SmartSosDatabase::class.java,
             "smart_sos_db"
-        ).fallbackToDestructiveMigration(true).build()
+        ).fallbackToDestructiveMigration().build()
     }
 
     @Provides

@@ -43,6 +43,9 @@ fun SettingsScreen(
     val language by viewModel.language.collectAsState()
     val notificationsEnabled by viewModel.criticalAlarmsEnabled.collectAsState()
     val voiceSosEnabled by viewModel.voiceSosEnabled.collectAsState()
+    val voiceState by viewModel.voiceSosService.voiceState.collectAsState()
+    val isSpeechActive by viewModel.voiceSosService.isSpeechRecognizerActive.collectAsState()
+    val wakePhrases by viewModel.voiceSosService.wakePhrases.collectAsState()
     val voiceSosPhrase by viewModel.voiceSosPhrase.collectAsState()
     var showVoicePhraseDialog by remember { mutableStateOf(false) }
     var tempPhrase by remember { mutableStateOf("") }
@@ -101,25 +104,29 @@ fun SettingsScreen(
             }
 
             item {
-                SettingsSection(title = "Features") {
+                SettingsSection(title = "Voice SOS & Emergency Phrases") {
                     SettingsSwitchItem(
                         icon = Icons.Default.Mic,
                         title = "Voice SOS",
-                        subtitle = if (voiceSosEnabled) "Listening for wake phrase" else "Disabled",
+                        subtitle = if (voiceSosEnabled) (if (isSpeechActive) "Listening: Active" else "Listening: Inactive") else "Disabled",
                         checked = voiceSosEnabled,
                         onCheckedChange = { viewModel.setVoiceSosEnabled(it) }
                     )
                     if (voiceSosEnabled) {
                         SettingsItem(
-                            icon = Icons.Default.TextFields,
-                            title = "Emergency Phrase",
-                            subtitle = "\"" + voiceSosPhrase + "\"",
+                            icon = Icons.AutoMirrored.Filled.FormatListBulleted,
+                            title = "Configured Phrases (${wakePhrases.size})",
+                            subtitle = wakePhrases.take(3).joinToString(", ") + if (wakePhrases.size > 3) "..." else "",
                             onClick = { 
-                                tempPhrase = voiceSosPhrase
+                                tempPhrase = ""
                                 showVoicePhraseDialog = true 
                             }
                         )
                     }
+                }
+            }
+            item {
+                SettingsSection(title = "Features") {
                     SettingsItem(
                         icon = Icons.Default.Timer,
                         title = "Safety Timer",
@@ -243,31 +250,56 @@ fun SettingsScreen(
     if (showVoicePhraseDialog) {
         AlertDialog(
             onDismissRequest = { showVoicePhraseDialog = false },
-            title = { Text("Emergency Phrase") },
+            title = { Text("Emergency Phrases") },
             text = {
                 Column {
-                    Text("Enter the phrase to trigger SOS:", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Add a new phrase to trigger SOS:", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(modifier = Modifier.height(16.dp))
                     androidx.compose.material3.OutlinedTextField(
                         value = tempPhrase,
                         onValueChange = { tempPhrase = it },
                         singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("New phrase") }
                     )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("Current Phrases:", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    androidx.compose.foundation.lazy.LazyColumn(
+                        modifier = Modifier.heightIn(max = 200.dp)
+                    ) {
+                        items(wakePhrases.size) { index ->
+                            val phrase = wakePhrases[index]
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(phrase, style = MaterialTheme.typography.bodyMedium)
+                                IconButton(onClick = { viewModel.voiceSosService.removeWakePhrase(phrase) }) {
+                                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error)
+                                }
+                            }
+                        }
+                    }
                 }
             },
             confirmButton = {
                 Button(onClick = {
                     if (tempPhrase.isNotBlank()) {
-                        viewModel.setVoiceSosPhrase(tempPhrase.trim())
+                        viewModel.voiceSosService.addWakePhrase(tempPhrase.trim())
+                        tempPhrase = ""
+                    } else {
+                        showVoicePhraseDialog = false
                     }
-                    showVoicePhraseDialog = false
                 }) {
-                    Text("Save")
+                    Text(if (tempPhrase.isNotBlank()) "Add Phrase" else "Done")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showVoicePhraseDialog = false }) { Text("Cancel") }
+                TextButton(onClick = { showVoicePhraseDialog = false }) {
+                    Text("Close")
+                }
             }
         )
     }

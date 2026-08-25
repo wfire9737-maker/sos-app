@@ -37,6 +37,7 @@ class EmergencyService(
 ) {
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var trackingJob: Job? = null
+    private var lastCalledEmergencyId: String? = null
     private var countdownJob: Job? = null
 
     private val _activeEmergency = MutableStateFlow<EmergencyModel?>(null)
@@ -58,7 +59,8 @@ class EmergencyService(
         customAccuracy: Float? = null,
         customAltitude: Double? = null,
         customSpeed: Float? = null,
-        customBearing: Float? = null
+        customBearing: Float? = null,
+        locationSource: String = "PHONE_GPS"
     ): EmergencyModel {
         // Prevent duplicate SOS sessions
         _activeEmergency.value?.let {
@@ -68,7 +70,7 @@ class EmergencyService(
         
         if (countdownJob?.isActive == true) {
             Log.w("EmergencyService", "Countdown already running.")
-            return EmergencyModel(emergencyId = "PENDING", userId = userId, userName = userName, userPhone = userPhone, startTimeMs = System.currentTimeMillis(), latitude = 0.0, longitude = 0.0, status = "COUNTDOWN", triggerType = triggerType, aiConfidenceScore = 100, contactsNotified = listOf(), responderStatus = "COUNTDOWN", deviceId = deviceId)
+            return EmergencyModel(emergencyId = "PENDING", userId = userId, userName = userName, userPhone = userPhone, startTimeMs = System.currentTimeMillis(), latitude = 0.0, longitude = 0.0, status = "COUNTDOWN", triggerType = triggerType, aiConfidenceScore = 100, contactsNotified = listOf(), responderStatus = "COUNTDOWN", deviceId = deviceId, locationSource = locationSource)
         }
 
         // Create a unique Emergency ID
@@ -95,7 +97,8 @@ class EmergencyService(
             aiConfidenceScore = if (triggerType == "FALL_DETECTED") 96 else 90,
             contactsNotified = databaseService.contacts.value.map { "${it.name} (${it.phone})" },
             responderStatus = "COUNTDOWN ACTIVE",
-            deviceId = deviceId
+            deviceId = deviceId,
+            locationSource = locationSource
         )
         
         _activeEmergency.value = pendingModel
@@ -121,11 +124,46 @@ class EmergencyService(
                 speed = customSpeed ?: currentLoc.speed.toFloat(),
                 bearing = customBearing ?: currentLoc.bearing,
                 status = "ACTIVE",
-                responderStatus = "SOS TRIGGERED - BROADCASTING"
+                responderStatus = "SOS TRIGGERED - BROADCASTING",
+                locationSource = locationSource
             )
             _activeEmergency.value = model
 
-            // Concurrently get location and execute actions
+            // Elevate to Foreground Service IMMEDIATELY to protect process from background restrictions
+            startHighFrequencyLocationUpdates(emergencyId)
+
+            // Independent Action: Call (Do not wait for slow GPS location!)
+            launch(Dispatchers.Main) {
+                val primaryContact = databaseService.contacts.value.firstOrNull()
+                val phoneToCall = primaryContact?.phone ?: "911"
+                databaseService.addDeveloperLog("CALL_REQUESTED: $phoneToCall (ID: $emergencyId)", "INFO")
+
+                if (lastCalledEmergencyId == emergencyId) {
+                    Log.w("EmergencyService", "Call already placed for emergency: $emergencyId")
+                } else {
+                    lastCalledEmergencyId = emergencyId
+                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED) {
+                        Log.d("EmergencyService", "CALL_REQUESTED: Attempting background dial to $phoneToCall")
+                        val callIntent = Intent(Intent.ACTION_CALL).apply {
+                            data = Uri.parse("tel:$phoneToCall")
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                        }
+                        try {
+                            context.startActivity(callIntent)
+                            databaseService.addDeveloperLog("CALL_STARTED: tel:$phoneToCall", "SUCCESS")
+                            Log.d("EmergencyService", "CALL_STARTED: Successfully launched dialer activity.")
+                        } catch (e: Exception) {
+                            databaseService.addDeveloperLog("CALL_FAILED: ${e.message}", "ERROR")
+                            Log.e("EmergencyService", "CALL_FAILED: Failed to start background call activity: ${e.message}")
+                        }
+                    } else {
+                        databaseService.addDeveloperLog("CALL_PERMISSION_DENIED: CALL_PHONE permission not granted", "ERROR")
+                        Log.w("EmergencyService", "CALL_PERMISSION_DENIED: Cannot place call.")
+                    }
+                }
+            }
+
+            // Independent Action: Acquire high-accuracy location, notify Cloud and SMS
             launch {
                 val highAccuracyLoc = locationService.getCurrentLocationOnce(3000)
                 if (highAccuracyLoc != null) {
@@ -139,8 +177,8 @@ class EmergencyService(
                     )
                     _activeEmergency.value = model
                 }
-
-                // Do independent actions concurrently
+                
+                // Now execute subsequent network/cloud/SMS tasks concurrently
                 launch { saveEmergencyToCloud(model) }
                 launch { notifyEmergencyContacts(model) }
                 launch {
@@ -154,27 +192,7 @@ class EmergencyService(
                         )
                     )
                 }
-
-                // Call
-                launch(Dispatchers.Main) {
-                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED) {
-                        val primaryContact = databaseService.contacts.value.firstOrNull()
-                        val phoneToCall = primaryContact?.phone ?: "911"
-                        val callIntent = Intent(Intent.ACTION_CALL).apply {
-                            data = Uri.parse("tel:$phoneToCall")
-                            flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                        }
-                        try {
-                            context.startActivity(callIntent)
-                        } catch (e: Exception) {
-                            Log.e("EmergencyService", "Failed to initiate real-time call: ${e.message}")
-                        }
-                    }
-                }
             }
-
-            // Start updating location every 3-5 seconds
-            startHighFrequencyLocationUpdates(emergencyId)
         }
 
         return pendingModel
@@ -292,6 +310,7 @@ class EmergencyService(
             countdownJob?.cancel()
             _countdown.value = null
             _activeEmergency.value = null
+            databaseService.addDeveloperLog("CALL_CANCELLED: Countdown aborted by user", "INFO")
             closeActiveSession()
             return true
         }
@@ -310,6 +329,7 @@ class EmergencyService(
             notes = notes
         )
 
+        databaseService.addDeveloperLog("CALL_CANCELLED: Emergency cancelled with PIN", "INFO")
         saveEmergencyToCloud(updatedModel)
         closeActiveSession()
         return true
@@ -324,6 +344,7 @@ class EmergencyService(
             notes = "Completed safety verification cycle."
         )
 
+        databaseService.addDeveloperLog("CALL_COMPLETED/RETURNED: Marked safe and emergency closed", "INFO")
         saveEmergencyToCloud(updatedModel)
         closeActiveSession()
     }

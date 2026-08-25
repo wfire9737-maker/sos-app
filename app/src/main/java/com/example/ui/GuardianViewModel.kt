@@ -101,6 +101,20 @@ class GuardianViewModel @Inject constructor(
         initialValue = false
     )
 
+    init {
+        fallDetectionService.onSosTriggeredCallback = {
+            triggerFallDetectedSOS()
+        }
+
+        // Wire real MPU6050 motion processor from BLE hardware
+        deviceService.bleManager.motionProcessor.onPossibleFallDetected = { reading, eventId ->
+            android.util.Log.d("GuardianViewModel", "MOTION: possible fall detected from MPU6050 event $eventId (MAG=${reading.accelerationMagnitudeG}g)")
+            if (!emergencyService.isEmergencyActive() && fallDetectionService.currentState.value != "FALL_COUNTDOWN") {
+                fallDetectionService.triggerFall()
+            }
+        }
+    }
+
     fun setDeveloperModeEnabled(enabled: Boolean) {
         viewModelScope.launch {
             settingsDataStore.setDeveloperMode(enabled)
@@ -149,6 +163,14 @@ class GuardianViewModel @Inject constructor(
     val aiLogsNew: StateFlow<List<AIAnalysisModel>> = aiProvider.analysisLogs
     val currentLiveReadingNew: StateFlow<AISensorReading> = aiProvider.currentLiveReading
     val currentLiveAnalysisNew: StateFlow<AIAnalysisModel?> = aiProvider.currentLiveAnalysis
+
+    val mpuReading: StateFlow<com.example.ble.Mpu6050Reading?> = deviceService.bleManager.latestMpuReading
+    val mpuHardwareState: StateFlow<com.example.ble.MpuHardwareState> = deviceService.bleManager.mpuHardwareState
+    val mpuMotionState: StateFlow<com.example.ble.MotionState> = deviceService.bleManager.motionState
+    val mpuRawString: StateFlow<String?> = deviceService.bleManager.mpuRawString
+    val mpuRecentReadings: StateFlow<List<com.example.ble.Mpu6050Reading>> = deviceService.bleManager.mpuRecentReadings
+    val mpuCharacteristicFound: StateFlow<Boolean> = deviceService.bleManager.mpuCharacteristicFound
+    val mpuNotificationSubscribed: StateFlow<Boolean> = deviceService.bleManager.mpuNotificationSubscribed
 
     // Fall Detection (Module 22) State Flows
     val fallState: StateFlow<String> = fallDetectionService.currentState
@@ -209,25 +231,17 @@ class GuardianViewModel @Inject constructor(
     val isTrackingLocation = locationService.isTracking
 
     // Settings & Security Custom States
-    private val _themeMode = MutableStateFlow("SYSTEM")
+    private val _themeMode = MutableStateFlow(try { getApplication<Application>().getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE).getString("theme_mode", "SYSTEM") ?: "SYSTEM" } catch(e:Exception) { "SYSTEM" })
     val themeMode: StateFlow<String> = _themeMode.asStateFlow()
-    fun setThemeMode(mode: String) { _themeMode.value = mode }
+    fun setThemeMode(mode: String) { _themeMode.value = mode; databaseService.saveUserSetting("theme_mode", mode) }
 
-    private val _language = MutableStateFlow("en")
+    private val _language = MutableStateFlow(try { getApplication<Application>().getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE).getString("language", "en") ?: "en" } catch(e:Exception) { "en" })
     val language: StateFlow<String> = _language.asStateFlow()
-    fun setLanguage(lang: String) { _language.value = lang }
+    fun setLanguage(lang: String) { _language.value = lang; databaseService.saveUserSetting("language", lang) }
 
     fun setSosSoundEnabled(enabled: Boolean) {
         _sosSoundEnabled.value = enabled
-        try {
-            getApplication<Application>()
-                .getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE)
-                .edit()
-                .putBoolean("sos_sound_enabled", enabled)
-                .apply()
-        } catch (e: Exception) {
-            Log.e("GuardianViewModel", "Failed to save sos_sound_enabled: ${e.message}")
-        }
+        databaseService.saveUserSetting("sos_sound_enabled", enabled)
     }
 
     fun toggleSirenAlarm() {
@@ -248,7 +262,7 @@ class GuardianViewModel @Inject constructor(
         }
     }
 
-    private val _criticalAlarmsEnabled = MutableStateFlow(true)
+    private val _criticalAlarmsEnabled = MutableStateFlow(try { getApplication<Application>().getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE).getBoolean("critical_alarms_enabled", true) } catch(e:Exception) { true })
     val criticalAlarmsEnabled = _criticalAlarmsEnabled.asStateFlow()
     fun setVoiceSosEnabled(enabled: Boolean) {
         _voiceSosEnabled.value = enabled
@@ -276,17 +290,10 @@ class GuardianViewModel @Inject constructor(
 
     fun setVoiceSosPhrase(phrase: String) {
         _voiceSosPhrase.value = phrase
-        try {
-            getApplication<Application>().getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE)
-                .edit()
-                .putString("voice_sos_phrase", phrase)
-                .apply()
-        } catch (e: Exception) {
-            Log.e("GuardianViewModel", "Failed to save voice_sos_phrase: ${e.message}")
-        }
+        databaseService.saveUserSetting("voice_sos_phrase", phrase)
     }
 
-    fun setCriticalAlarmsEnabled(enabled: Boolean) { _criticalAlarmsEnabled.value = enabled }
+    fun setCriticalAlarmsEnabled(enabled: Boolean) { _criticalAlarmsEnabled.value = enabled; databaseService.saveUserSetting("critical_alarms_enabled", enabled) }
 
     private val _arrivalAlertsEnabled = MutableStateFlow(true)
     val arrivalAlertsEnabled = _arrivalAlertsEnabled.asStateFlow()
@@ -594,10 +601,26 @@ class GuardianViewModel @Inject constructor(
 
     fun triggerFallDetectedSOS() {
         viewModelScope.launch {
-            val model = initiateEmergencySequence(
-                triggerSource = "FALL_DETECTED",
-                deviceId = "WEARABLE-BAND-IMU"
-            )
+            val hwGps = deviceService.bleManager.latestHardwareGpsLocation.value
+            val isGpsValid = deviceService.bleManager.hardwareGpsState.value is com.example.ble.HardwareGpsState.ValidLocation && hwGps != null
+
+            val model = if (isGpsValid && hwGps != null) {
+                initiateEmergencySequence(
+                    triggerSource = "FALL_DETECTED",
+                    deviceId = "ESP32-SOS-BAND-81F4",
+                    lat = hwGps.latitude,
+                    lng = hwGps.longitude,
+                    accuracy = 3.0f
+                )
+            } else {
+                initiateEmergencySequence(
+                    triggerSource = "FALL_DETECTED",
+                    deviceId = "ESP32-SOS-BAND-81F4"
+                )
+            }
+
+            val reading = deviceService.bleManager.latestMpuReading.value
+            val magStr = if (reading != null) String.format(Locale.US, "%.2fg", reading.accelerationMagnitudeG) else "4.1G"
 
             // Trigger AI Emergency Analysis for our new service as well
             val analysis = AIAnalysisModel(
@@ -609,9 +632,9 @@ class GuardianViewModel @Inject constructor(
                 riskLevel = "CRITICAL",
                 suggestedAction = "ALERT ALL PRIMARY FAMILY CONTACTS AND LAUNCH COUNTY DISPATCH CODES",
                 timeline = listOf(
-                    AITimelineEvent("10:44:00 AM", "Impact Shock", "Accelerometer spike of 4.1G logged.", "💥"),
+                    AITimelineEvent("10:44:00 AM", "Impact Shock", "MPU6050 accelerometer spike ($magStr) logged.", "💥"),
                     AITimelineEvent("10:44:05 AM", "Countdown Commenced", "Wearer unresponsive. 15-second countdown started.", "⏱️"),
-                    AITimelineEvent("10:44:20 AM", "Auto SOS Dispatch", "No cancel received. Triggering fallback emergency broadcast.", "🚨")
+                    AITimelineEvent("10:44:20 AM", "Auto SOS Dispatch", "No cancel received. Dispatched emergency broadcast.", "🚨")
                 )
             )
             aiService.addAnalysisLog(analysis)
@@ -691,12 +714,12 @@ class GuardianViewModel @Inject constructor(
         }
     }
 
-    fun startVoiceRecognition(context: Context) {
-        voiceSosService.startSpeechRecognition(context)
+fun startVoiceRecognition(context: Context) {
+        setVoiceSosEnabled(true)
     }
 
     fun stopVoiceRecognition() {
-        voiceSosService.stopSpeechRecognition()
+        setVoiceSosEnabled(false)
     }
 
     fun clearVoiceCommandConfirmation() {
@@ -1131,21 +1154,14 @@ class GuardianViewModel @Inject constructor(
 
 
     // --- MODULE 8: DEVELOPER LOGS ---
-    private val _developerLogs = MutableStateFlow<List<DeveloperLog>>(listOf(
-        DeveloperLog(event = "App Started", status = "SUCCESS"),
-        DeveloperLog(event = "Bluetooth Connected", status = "INFO"),
-        DeveloperLog(event = "GPS Acquired", status = "SUCCESS")
-    ))
-    val developerLogs: StateFlow<List<DeveloperLog>> = _developerLogs.asStateFlow()
+    val developerLogs: StateFlow<List<DeveloperLog>> = databaseService.developerLogs
 
     fun addDeveloperLog(event: String, status: String) {
-        val currentLogs = _developerLogs.value.toMutableList()
-        currentLogs.add(0, DeveloperLog(event = event, status = status))
-        _developerLogs.value = currentLogs
+        databaseService.addDeveloperLog(event, status)
     }
 
     fun clearDeveloperLogs() {
-        _developerLogs.value = emptyList()
+        databaseService.clearDeveloperLogs()
     }
 
     fun deleteTestRecords() {
@@ -1197,20 +1213,18 @@ class GuardianViewModel @Inject constructor(
 
     
     init {
-        // Voice SOS background setup
+        // Voice SOS background setup - SAFELY LOAD ONLY
         try {
             val prefs = getApplication<Application>().getSharedPreferences("smart_sos_settings", android.content.Context.MODE_PRIVATE)
             val isVoiceEnabled = prefs.getBoolean("voice_sos_enabled", false)
             if (isVoiceEnabled) {
-                val intent = android.content.Intent(getApplication(), com.example.service.VoiceSosForegroundService::class.java)
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                    getApplication<Application>().startForegroundService(intent)
-                } else {
-                    getApplication<Application>().startService(intent)
-                }
+                // Do not auto-start foreground service on launch to prevent crashes.
+                // Reset to false so the user must explicitly grant permission and re-enable it.
+                prefs.edit().putBoolean("voice_sos_enabled", false).apply()
+                _voiceSosEnabled.value = false
             }
         } catch (e: Exception) {
-            android.util.Log.e("GuardianViewModel", "Failed to start Voice SOS on init: ${e.message}")
+            android.util.Log.e("GuardianViewModel", "Failed to load Voice SOS state safely: ${e.message}")
         }
 
         // Register callbacks for Fall, Voice SOS, and Safety Timer automation
@@ -1228,14 +1242,7 @@ class GuardianViewModel @Inject constructor(
             handleVoiceCommand(command, confidence)
         }
 
-        viewModelScope.launch {
-            deviceService.incomingEsp32SosEvent.collect { triggerType ->
-                if (triggerType != null) {
-                    triggerEsp32SOS(triggerType)
-                    deviceService.clearIncomingEsp32SosEvent()
-                }
-            }
-        }
+        
 
         viewModelScope.launch {
             emergencyProvider.activeEmergencyState.collect { model ->

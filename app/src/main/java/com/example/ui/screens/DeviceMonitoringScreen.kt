@@ -100,7 +100,7 @@ fun DeviceMonitoringScreen(
                         TelemetryCard(
                             title = "Battery",
                             value = if (device.status == "DISCONNECTED") "--" else "${device.batteryLevel}%",
-                            icon = if (device.status == "DISCONNECTED") Icons.Default.BatteryUnknown else Icons.Default.BatteryFull,
+                            icon = if (device.status == "DISCONNECTED") Icons.AutoMirrored.Filled.BatteryUnknown else Icons.Default.BatteryFull,
                             color = if (device.status == "DISCONNECTED") Color.Gray else if (device.batteryLevel > 20) SafetyGreen else EmergencyRed,
                             modifier = Modifier.weight(1f)
                         )

@@ -52,10 +52,14 @@ class LocationForegroundService : Service() {
             .setSmallIcon(android.R.drawable.ic_dialog_alert)
             .build()
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(1001, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
-        } else {
-            startForeground(1001, notification)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(1001, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+            } else {
+                startForeground(1001, notification)
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("LocationFgService", "Failed to start foreground service: ${e.message}")
         }
     }
 }

@@ -39,6 +39,9 @@ fun FallDetectionScreen(
     val currentState by viewModel.fallState.collectAsState()
     val countdownSeconds by viewModel.fallCountdown.collectAsState()
     val allEvents by viewModel.allFallEvents.collectAsState()
+    val mpuReading by viewModel.mpuReading.collectAsState()
+    val mpuMotionState by viewModel.mpuMotionState.collectAsState()
+    val mpuHardwareState by viewModel.mpuHardwareState.collectAsState()
 
     // Show Countdown overlay Dialog if in count-down state
     if (currentState == "FALL_COUNTDOWN") {
@@ -163,19 +166,132 @@ fun FallDetectionScreen(
                 }
             }
 
-            // --- SIMULATE ACCIDENT TRIGGER ---
+            // --- REAL MPU6050 HARDWARE SENSOR TELEMETRY ---
             item {
+                Text(
+                    text = "ESP32 MPU6050 Live Telemetry",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.height(6.dp))
                 Card(
                     colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.25f)
+                        containerColor = MaterialTheme.colorScheme.surface
                     ),
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(20.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
-                        modifier = Modifier.padding(14.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "Hardware Motion Pattern",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            val badgeColor = when (mpuMotionState) {
+                                com.example.ble.MotionState.POSSIBLE_FALL -> MaterialTheme.colorScheme.error
+                                com.example.ble.MotionState.POSSIBLE_IMPACT -> Color(0xFFF59E0B)
+                                com.example.ble.MotionState.POSSIBLE_FREE_FALL -> Color(0xFF3B82F6)
+                                com.example.ble.MotionState.NORMAL -> Color(0xFF10B981)
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = badgeColor.copy(alpha = 0.15f)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(8.dp)
+                                            .background(badgeColor, CircleShape)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = mpuMotionState.displayName,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.sp,
+                                        color = badgeColor
+                                    )
+                                }
+                            }
+                        }
+
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "Total Magnitude",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            val mag = mpuReading?.accelerationMagnitudeG
+                            Text(
+                                text = if (mag != null) String.format(Locale.US, "%.2f g", mag) else "Waiting for BLE stream",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                color = if (mag != null && mag > 2.7) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "Acceleration (X/Y/Z)",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = mpuReading?.let {
+                                    "${String.format(Locale.US, "%.2f", it.accelerationX)} / ${String.format(Locale.US, "%.2f", it.accelerationY)} / ${String.format(Locale.US, "%.2f", it.accelerationZ)} g"
+                                } ?: "--",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "Gyroscope (X/Y/Z)",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = mpuReading?.let {
+                                    "${String.format(Locale.US, "%.0f", it.gyroX)} / ${String.format(Locale.US, "%.0f", it.gyroY)} / ${String.format(Locale.US, "%.0f", it.gyroZ)} °/s"
+                                } ?: "--",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                }
+            }
+
+
             if (allEvents.isEmpty()) {
                 item {
                     Card(
@@ -260,105 +376,6 @@ fun FallDetectionScreen(
                             }
                         }
                     }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun FallCountdownDialog(
-    secondsLeft: Int,
-    onCancel: () -> Unit
-) {
-    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-    val scale by infiniteTransition.animateFloat(
-        initialValue = 0.95f,
-        targetValue = 1.05f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1000, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "scale_anim"
-    )
-
-    Dialog(
-        onDismissRequest = { /* Force response */ },
-        properties = DialogProperties(
-            dismissOnBackPress = false,
-            dismissOnClickOutside = false
-        )
-    ) {
-        Card(
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E2E)),
-            shape = RoundedCornerShape(24.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .scale(scale)
-                .border(2.dp, Color(0xFFEF4444), RoundedCornerShape(24.dp))
-        ) {
-            Column(
-                modifier = Modifier.padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Icon(
-                    imageVector = Icons.Default.ReportProblem,
-                    contentDescription = null,
-                    tint = Color(0xFFEF4444),
-                    modifier = Modifier.size(54.dp)
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                    text = "FALL DETECTED!",
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Black,
-                    color = Color.White
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = "An abrupt vertical deceleration was registered. Preparing automated emergency dispatch.",
-                    fontSize = 11.sp,
-                    color = Color.LightGray,
-                    textAlign = TextAlign.Center
-                )
-                Spacer(modifier = Modifier.height(20.dp))
-
-                // Huge Pulsing Countdown Timer
-                Box(
-                    modifier = Modifier
-                        .size(100.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFFEF4444).copy(alpha = 0.15f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "$secondsLeft",
-                        fontSize = 44.sp,
-                        fontWeight = FontWeight.Black,
-                        color = Color(0xFFEF4444),
-                        modifier = Modifier.testTag("countdown_number")
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(24.dp))
-
-                Button(
-                    onClick = onCancel,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFFEF4444)
-                    ),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp)
-                        .testTag("cancel_fall_countdown_btn")
-                ) {
-                    Text(
-                        text = "I am safe (Cancel)",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp,
-                        color = Color.White
-                    )
                 }
             }
         }
