@@ -8,15 +8,22 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -29,9 +36,52 @@ import dagger.hilt.android.AndroidEntryPoint
 class MainActivity : ComponentActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
+    
+    val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
+    Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+        val stackTrace = android.util.Log.getStackTraceString(throwable)
+        getSharedPreferences("crash_prefs", android.content.Context.MODE_PRIVATE)
+            .edit()
+            .putString("last_crash", stackTrace)
+            .commit()
+        defaultHandler?.uncaughtException(thread, throwable)
+    }
+    
+    val lastCrash = getSharedPreferences("crash_prefs", android.content.Context.MODE_PRIVATE)
+        .getString("last_crash", null)
+    if (lastCrash != null) {
+        android.util.Log.e("CRASH_LOG", "Last crash: $lastCrash")
+    }
+
     try {
         enableEdgeToEdge()
         setContent {
+          if (lastCrash != null) {
+             Box(
+                 modifier = Modifier.fillMaxSize().background(Color.Red)
+             ) {
+                 LazyColumn {
+                     item {
+                         Text(
+                             text = lastCrash,
+                             color = Color.White,
+                             modifier = Modifier.padding(16.dp)
+                         )
+                     }
+                     item {
+                         androidx.compose.material3.Button(onClick = {
+                             getSharedPreferences("crash_prefs", android.content.Context.MODE_PRIVATE)
+                                .edit()
+                                .remove("last_crash")
+                                .commit()
+                         }, modifier = Modifier.padding(16.dp)) {
+                             Text("Clear Crash Log")
+                         }
+                     }
+                 }
+             }
+             return@setContent
+          }
           val guardianViewModel: GuardianViewModel = androidx.hilt.navigation.compose.hiltViewModel()
           val themeMode by guardianViewModel.themeMode.collectAsState()
           val isDarkTheme = when (themeMode) {
@@ -68,11 +118,9 @@ fun AppPermissionChecker() {
         android.Manifest.permission.ACCESS_COARSE_LOCATION,
         android.Manifest.permission.READ_CONTACTS
     )
-
     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
         permissionsToRequest.add(android.Manifest.permission.POST_NOTIFICATIONS)
     }
-
     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
         permissionsToRequest.add(android.Manifest.permission.BLUETOOTH_SCAN)
         permissionsToRequest.add(android.Manifest.permission.BLUETOOTH_CONNECT)
@@ -89,12 +137,18 @@ fun AppPermissionChecker() {
 
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
-    ) { _ ->
-        try {
-            com.example.service.BleForegroundService.start(context)
-        } catch (e: Exception) {
-            // Ignore
+    ) { permissions ->
+        val allGranted = permissions.entries.all { it.value }
+        if (allGranted || (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S && 
+             androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED)) {
+            try {
+                com.example.service.BleForegroundService.start(context)
+            } catch (e: Exception) {
+                // Ignore
+            }
         }
+        
+            
         val locationManager = context.getSystemService(android.content.Context.LOCATION_SERVICE) as android.location.LocationManager
         try {
             if (!locationManager.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER)) {
@@ -108,17 +162,13 @@ fun AppPermissionChecker() {
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_START) {
-                try {
-                    com.example.service.BleForegroundService.start(context)
-                } catch (e: Exception) {
-                    // Ignore
-                }
                 val missingPermissions = permissionsToRequest.toList().filter {
                     ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
                 }
                 if (missingPermissions.isNotEmpty()) {
                     launcher.launch(missingPermissions.toTypedArray())
                 } else {
+                    try { com.example.service.BleForegroundService.start(context) } catch (e: Exception) {}
                     val locationManager = context.getSystemService(android.content.Context.LOCATION_SERVICE) as android.location.LocationManager
                     try {
                         if (!locationManager.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER)) {

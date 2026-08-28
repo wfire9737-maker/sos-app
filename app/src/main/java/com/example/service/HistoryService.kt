@@ -33,14 +33,10 @@ class HistoryService(private val context: Context, private val firestore: Fireba
                 val obj = arr.getJSONObject(i)
                 list.add(parseJsonToHistoryItem(obj))
             }
-            if (list.isEmpty()) {
-                populateSimulatedDefaults()
-            } else {
-                _history.value = list
-            }
+            _history.value = list
         } catch (e: Exception) {
             Log.e("HistoryService", "Failed to deserialize local history: ${e.message}")
-            populateSimulatedDefaults()
+            
         }
     }
 
@@ -150,72 +146,6 @@ class HistoryService(private val context: Context, private val firestore: Fireba
         return sb.toString()
     }
 
-    private fun populateSimulatedDefaults() {
-        val defaults = listOf(
-            HistoryModel(
-                date = "2026-07-15",
-                time = "10:24 AM",
-                durationSeconds = 184,
-                responseTimeSeconds = 24,
-                address = "North Ward Corridor B, Suite 104",
-                latitude = 37.77492,
-                longitude = -122.41941,
-                severity = "CRITICAL",
-                contactsNotified = listOf("Dr. Sarah Jenkins", "Warden Vance", "Emergency Service 911"),
-                aiConfidence = 96,
-                triggerType = "FALL_DETECTED",
-                resolutionNotes = "Sudden vertical acceleration signature detected followed by complete absence of motion. Medical staff arrived in 184 seconds. Stabilized and resolved.",
-                resolvedBy = "Nurse Julia"
-            ),
-            HistoryModel(
-                date = "2026-07-10",
-                time = "06:12 PM",
-                durationSeconds = 95,
-                responseTimeSeconds = 12,
-                address = "Main Garden Courtyard Area",
-                latitude = 37.77511,
-                longitude = -122.41893,
-                severity = "HIGH",
-                contactsNotified = listOf("Warden Vance", "Dr. Sarah Jenkins"),
-                aiConfidence = 100,
-                triggerType = "MANUAL_BUTTON",
-                resolutionNotes = "User manual SOS button depressed due to heart arrhythmia warning onset. Help dispatched to garden immediately.",
-                resolvedBy = "Officer Marcus"
-            ),
-            HistoryModel(
-                date = "2026-07-01",
-                time = "02:45 AM",
-                durationSeconds = 230,
-                responseTimeSeconds = 45,
-                address = "Living Quarters Restroom 4",
-                latitude = 37.77456,
-                longitude = -122.41999,
-                severity = "CRITICAL",
-                contactsNotified = listOf("Night Guard Thomas", "Emergency Service 911"),
-                aiConfidence = 91,
-                triggerType = "FALL_DETECTED",
-                resolutionNotes = "Slip detected on restroom wet flooring. Automated fall alarm activated. Night guard accessed with key-card and assisted user up.",
-                resolvedBy = "Guard Thomas"
-            ),
-            HistoryModel(
-                date = "2026-06-25",
-                time = "09:15 AM",
-                durationSeconds = 54,
-                responseTimeSeconds = 8,
-                address = "West Entrance Reception",
-                latitude = 37.77488,
-                longitude = -122.41912,
-                severity = "WARNING",
-                contactsNotified = listOf("Warden Vance"),
-                aiConfidence = 88,
-                triggerType = "MANUAL_BUTTON",
-                resolutionNotes = "Accidental click during strap replacement. User apologized and marked device safe inside 54 seconds. False alarm cleared.",
-                resolvedBy = "Self (Marcus Vance)"
-            )
-        )
-        _history.value = defaults
-        saveHistory()
-    }
 
     // --- JSON & MAP PARSERS ---
 

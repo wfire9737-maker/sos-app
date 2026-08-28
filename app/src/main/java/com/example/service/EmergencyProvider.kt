@@ -23,6 +23,7 @@ class EmergencyProvider(
 ) {
     val activeEmergencyState: StateFlow<EmergencyModel?> = emergencyService.activeEmergency
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private var lastUpdateNotificationTime: Long = 0L
 
     init {
         scope.launch {
@@ -114,8 +115,14 @@ class EmergencyProvider(
     ) {
         scope.launch {
             if (isEmergencyInProgress()) {
-                emergencyService.activeEmergency.value?.let { model ->
-                    emergencyService.notifyEmergencyContacts(model, isUpdate = true)
+                val now = System.currentTimeMillis()
+                if (now - lastUpdateNotificationTime > 30000) { // Limit updates to once every 30 seconds
+                    lastUpdateNotificationTime = now
+                    emergencyService.activeEmergency.value?.let { model ->
+                        emergencyService.notifyEmergencyContacts(model, isUpdate = true)
+                    }
+                } else {
+                    android.util.Log.d("Emergency", "EMERGENCY: Duplicate trigger ignored (rate limited)")
                 }
                 return@launch
             }
@@ -131,9 +138,9 @@ class EmergencyProvider(
                 userPhone = userPhone,
                 triggerType = triggerSource,
                 deviceId = deviceId,
-                customLat = lat ?: locationService.currentLocation.value.latitude,
-                customLng = lng ?: locationService.currentLocation.value.longitude,
-                customAccuracy = accuracy ?: locationService.currentLocation.value.accuracy,
+                customLat = lat,
+                customLng = lng,
+                customAccuracy = accuracy,
                 customAltitude = altitude,
                 customSpeed = speed,
                 customBearing = bearing,

@@ -23,9 +23,7 @@ fun rememberLocationPermissionHandler(
         contract = ActivityResultContracts.StartIntentSenderForResult()
     ) { result ->
         val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-        if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-            onPermissionsGrantedAndGpsEnabled()
-        }
+        onPermissionsGrantedAndGpsEnabled()
         isCheckingGps = false
     }
 
@@ -92,20 +90,15 @@ fun rememberLocationPermissionHandler(
     val foregroundPermissionsLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
-        // We proceed if core location is granted
         val fineLoc = permissions[Manifest.permission.ACCESS_FINE_LOCATION] ?: false
         if (fineLoc) {
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
                 backgroundPermissionLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
             } else {
-                val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-                if (!locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-                    isCheckingGps = true
-                    promptEnableLocation()
-                } else {
-                    onPermissionsGrantedAndGpsEnabled()
-                }
+                onPermissionsGrantedAndGpsEnabled()
             }
+        } else {
+            onPermissionsGrantedAndGpsEnabled()
         }
     }
 

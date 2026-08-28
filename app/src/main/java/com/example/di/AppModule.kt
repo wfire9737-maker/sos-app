@@ -72,7 +72,7 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideNotificationService(@ApplicationContext context: Context, databaseService: DatabaseService): NotificationService = NotificationService(context, databaseService.firestoreInstance)
+    fun provideNotificationService(@ApplicationContext context: Context, databaseService: DatabaseService, settingsDataStore: com.example.data.SettingsDataStore): NotificationService = NotificationService(context, databaseService.firestoreInstance, settingsDataStore)
 
     @Provides
     @Singleton
@@ -92,7 +92,7 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideDeviceService(@ApplicationContext context: Context, databaseService: DatabaseService, notificationService: NotificationService): DeviceService = DeviceService(context, databaseService, notificationService)
+    fun provideDeviceService(@ApplicationContext context: Context, databaseService: DatabaseService, notificationService: NotificationService, emergencyProvider: dagger.Lazy<EmergencyProvider>): DeviceService = DeviceService(context, databaseService, notificationService, emergencyProvider)
 
     @Provides
     @Singleton
@@ -179,7 +179,7 @@ object AppModule {
             context,
             SmartSosDatabase::class.java,
             "smart_sos_db"
-        ).fallbackToDestructiveMigration().build()
+        ).fallbackToDestructiveMigration(true).build()
     }
 
     @Provides

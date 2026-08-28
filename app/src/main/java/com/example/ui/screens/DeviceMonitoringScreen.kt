@@ -34,6 +34,10 @@ fun DeviceMonitoringScreen(
     val isEsp32Connected by viewModel.isEsp32Connected.collectAsState()
     
     // Select the first device to monitor if available
+        val bleBatteryLevel by viewModel.bleBatteryLevel.collectAsState()
+    val bleBatteryDisplay by viewModel.bleBatteryDisplay.collectAsState()
+    val bleRssi by viewModel.bleRssi.collectAsState()
+
     var selectedDeviceId by remember { mutableStateOf(devices.firstOrNull()?.deviceId) }
     val device = devices.find { it.deviceId == selectedDeviceId }
     
@@ -89,7 +93,7 @@ fun DeviceMonitoringScreen(
                 
                 // Status Header
                 item {
-                    DeviceStatusHeader(device = device, isEsp32Connected = isEsp32Connected)
+                    DeviceStatusHeader(device = device, isEsp32Connected = isEsp32Connected, bleBatteryLevel = bleBatteryLevel, bleRssi = bleRssi)
                 }
                 
                 // Telemetry Grid
@@ -177,8 +181,8 @@ fun DeviceMonitoringScreen(
 }
 
 @Composable
-fun DeviceStatusHeader(device: Device, isEsp32Connected: Boolean) {
-    val isConnected = isEsp32Connected || device.status == "CONNECTED"
+fun DeviceStatusHeader(device: Device, isEsp32Connected: Boolean, bleBatteryLevel: Int?, bleRssi: Int?) {
+    val isConnected = isEsp32Connected
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),

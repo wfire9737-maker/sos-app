@@ -63,12 +63,7 @@ class LocationService(
     init {
         loadCachedLocation()
         if (_currentLocation.value.favorites.isEmpty()) {
-            val defaultFavorites = listOf(
-                FavoritePlace("fav-home", "My Safehouse Home", 37.7739, -122.4312, "HOME"),
-                FavoritePlace("fav-college", "State Tech College", 37.7801, -122.4121, "COLLEGE"),
-                FavoritePlace("fav-work", "Guardian HQ Office", 37.7698, -122.4468, "WORK")
-            )
-            updateLocationState { it.copy(favorites = defaultFavorites) }
+            updateLocationState { it.copy(favorites = emptyList()) }
         }
     }
 
@@ -170,18 +165,7 @@ class LocationService(
                 var lng = loc.longitude
                 var acc = loc.accuracy
 
-                if (_isWeakGps.value) {
-                    // Inject jitter and high inaccuracy
-                    lat += (Math.random() - 0.5) * 0.005
-                    lng += (Math.random() - 0.5) * 0.005
-                    acc = 250f + (Math.random() * 200).toFloat()
-                    
-                    val weakLoc = Location(loc)
-                    weakLoc.latitude = lat
-                    weakLoc.longitude = lng
-                    weakLoc.accuracy = acc
-                    loc = weakLoc
-                }
+                
 
                 
                 val lastLoc = _currentLocation.value

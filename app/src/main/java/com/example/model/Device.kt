@@ -25,8 +25,8 @@ data class Device(
     val connectionStatus: String = "ONLINE", // ONLINE, OFFLINE, STANDBY
     
     // GPS & MPU6050 telemetries
-    val latitude: Double = 37.7749,
-    val longitude: Double = -122.4194,
+    val latitude: Double = 0.0,
+    val longitude: Double = 0.0,
     val accelX: Float = 0.05f,
     val accelY: Float = -0.02f,
     val accelZ: Float = 0.98f,
@@ -90,8 +90,8 @@ data class Device(
                 cpuUsagePercent = (map["cpuUsagePercent"] as? Number)?.toInt() ?: 18,
                 healthScore = (map["healthScore"] as? Number)?.toInt() ?: 98,
                 connectionStatus = map["connectionStatus"] as? String ?: "ONLINE",
-                latitude = (map["latitude"] as? Number)?.toDouble() ?: 37.7749,
-                longitude = (map["longitude"] as? Number)?.toDouble() ?: -122.4194,
+                latitude = (map["latitude"] as? Number)?.toDouble() ?: 0.0,
+                longitude = (map["longitude"] as? Number)?.toDouble() ?: 0.0,
                 accelX = (map["accelX"] as? Number)?.toFloat() ?: 0.05f,
                 accelY = (map["accelY"] as? Number)?.toFloat() ?: -0.02f,
                 accelZ = (map["accelZ"] as? Number)?.toFloat() ?: 0.98f,

@@ -12,11 +12,11 @@ import kotlinx.coroutines.flow.map
 val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
 
 class SettingsDataStore(private val context: Context) {
-
     companion object {
         val DEVELOPER_MODE_KEY = booleanPreferencesKey("developer_mode")
         val SOS_SOUND_ENABLED_KEY = booleanPreferencesKey("sos_sound_enabled")
         val SOS_VIBRATION_ENABLED_KEY = booleanPreferencesKey("sos_vibration_enabled")
+        val CRITICAL_ALARMS_ENABLED_KEY = booleanPreferencesKey("critical_alarms_enabled")
     }
 
     val developerModeFlow: Flow<Boolean> = context.dataStore.data
@@ -34,6 +34,11 @@ class SettingsDataStore(private val context: Context) {
             preferences[SOS_VIBRATION_ENABLED_KEY] ?: true
         }
 
+    val criticalAlarmsEnabledFlow: Flow<Boolean> = context.dataStore.data
+        .map { preferences ->
+            preferences[CRITICAL_ALARMS_ENABLED_KEY] ?: true
+        }
+
     suspend fun setDeveloperMode(enabled: Boolean) {
         context.dataStore.edit { preferences ->
             preferences[DEVELOPER_MODE_KEY] = enabled
@@ -49,6 +54,12 @@ class SettingsDataStore(private val context: Context) {
     suspend fun setSosVibrationEnabled(enabled: Boolean) {
         context.dataStore.edit { preferences ->
             preferences[SOS_VIBRATION_ENABLED_KEY] = enabled
+        }
+    }
+
+    suspend fun setCriticalAlarmsEnabled(enabled: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[CRITICAL_ALARMS_ENABLED_KEY] = enabled
         }
     }
 }

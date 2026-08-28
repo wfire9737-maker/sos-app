@@ -21,13 +21,14 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.tasks.await
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
 @Suppress("DEPRECATION")
-class NotificationService(private val context: Context, private val firestore: FirebaseFirestore?) {
+class NotificationService(private val context: Context, private val firestore: FirebaseFirestore?, private val settingsDataStore: com.example.data.SettingsDataStore) {
     
     private val _notifications = MutableStateFlow<List<NotificationItem>>(emptyList())
     val notifications: StateFlow<List<NotificationItem>> = _notifications.asStateFlow()
@@ -244,6 +245,14 @@ class NotificationService(private val context: Context, private val firestore: F
     // --- SYSTEM NOTIFICATION PROVIDER BAR BRIDGE ---
 
     private fun showSystemNotificationBar(item: NotificationItem) {
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            val enabled = settingsDataStore.criticalAlarmsEnabledFlow.first()
+            if (!enabled) return@launch
+            showSystemNotificationBarInternal(item)
+        }
+    }
+
+    private fun showSystemNotificationBarInternal(item: NotificationItem) {
         try {
             val intent = Intent(context, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK

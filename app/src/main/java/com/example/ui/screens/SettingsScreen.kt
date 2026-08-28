@@ -36,6 +36,7 @@ fun SettingsScreen(
     onNavigateToTrustedPlaces: () -> Unit = {},
     onNavigateToPermissions: () -> Unit = {},
     onNavigateToAbout: () -> Unit = {},
+    onNavigateToContacts: () -> Unit = {},
     onNavigateToDeveloperDashboard: () -> Unit = {}
 ) {
     val themeMode by viewModel.themeMode.collectAsState()
@@ -43,9 +44,9 @@ fun SettingsScreen(
     val language by viewModel.language.collectAsState()
     val notificationsEnabled by viewModel.criticalAlarmsEnabled.collectAsState()
     val voiceSosEnabled by viewModel.voiceSosEnabled.collectAsState()
-    val voiceState by viewModel.voiceSosService.voiceState.collectAsState()
-    val isSpeechActive by viewModel.voiceSosService.isSpeechRecognizerActive.collectAsState()
-    val wakePhrases by viewModel.voiceSosService.wakePhrases.collectAsState()
+    val voiceState by viewModel.voiceState.collectAsState()
+    val isSpeechActive by viewModel.isSpeechRecognizerActive.collectAsState()
+    val wakePhrases by viewModel.wakePhrases.collectAsState()
     val voiceSosPhrase by viewModel.voiceSosPhrase.collectAsState()
     var showVoicePhraseDialog by remember { mutableStateOf(false) }
     var tempPhrase by remember { mutableStateOf("") }
@@ -94,6 +95,12 @@ fun SettingsScreen(
                         title = "Trusted Places",
                         subtitle = "Manage your safe zones",
                         onClick = onNavigateToTrustedPlaces
+                    )
+                    SettingsItem(
+                        icon = Icons.Default.Contacts,
+                        title = "Emergency Contacts",
+                        subtitle = "Manage who to notify",
+                        onClick = onNavigateToContacts
                     )
                     SettingsItem(
                         icon = Icons.Default.QrCode,

@@ -1,24 +1,18 @@
 import re
 
-with open('app/src/main/java/com/example/ui/GuardianViewModel.kt', 'r') as f:
+with open("app/src/main/java/com/example/ui/GuardianViewModel.kt", "r") as f:
     content = f.read()
 
-replacement = '''
-    fun startVoiceRecognition(context: Context) {
-        setVoiceSosEnabled(true)
-    }
-
-    fun stopVoiceRecognition() {
-        setVoiceSosEnabled(false)
-    }
-'''
-
-content = re.sub(
-    r'    fun startVoiceRecognition\(context: Context\) \{.*?\n    \}[\s\n]*fun stopVoiceRecognition\(\) \{.*?\n    \}',
-    replacement.strip(),
-    content,
-    flags=re.DOTALL
+content = content.replace(
+    "fun triggerManualSOS(lat: Double? = null, lng: Double? = null) { }",
+    """fun triggerManualSOS(lat: Double? = null, lng: Double? = null) {
+        emergencyProvider.triggerEmergency(
+            triggerSource = "MANUAL_SOS",
+            lat = lat,
+            lng = lng
+        )
+    }"""
 )
 
-with open('app/src/main/java/com/example/ui/GuardianViewModel.kt', 'w') as f:
+with open("app/src/main/java/com/example/ui/GuardianViewModel.kt", "w") as f:
     f.write(content)

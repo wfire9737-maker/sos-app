@@ -29,7 +29,8 @@ import java.util.UUID
 class DeviceService(
     private val context: Context,
     private val databaseService: DatabaseService,
-    private val notificationService: NotificationService
+    private val notificationService: NotificationService,
+    private val emergencyProvider: dagger.Lazy<com.example.service.EmergencyProvider>
 ) {
     val bleManager = com.example.ble.BleManager(context)
     private val deviceProvider = DeviceProvider(context)
@@ -620,6 +621,7 @@ class DeviceService(
             }
 
             addCommLog("⏱️ SOS 5-second countdown initiated. Awaiting user cancellation or dispatch...")
+            emergencyProvider.get().triggerEmergency(triggerSource = "ESP32_BUTTON", deviceId = deviceId)
         }
     }
 
@@ -716,10 +718,12 @@ class DeviceService(
 
     fun startEsp32Polling() {
         if (esp32PollingJob?.isActive == true) return
-        try {
-            com.example.service.BleForegroundService.start(context)
-        } catch (e: Exception) {
-            Log.e("DeviceService", "Could not start BleForegroundService: ${e.message}")
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.BLUETOOTH_CONNECT) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                try { com.example.service.BleForegroundService.start(context) } catch (e: Exception) {}
+            }
+        } else {
+            try { com.example.service.BleForegroundService.start(context) } catch (e: Exception) {}
         }
         esp32PollingJob = serviceScope.launch {
             launch {

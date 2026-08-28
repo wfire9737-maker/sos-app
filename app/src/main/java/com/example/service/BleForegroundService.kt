@@ -108,7 +108,6 @@ class BleForegroundService : Service() {
                     BleState.DISCONNECTED -> "Disconnected. Auto-reconnect active."
                     else -> "ESP32 BLE Monitoring Active"
                 }
-                updateForegroundNotification(statusText)
             }
         }
     }

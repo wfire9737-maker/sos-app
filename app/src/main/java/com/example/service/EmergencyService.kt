@@ -135,30 +135,34 @@ class EmergencyService(
             // Independent Action: Call (Do not wait for slow GPS location!)
             launch(Dispatchers.Main) {
                 val primaryContact = databaseService.contacts.value.firstOrNull()
-                val phoneToCall = primaryContact?.phone ?: "911"
-                databaseService.addDeveloperLog("CALL_REQUESTED: $phoneToCall (ID: $emergencyId)", "INFO")
-
-                if (lastCalledEmergencyId == emergencyId) {
-                    Log.w("EmergencyService", "Call already placed for emergency: $emergencyId")
+                val phoneToCall = primaryContact?.phone
+                if (phoneToCall.isNullOrEmpty()) {
+                    databaseService.addDeveloperLog("CALL_SKIPPED: No emergency contacts configured", "INFO")
+                    Log.w("EmergencyService", "CALL_SKIPPED: No emergency contacts configured")
                 } else {
-                    lastCalledEmergencyId = emergencyId
-                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED) {
-                        Log.d("EmergencyService", "CALL_REQUESTED: Attempting background dial to $phoneToCall")
-                        val callIntent = Intent(Intent.ACTION_CALL).apply {
-                            data = Uri.parse("tel:$phoneToCall")
-                            flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                        }
-                        try {
-                            context.startActivity(callIntent)
-                            databaseService.addDeveloperLog("CALL_STARTED: tel:$phoneToCall", "SUCCESS")
-                            Log.d("EmergencyService", "CALL_STARTED: Successfully launched dialer activity.")
-                        } catch (e: Exception) {
-                            databaseService.addDeveloperLog("CALL_FAILED: ${e.message}", "ERROR")
-                            Log.e("EmergencyService", "CALL_FAILED: Failed to start background call activity: ${e.message}")
-                        }
+                    databaseService.addDeveloperLog("CALL_REQUESTED: $phoneToCall (ID: $emergencyId)", "INFO")
+                    if (lastCalledEmergencyId == emergencyId) {
+                        Log.w("EmergencyService", "Call already placed for emergency: $emergencyId")
                     } else {
-                        databaseService.addDeveloperLog("CALL_PERMISSION_DENIED: CALL_PHONE permission not granted", "ERROR")
-                        Log.w("EmergencyService", "CALL_PERMISSION_DENIED: Cannot place call.")
+                        lastCalledEmergencyId = emergencyId
+                        if (ContextCompat.checkSelfPermission(context, Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED) {
+                            Log.d("EmergencyService", "CALL_REQUESTED: Attempting background dial to $phoneToCall")
+                            val callIntent = Intent(Intent.ACTION_CALL).apply {
+                                data = Uri.parse("tel:$phoneToCall")
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                            }
+                            try {
+                                context.startActivity(callIntent)
+                                databaseService.addDeveloperLog("CALL_STARTED: tel:$phoneToCall", "SUCCESS")
+                                Log.d("EmergencyService", "CALL_STARTED: Successfully launched dialer activity.")
+                            } catch (e: Exception) {
+                                databaseService.addDeveloperLog("CALL_FAILED: ${e.message}", "ERROR")
+                                Log.e("EmergencyService", "CALL_FAILED: Failed to start background call activity: ${e.message}")
+                            }
+                        } else {
+                            databaseService.addDeveloperLog("CALL_PERMISSION_DENIED: CALL_PHONE permission not granted", "ERROR")
+                            Log.w("EmergencyService", "CALL_PERMISSION_DENIED: Cannot place call.")
+                        }
                     }
                 }
             }
@@ -220,21 +224,30 @@ class EmergencyService(
             if (sentPhones.contains(contact.phone)) return@forEach
             sentPhones.add(contact.phone)
             
-            val message = if (isUpdate) {
-                "LIVE UPDATE!\n${model.userName} is still in an active emergency.\n\nLocation:\nhttps://maps.google.com/?q=${model.latitude},${model.longitude}\n\nTime: $timestamp"
+            val locationStr = if (model.latitude != 0.0 && model.longitude != 0.0) {
+                "Location:\nhttps://maps.google.com/?q=${model.latitude},${model.longitude}"
             } else {
-                "EMERGENCY!\n${model.userName} has triggered an SOS.\n\nLocation:\nhttps://maps.google.com/?q=${model.latitude},${model.longitude}\n\nPlease contact immediately.\n\nTime: $timestamp"
+                "Location: UNAVAILABLE"
             }
-            try {
-                // For long SMS, we should use sendMultipartTextMessage
-                val parts = smsManager?.divideMessage(message)
-                if (parts != null) {
-                    smsManager.sendMultipartTextMessage(contact.phone, null, parts, null, null)
-                } else {
-                    smsManager?.sendTextMessage(contact.phone, null, message, null, null)
+            val message = if (isUpdate) {
+                "LIVE UPDATE!\n${model.userName} is still in an active emergency.\n\n$locationStr\n\nTime: $timestamp"
+            } else {
+                "EMERGENCY!\n${model.userName} has triggered an SOS.\n\n$locationStr\n\nPlease contact immediately.\n\nTime: $timestamp"
+            }
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) == PackageManager.PERMISSION_GRANTED) {
+                try {
+                    // For long SMS, we should use sendMultipartTextMessage
+                    val parts = smsManager?.divideMessage(message)
+                    if (parts != null) {
+                        smsManager.sendMultipartTextMessage(contact.phone, null, parts, null, null)
+                    } else {
+                        smsManager?.sendTextMessage(contact.phone, null, message, null, null)
+                    }
+                } catch (e: Exception) {
+                    Log.e("EmergencyService", "Failed to send real SMS to ${contact.phone}: ${e.message}")
                 }
-            } catch (e: Exception) {
-                Log.e("EmergencyService", "Failed to send real SMS to ${contact.phone}: ${e.message}")
+            } else {
+                Log.w("EmergencyService", "SMS_PERMISSION_DENIED: Cannot send SMS.")
             }
             
             notificationService.addNotification(
