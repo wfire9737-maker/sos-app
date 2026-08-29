@@ -13,7 +13,6 @@ import android.content.IntentFilter
 import android.content.BroadcastReceiver
 import android.net.ConnectivityManager
 import android.net.Network
-import android.net.NetworkCapabilities
 import android.bluetooth.BluetoothAdapter
 import com.example.config.Esp32Config
 import com.example.model.Device
