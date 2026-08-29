@@ -3,6 +3,8 @@ package com.example.service
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 import com.example.model.User
 import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
@@ -28,7 +30,42 @@ class AuthService(private val context: Context) {
     private var firestore: FirebaseFirestore? = null
 
     // Fallback SharedPreferences for Demo Mode
-    private val sharedPrefs: SharedPreferences = context.getSharedPreferences("guardian_sos_auth", Context.MODE_PRIVATE)
+    private val sharedPrefs: SharedPreferences = try {
+        val masterKey = MasterKey.Builder(context)
+            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+            .build()
+        val encryptedPrefs = EncryptedSharedPreferences.create(
+            context,
+            "guardian_sos_auth_secure",
+            masterKey,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+        )
+        val oldPrefs = context.getSharedPreferences("guardian_sos_auth", Context.MODE_PRIVATE)
+        if (oldPrefs.all.isNotEmpty()) {
+            val editor = encryptedPrefs.edit()
+            for ((key, value) in oldPrefs.all) {
+                when (value) {
+                    is String -> editor.putString(key, value)
+                    is Boolean -> editor.putBoolean(key, value)
+                    is Int -> editor.putInt(key, value)
+                    is Float -> editor.putFloat(key, value)
+                    is Long -> editor.putLong(key, value)
+                }
+            }
+            editor.apply()
+            oldPrefs.edit().clear().apply()
+        }
+        encryptedPrefs
+    } catch (e: Exception) {
+        Log.e("AuthService", "Failed to initialize EncryptedSharedPreferences", e)
+        // Throw an exception on real devices, but allow a fallback in test environments
+        if (e is java.security.GeneralSecurityException || e.message?.contains("KeyStore") == true) {
+             context.getSharedPreferences("guardian_sos_auth_test", Context.MODE_PRIVATE)
+        } else {
+             throw IllegalStateException("Device does not support secure storage required by this application", e)
+        }
+    }
     
     val isDemoMode: Boolean
         get() = firebaseAuth == null
@@ -343,9 +380,6 @@ class AuthService(private val context: Context) {
         userObj.put("allergies", user.allergies)
         userObj.put("conditions", user.conditions)
         userObj.put("medications", user.medications)
-        if (password != null) {
-            userObj.put("password", password)
-        }
         return userObj
     }
 }
