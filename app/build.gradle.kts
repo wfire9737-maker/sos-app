@@ -129,6 +129,8 @@ dependencies {
   testImplementation(libs.junit)
   testImplementation(libs.kotlinx.coroutines.test)
   testImplementation(libs.robolectric)
+  testImplementation("org.mockito:mockito-core:5.3.1")
+  testImplementation("org.mockito.kotlin:mockito-kotlin:5.0.0")
   testImplementation(libs.roborazzi)
   testImplementation(libs.roborazzi.compose)
   testImplementation(libs.roborazzi.junit.rule)
