@@ -14,7 +14,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
@@ -33,8 +32,8 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
           val guardianViewModel: GuardianViewModel = androidx.hilt.navigation.compose.hiltViewModel()
-          val themeMode by guardianViewModel.themeMode.collectAsState()
-          val isDarkTheme = when (themeMode) {
+          val themeModeState = guardianViewModel.themeMode.collectAsState()
+          val isDarkTheme = when (themeModeState.value) {
             "DARK" -> true
             "LIGHT" -> false
             else -> isSystemInDarkTheme()
