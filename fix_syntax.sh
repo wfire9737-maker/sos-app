@@ -1,1 +1,0 @@
-sed -i 's/val confirmationMsg = "🚨 Voice SOS: Countdown Initiated ("${command.matchedPhrase}")"/val confirmationMsg = "🚨 Voice SOS: Countdown Initiated (\\"${command.matchedPhrase}\\")"/g' app/src/main/java/com/example/ui/GuardianViewModel.kt
