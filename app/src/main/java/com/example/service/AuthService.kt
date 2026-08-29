@@ -12,6 +12,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.tasks.await
 import org.json.JSONObject
+import java.security.SecureRandom
+import android.util.Base64
 
 sealed class AuthState {
     object Initial : AuthState()
@@ -246,9 +248,10 @@ class AuthService(private val context: Context) {
             // Load old password if existing to preserve registration integrity
             val oldUserJson = sharedPrefs.getString("user_reg_${updatedUser.email}", null)
             val password = if (oldUserJson != null) {
-                JSONObject(oldUserJson).optString("password", "password123")
+                val oldPwd = JSONObject(oldUserJson).optString("password")
+                if (oldPwd.isNotEmpty()) oldPwd else generateSecurePassword()
             } else {
-                "password123"
+                generateSecurePassword()
             }
             
             val userObj = userToJsonObject(updatedUser, password)
@@ -325,6 +328,13 @@ class AuthService(private val context: Context) {
             conditions = userObj.optString("conditions", ""),
             medications = userObj.optString("medications", "")
         )
+    }
+
+    private fun generateSecurePassword(): String {
+        val random = SecureRandom()
+        val bytes = ByteArray(16)
+        random.nextBytes(bytes)
+        return Base64.encodeToString(bytes, Base64.NO_WRAP)
     }
 
     private fun userToJsonObject(user: User, password: String? = null): JSONObject {
