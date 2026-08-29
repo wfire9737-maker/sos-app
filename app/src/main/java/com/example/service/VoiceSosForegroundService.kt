@@ -41,16 +41,19 @@ class VoiceSosForegroundService : Service() {
 
         Log.d("VoiceSosFgService", "Starting Foreground Service")
         val notification = createNotification()
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+            voiceSosService.isContinuousMode = true
+            voiceSosService.startSpeechRecognition(this)
+        } catch (e: Exception) {
+            Log.e("VoiceSosFgService", "Failed to start foreground service: ${e.message}")
+            stopSelf()
+            return START_NOT_STICKY
         }
-
-        voiceSosService.isContinuousMode = true
-        voiceSosService.startSpeechRecognition(this)
-
         return START_STICKY
     }
 
@@ -80,7 +83,7 @@ class VoiceSosForegroundService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Voice SOS Active")
             .setContentText("Listening for your emergency phrase")
-            .setSmallIcon(android.R.drawable.ic_btn_speak_now) // We can use this or any existing app icon
+            .setSmallIcon(com.example.R.mipmap.ic_launcher) // We can use this or any existing app icon
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
