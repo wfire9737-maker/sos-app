@@ -2,8 +2,6 @@ package com.example.service
 
 import android.content.Context
 import android.util.Log
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import com.example.model.EmergencyModel
