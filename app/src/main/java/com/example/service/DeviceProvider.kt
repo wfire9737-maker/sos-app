@@ -14,7 +14,11 @@ import android.bluetooth.BluetoothAdapter
 import java.io.RandomAccessFile
 import kotlin.math.roundToInt
 
-class DeviceProvider(private val context: Context) {
+class DeviceProvider(
+    private val context: Context,
+    // Allow injecting file path for testing purposes
+    private val procStatPath: String = "/proc/stat"
+) {
 
     fun getLocalBatteryPercentage(): Int {
         return try {
@@ -133,7 +137,7 @@ class DeviceProvider(private val context: Context) {
 
     fun getLocalCpuUsagePercent(): Int {
         return try {
-            val reader = java.io.RandomAccessFile("/proc/stat", "r")
+            val reader = java.io.RandomAccessFile(procStatPath, "r")
             val load = reader.readLine()
             reader.close()
             val tokens = load.split(" +".toRegex())
@@ -141,6 +145,7 @@ class DeviceProvider(private val context: Context) {
             val cpu1 = tokens[1].toLong() + tokens[2].toLong() + tokens[3].toLong() + tokens[5].toLong() + tokens[6].toLong() + tokens[7].toLong()
             
             // Avoid Thread.sleep. Just estimate or return a fallback if we can't measure over time.
+
             (12..25).random()
         } catch (e: Exception) {
             // Fallback for container security limits
