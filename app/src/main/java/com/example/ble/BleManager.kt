@@ -207,11 +207,6 @@ class BleManager(private val context: Context) {
 
     private val gattCallback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
-            if (this@BleManager.gatt != gatt) {
-                try { gatt.close() } catch (e: Exception) {}
-                return
-            }
-
             try {
                 if (status == BluetoothGatt.GATT_SUCCESS) {
                     if (newState == BluetoothProfile.STATE_CONNECTED) {
@@ -243,8 +238,6 @@ class BleManager(private val context: Context) {
         }
 
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
-            if (this@BleManager.gatt != gatt) return
-
             try {
                 if (status == BluetoothGatt.GATT_SUCCESS) {
                     Log.d("BleManager", "BLE: services discovered")
@@ -306,13 +299,7 @@ class BleManager(private val context: Context) {
             }
         }
 
-        override fun onDescriptorWrite(
-            gatt: BluetoothGatt,
-            descriptor: BluetoothGattDescriptor,
-            status: Int
-        ) {
-            if (this@BleManager.gatt != gatt) return
-
+        override fun onDescriptorWrite(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
             val charUuid = descriptor.characteristic?.uuid
             val descUuid = descriptor.uuid
 
@@ -368,8 +355,6 @@ class BleManager(private val context: Context) {
             characteristic: BluetoothGattCharacteristic,
             status: Int
         ) {
-            if (this@BleManager.gatt != gatt) return
-
             val uuid = characteristic.uuid
             val value = characteristic.value ?: byteArrayOf()
 
@@ -409,22 +394,16 @@ class BleManager(private val context: Context) {
         // For Android API < 33
         @Deprecated("Deprecated in Java")
         override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
-            if (this@BleManager.gatt != gatt) return
-
             val value = characteristic.value ?: byteArrayOf()
             handleCharacteristicNotification(characteristic.uuid, value)
         }
 
         // For Android API >= 33 (Tiramisu+)
         override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray) {
-            if (this@BleManager.gatt != gatt) return
-
             handleCharacteristicNotification(characteristic.uuid, value)
         }
 
         override fun onReadRemoteRssi(gatt: BluetoothGatt, rssi: Int, status: Int) {
-            if (this@BleManager.gatt != gatt) return
-
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 _rssi.value = rssi
             }
@@ -857,10 +836,6 @@ class BleManager(private val context: Context) {
 
     private fun connectToDevice(device: BluetoothDevice) {
         try {
-            if (_connectionState.value == BleState.CONNECTING && gatt != null) {
-                Log.d("BleManager", "BLE: Already connecting, ignoring duplicate request")
-                return
-            }
             _connectionState.value = BleState.CONNECTING
             Log.d("BleManager", "BLE: connecting")
             cleanGatt()
@@ -893,16 +868,13 @@ class BleManager(private val context: Context) {
     }
 
     private fun disconnectGattInternal() {
-        val oldGatt = gatt
-        gatt = null
         try {
-            oldGatt?.disconnect()
-            oldGatt?.close()
+            gatt?.disconnect()
+            gatt?.close()
         } catch (e: SecurityException) {
             Log.e("BleManager", "SecurityException closing GATT", e)
-        } catch (e: Exception) {
-            Log.e("BleManager", "Exception closing GATT", e)
         } finally {
+            gatt = null
             _rssi.value = null
         }
     }

@@ -11,7 +11,6 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.example.service.AuthState
 import com.example.ui.GuardianViewModel
-import com.example.ui.GuardianViewModel.UiEvent
 import com.example.ui.screens.ForgotPasswordScreen
 import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.LoginScreen
@@ -31,6 +30,7 @@ import com.example.ui.screens.AddEditTrustedPlaceScreen
 import com.example.ui.screens.SecurityScreen
 import com.example.ui.screens.AnalyticsScreen
 import com.example.ui.screens.ReportsScreen
+import com.example.ui.screens.SplashScreen
 import com.example.ui.screens.OnboardingScreen
 import com.example.ui.screens.TrustedPlacesScreen
 import com.example.ui.screens.SosCountdownDialog
@@ -60,51 +60,29 @@ fun NavGraph(
     LaunchedEffect(key1 = Unit) {
         viewModel.uiEvents.collect { event ->
             when (event) {
-                is UiEvent.ShowToast -> {
+                is GuardianViewModel.UiEvent.ShowToast -> {
                     Toast.makeText(context, event.message, Toast.LENGTH_LONG).show()
                 }
-                is UiEvent.NavigateToHome -> {
+                is GuardianViewModel.UiEvent.NavigateToHome -> {
                     navController.navigate(Screen.Home.route) {
-                        popUpTo(0) { inclusive = true }
+                        popUpTo(Screen.Login.route) { inclusive = true }
                     }
                 }
-                is UiEvent.NavigateToLogin -> {
-
+                is GuardianViewModel.UiEvent.NavigateToLogin -> {
                     navController.navigate(Screen.Login.route) {
                         popUpTo(0) { inclusive = true }
                     }
                 }
-                is UiEvent.NavigateToEmergency -> {
+                is GuardianViewModel.UiEvent.NavigateToEmergency -> {
                     navController.navigate(Screen.Emergency.route)
                 }
-                else -> {}
             }
         }
     }
 
     // Determine starting route depending on session availability
-    val authStateValue by viewModel.authState.collectAsState()
-    val startDestination = if (viewModel.authState.value is AuthState.Success) Screen.Home.route else Screen.Onboarding.route
-
-    LaunchedEffect(authStateValue) {
-        if (authStateValue is AuthState.Success) {
-            val currentRoute = navController.currentBackStackEntry?.destination?.route
-            if (currentRoute == Screen.Login.route || currentRoute == Screen.Register.route || currentRoute == Screen.Onboarding.route) {
-                navController.navigate(Screen.Home.route) {
-                    popUpTo(0) { inclusive = true }
-                }
-            }
-        } else if (authStateValue is AuthState.Initial) {
-            val currentRoute = navController.currentBackStackEntry?.destination?.route
-            if (currentRoute != Screen.Onboarding.route && currentRoute != Screen.Login.route && currentRoute != Screen.Register.route) {
-                if (currentRoute != null) {
-                    navController.navigate(Screen.Onboarding.route) {
-                        popUpTo(0) { inclusive = true }
-                    }
-                }
-            }
-        }
-    }
+    val authState = viewModel.authState.value
+    val startDestination = Screen.Splash.route
 
     val fallState by viewModel.fallState.collectAsState()
     val fallCountdown by viewModel.fallCountdown.collectAsState()
@@ -123,6 +101,19 @@ fun NavGraph(
         navController = navController,
         startDestination = startDestination
     ) {
+        composable(Screen.Splash.route) {
+            SplashScreen(
+                viewModel = viewModel,
+                onNavigateToNext = {
+                    val currentAuth = viewModel.authState.value
+                    if (currentAuth is AuthState.Success) {
+                        navController.navigate(Screen.Home.route) { popUpTo(0) { inclusive = true } }
+                    } else {
+                        navController.navigate(Screen.Onboarding.route) { popUpTo(0) { inclusive = true } }
+                    }
+                }
+            )
+        }
         composable(Screen.Onboarding.route) {
             OnboardingScreen(
                 viewModel = viewModel,
@@ -229,7 +220,7 @@ fun NavGraph(
         composable(Screen.Emergency.route) {
             EmergencyScreen(
                 viewModel = viewModel,
-                
+                onNavigateBack = { navController.navigateUp() },
                 )
         }
         composable(Screen.Notifications.route) {
@@ -259,7 +250,6 @@ fun NavGraph(
         composable(Screen.TrustedPlaces.route) {
             TrustedPlacesScreen(
                 viewModel = viewModel,
-                
                 onNavigateBack = { navController.navigateUp() },
                 onNavigateToAddPlace = { navController.navigate(Screen.AddEditTrustedPlace.createRoute(null)) },
                 onNavigateToEditPlace = { placeId -> navController.navigate(Screen.AddEditTrustedPlace.createRoute(placeId)) }
@@ -279,7 +269,7 @@ fun NavGraph(
         composable(Screen.Settings.route) {
             SettingsScreen(
                 viewModel = viewModel,
-                
+                onNavigateBack = { navController.navigateUp() },
                 onNavigateToSecurity = { navController.navigate(Screen.Security.route) },
                 onNavigateToFallDetection = { navController.navigate(Screen.FallDetection.route) },
                 onNavigateToAnalytics = { navController.navigate(Screen.Analytics.route) },
@@ -290,9 +280,7 @@ fun NavGraph(
                 onNavigateToHelpFaq = { navController.navigate(Screen.HelpFaq.route) },
                 onNavigateToAiScreen = { navController.navigate(Screen.AiScreen.route) },
                 onNavigateToTrustedPlaces = { navController.navigate(Screen.TrustedPlaces.route) },
-                onNavigateToContacts = { navController.navigate(Screen.Contacts.route) },
                 onNavigateToPermissions = { navController.navigate(Screen.Permissions.route) },
-                onNavigateBack = { navController.navigateUp() },
                 onNavigateToAbout = { navController.navigate(Screen.About.route) },
                 onNavigateToDeveloperDashboard = { navController.navigate(Screen.DeveloperDashboard.route) }
             )

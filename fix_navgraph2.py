@@ -1,15 +1,18 @@
 import re
 
 with open("app/src/main/java/com/example/ui/navigation/NavGraph.kt", "r") as f:
-    lines = f.read().split('\n')
+    content = f.read()
 
-new_lines = []
-for line in lines:
-    if "else -> {}" not in line and "else -> { }" not in line:
-        new_lines.append(line)
+bad_str = """                onNavigateBack = { navController.navigateUp() }
+            )
+        composable(Screen.DeveloperDashboard.route) {"""
 
-out = "\n".join(new_lines)
-out = out.replace("is UiEvent.NavigateToEmergency -> {\n                    navController.navigate(Screen.Emergency.route)\n                }", "is UiEvent.NavigateToEmergency -> {\n                    navController.navigate(Screen.Emergency.route)\n                }\n                else -> {}")
+good_str = """                onNavigateBack = { navController.navigateUp() }
+            )
+        }
+        composable(Screen.DeveloperDashboard.route) {"""
+
+content = content.replace(bad_str, good_str)
 
 with open("app/src/main/java/com/example/ui/navigation/NavGraph.kt", "w") as f:
-    f.write(out)
+    f.write(content)

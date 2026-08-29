@@ -51,7 +51,7 @@ fun VoiceSosScreen(
         contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
     ) { isGranted ->
         if (isGranted) {
-            viewModel.voiceSosService.startSpeechRecognition(context)
+            viewModel.startVoiceRecognition(context)
         } else {
             android.widget.Toast.makeText(context, "Microphone permission required for voice commands", android.widget.Toast.LENGTH_SHORT).show()
         }
@@ -148,7 +148,7 @@ fun VoiceSosScreen(
                                 val infiniteTransition = rememberInfiniteTransition(label = "wave")
                                 val phase by infiniteTransition.animateFloat(
                                     initialValue = 0f,
-                                    targetValue = (2 * Math.PI.toFloat()).toFloat(),
+                                    targetValue = (2 * Math.PI).toFloat(),
                                     animationSpec = infiniteRepeatable(
                                         animation = tween(1200, easing = LinearEasing),
                                         repeatMode = RepeatMode.Restart
@@ -167,12 +167,12 @@ fun VoiceSosScreen(
 
                                     for (i in 0 until points - 1) {
                                         val x1 = i * step
-                                        val angle1 = (i / points.toFloat()) * (4 * Math.PI.toFloat()) + phase
-                                        val y1 = centerY + (Math.sin(angle1.toDouble()).toFloat() * peak).toFloat()
+                                        val angle1 = (i / points.toFloat()) * (4 * Math.PI) + phase
+                                        val y1 = centerY + (Math.sin(angle1) * peak).toFloat()
 
                                         val x2 = (i + 1) * step
-                                        val angle2 = ((i + 1) / points.toFloat()) * (4 * Math.PI.toFloat()) + phase
-                                        val y2 = centerY + (Math.sin(angle2.toDouble()).toFloat() * peak).toFloat()
+                                        val angle2 = ((i + 1) / points.toFloat()) * (4 * Math.PI) + phase
+                                        val y2 = centerY + (Math.sin(angle2) * peak).toFloat()
 
                                         drawLine(
                                             color = Color(0xFF38BDF8),
@@ -241,10 +241,10 @@ fun VoiceSosScreen(
                                 ) == android.content.pm.PackageManager.PERMISSION_GRANTED
 
                                 if (isSpeechActive) {
-                                    viewModel.voiceSosService.stopSpeechRecognition()
+                                    viewModel.stopVoiceRecognition()
                                 } else {
                                     if (hasPermission) {
-                                        viewModel.voiceSosService.startSpeechRecognition(context)
+                                        viewModel.startVoiceRecognition(context)
                                     } else {
                                         micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
                                     }
@@ -336,6 +336,91 @@ fun VoiceSosScreen(
                 }
             }
 
+            // --- CUSTOM WAKE PHRASES MANAGEMENT ---
+            item {
+                Text(
+                    text = "Custom Emergency Wake Phrases",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    shape = RoundedCornerShape(16.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            OutlinedTextField(
+                                value = customPhraseInput,
+                                onValueChange = { customPhraseInput = it },
+                                label = { Text("Add custom wake-word") },
+                                singleLine = true,
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.weight(1f).testTag("custom_phrase_input")
+                            )
+                            Button(
+                                onClick = {
+                                    if (customPhraseInput.isNotBlank()) {
+                                        viewModel.voiceSosService.addWakePhrase(customPhraseInput)
+                                        customPhraseInput = ""
+                                    }
+                                },
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.height(54.dp).testTag("add_phrase_btn")
+                            ) {
+                                Icon(Icons.Default.Add, contentDescription = "Add")
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        // Show current list of words as FlowLayout tags
+                        Text("Active trigger words:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            wakePhrases.chunked(3).forEach { rowPhrases ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    rowPhrases.forEach { phrase ->
+                                        Surface(
+                                            color = MaterialTheme.colorScheme.secondaryContainer,
+                                            shape = RoundedCornerShape(8.dp),
+                                            modifier = Modifier.testTag("wake_phrase_tag_$phrase")
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(phrase, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSecondaryContainer, fontWeight = FontWeight.SemiBold)
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Icon(
+                                                    imageVector = Icons.Default.Close,
+                                                    contentDescription = "Delete",
+                                                    tint = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.6f),
+                                                    modifier = Modifier
+                                                        .size(12.dp)
+                                                        .clickable { viewModel.voiceSosService.removeWakePhrase(phrase) }
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // --- SPEECH DETECTION LOGS ---
             item {
                 Row(
@@ -374,7 +459,7 @@ fun VoiceSosScreen(
             } else {
                 items(logs, key = { it.timestampMs }) { log ->
                     val dateStr = remember(log.timestampMs) {
-                        java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date(log.timestampMs))
+                        SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(log.timestampMs))
                     }
                     val accent = if (log.isActivated) Color(0xFFEF4444) else Color(0xFF10B981)
 
@@ -421,21 +506,14 @@ fun VoiceSosScreen(
                                     )
                                 }
                                 Spacer(modifier = Modifier.height(2.dp))
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
+                                Row {
+                                    Text("Confidence: ${log.confidence}% ", fontSize = 10.sp, color = accent, fontWeight = FontWeight.Bold)
+                                    Text("• Input level: ${log.noiseFilteredDb.toInt()}dB", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     Text(
-                                        text = if (log.isActivated) "Emergency Triggered" else "Filtered (Confidence: ${log.confidence}%)",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        color = accent
-                                    )
-                                    Text(
-                                        text = "Ambient: ${log.noiseFilteredDb.toInt()}dB",
+                                        text = if (log.isActivated) " • SOS DISPATCHED" else " • BLOCKED",
                                         fontSize = 10.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = accent
                                     )
                                 }
                             }
@@ -443,8 +521,6 @@ fun VoiceSosScreen(
                     }
                 }
             }
-            
-            item { Spacer(modifier = Modifier.height(32.dp)) }
         }
     }
 }

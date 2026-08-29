@@ -1,1 +1,0 @@
-private val _arrivalAlertsEnabled = MutableStateFlow(try { getApplication<Application>().getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE).getBoolean("arrival_alerts_enabled", true) } catch(e:Exception) { true })

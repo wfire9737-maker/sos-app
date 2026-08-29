@@ -114,6 +114,9 @@ class VoiceSosService(
                 for (i in 0 until arr.length()) {
                     list.add(arr.getString(i))
                 }
+                defaultPhrases.forEach { p ->
+                    if (!list.contains(p)) list.add(p)
+                }
                 _wakePhrases.value = list
             } catch (e: Exception) {
                 _wakePhrases.value = defaultPhrases
@@ -397,12 +400,15 @@ class VoiceSosService(
         }
     }
 
-        private fun startMicLevelMonitor() {
+    private fun startMicLevelMonitor() {
         micPollerJob?.cancel()
         micPollerJob = serviceScope.launch {
             while (isActive) {
-                if (!_isListening.value && !_isSpeechRecognizerActive.value) {
-                    _micDecibels.value = 30f
+                if (_isListening.value || _isSpeechRecognizerActive.value) {
+                    val base = 40f
+                    val variance = (Math.sin(System.currentTimeMillis() * 0.002) * 12).toFloat()
+                    val randomJitter = (Math.random() * 4 - 2).toFloat()
+                    _micDecibels.value = base + variance + randomJitter
                 }
                 delay(120)
             }

@@ -7,8 +7,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.SupervisorJob
 import com.example.model.EmergencyModel
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.distinctUntilChanged
 
 class EmergencyProvider(
     private val context: Context,
@@ -18,33 +16,12 @@ class EmergencyProvider(
     private val aiService: AIService,
     private val alarmVibratorService: AlarmVibratorService,
     private val deviceService: DeviceService,
-    private val voiceSosService: VoiceSosService,
-    private val settingsDataStore: com.example.data.SettingsDataStore
+    private val voiceSosService: VoiceSosService
 ) {
     val activeEmergencyState: StateFlow<EmergencyModel?> = emergencyService.activeEmergency
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    private var lastUpdateNotificationTime: Long = 0L
 
     init {
-        scope.launch {
-            combine(
-                activeEmergencyState,
-                settingsDataStore.sosSoundEnabledFlow,
-                settingsDataStore.sosVibrationEnabledFlow
-            ) { activeEmergency, soundEnabled, vibrationEnabled ->
-                Triple(activeEmergency != null, soundEnabled, vibrationEnabled)
-            }
-            .distinctUntilChanged()
-            .collect { (isActive, soundEnabled, vibrationEnabled) ->
-                if (isActive) {
-                    if (soundEnabled) alarmVibratorService.startAlarm() else alarmVibratorService.stopAlarm()
-                    if (vibrationEnabled) alarmVibratorService.startVibration() else alarmVibratorService.stopVibration()
-                } else {
-                    alarmVibratorService.cleanUp()
-                }
-            }
-        }
-
         scope.launch {
             deviceService.bleManager.sosEvents.collect { sosEvent ->
                 android.util.Log.d("BleManager", "EMERGENCY: activating from PHYSICAL_BLE_BUTTON (Event #${sosEvent.eventId})")
@@ -115,15 +92,11 @@ class EmergencyProvider(
     ) {
         scope.launch {
             if (isEmergencyInProgress()) {
-                val now = System.currentTimeMillis()
-                if (now - lastUpdateNotificationTime > 30000) { // Limit updates to once every 30 seconds
-                    lastUpdateNotificationTime = now
-                    emergencyService.activeEmergency.value?.let { model ->
-                        emergencyService.notifyEmergencyContacts(model, isUpdate = true)
-                    }
-                } else {
-                    android.util.Log.d("Emergency", "EMERGENCY: Duplicate trigger ignored (rate limited)")
+                emergencyService.activeEmergency.value?.let { model ->
+                    emergencyService.notifyEmergencyContacts(model, isUpdate = true)
                 }
+                alarmVibratorService.startAlarm()
+                alarmVibratorService.startVibration()
                 return@launch
             }
             
@@ -132,15 +105,19 @@ class EmergencyProvider(
             val userName = user?.name ?: "Marcus Vance"
             val userPhone = user?.phone ?: "+1-555-0143"
 
+            // Trigger alarm/vibrator (assuming sound is enabled globally for emergencies)
+            alarmVibratorService.startAlarm()
+            alarmVibratorService.startVibration()
+
             val model = emergencyService.startEmergency(
                 userId = userId,
                 userName = userName,
                 userPhone = userPhone,
                 triggerType = triggerSource,
                 deviceId = deviceId,
-                customLat = lat,
-                customLng = lng,
-                customAccuracy = accuracy,
+                customLat = lat ?: locationService.currentLocation.value.latitude,
+                customLng = lng ?: locationService.currentLocation.value.longitude,
+                customAccuracy = accuracy ?: locationService.currentLocation.value.accuracy,
                 customAltitude = altitude,
                 customSpeed = speed,
                 customBearing = bearing,

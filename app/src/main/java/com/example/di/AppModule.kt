@@ -72,7 +72,7 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideNotificationService(@ApplicationContext context: Context, databaseService: DatabaseService, settingsDataStore: com.example.data.SettingsDataStore): NotificationService = NotificationService(context, databaseService.firestoreInstance, settingsDataStore)
+    fun provideNotificationService(@ApplicationContext context: Context, databaseService: DatabaseService): NotificationService = NotificationService(context, databaseService.firestoreInstance)
 
     @Provides
     @Singleton
@@ -92,7 +92,7 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideDeviceService(@ApplicationContext context: Context, databaseService: DatabaseService, notificationService: NotificationService, emergencyProvider: dagger.Lazy<EmergencyProvider>): DeviceService = DeviceService(context, databaseService, notificationService, emergencyProvider)
+    fun provideDeviceService(@ApplicationContext context: Context, databaseService: DatabaseService, notificationService: NotificationService): DeviceService = DeviceService(context, databaseService, notificationService)
 
     @Provides
     @Singleton
@@ -146,9 +146,8 @@ object AppModule {
         aiService: AIService,
         alarmVibratorService: AlarmVibratorService,
         deviceService: DeviceService,
-        voiceSosService: VoiceSosService,
-        settingsDataStore: SettingsDataStore
-    ): EmergencyProvider = EmergencyProvider(context, emergencyService, authService, locationService, aiService, alarmVibratorService, deviceService, voiceSosService, settingsDataStore)
+        voiceSosService: VoiceSosService
+    ): EmergencyProvider = EmergencyProvider(context, emergencyService, authService, locationService, aiService, alarmVibratorService, deviceService, voiceSosService)
 
     @Provides
     @Singleton
@@ -179,7 +178,7 @@ object AppModule {
             context,
             SmartSosDatabase::class.java,
             "smart_sos_db"
-        ).fallbackToDestructiveMigration(true).build()
+        ).fallbackToDestructiveMigration().build()
     }
 
     @Provides

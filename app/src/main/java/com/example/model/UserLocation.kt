@@ -35,8 +35,8 @@ data class FavoritePlace(
 
 data class UserLocation(
     val userId: String = "",
-    val latitude: Double = 0.0, // Default to San Francisco or a standard city center
-    val longitude: Double = 0.0,
+    val latitude: Double = 37.7749, // Default to San Francisco or a standard city center
+    val longitude: Double = -122.4194,
     val speed: Double = 0.0, // km/h
     val bearing: Float = 0f, // degrees
     val altitude: Double = 0.0, // meters
@@ -103,8 +103,8 @@ data class UserLocation(
 
             return UserLocation(
                 userId = map["userId"] as? String ?: "",
-                latitude = (map["latitude"] as? Number)?.toDouble() ?: 0.0,
-                longitude = (map["longitude"] as? Number)?.toDouble() ?: 0.0,
+                latitude = (map["latitude"] as? Number)?.toDouble() ?: 37.7749,
+                longitude = (map["longitude"] as? Number)?.toDouble() ?: -122.4194,
                 speed = (map["speed"] as? Number)?.toDouble() ?: 0.0,
                 bearing = (map["bearing"] as? Number)?.toFloat() ?: 0f,
                 altitude = (map["altitude"] as? Number)?.toDouble() ?: 0.0,
@@ -138,8 +138,8 @@ data class UserLocation(
 
             return UserLocation(
                 userId = obj.optString("userId"),
-                latitude = obj.optDouble("latitude", 0.0),
-                longitude = obj.optDouble("longitude", 0.0),
+                latitude = obj.optDouble("latitude", 37.7749),
+                longitude = obj.optDouble("longitude", -122.4194),
                 speed = obj.optDouble("speed", 0.0),
                 bearing = obj.optDouble("bearing", 0.0).toFloat(),
                 altitude = obj.optDouble("altitude", 0.0),

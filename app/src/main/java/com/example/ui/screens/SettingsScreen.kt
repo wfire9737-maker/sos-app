@@ -36,7 +36,6 @@ fun SettingsScreen(
     onNavigateToTrustedPlaces: () -> Unit = {},
     onNavigateToPermissions: () -> Unit = {},
     onNavigateToAbout: () -> Unit = {},
-    onNavigateToContacts: () -> Unit = {},
     onNavigateToDeveloperDashboard: () -> Unit = {}
 ) {
     val themeMode by viewModel.themeMode.collectAsState()
@@ -44,14 +43,13 @@ fun SettingsScreen(
     val language by viewModel.language.collectAsState()
     val notificationsEnabled by viewModel.criticalAlarmsEnabled.collectAsState()
     val voiceSosEnabled by viewModel.voiceSosEnabled.collectAsState()
-    val voiceState by viewModel.voiceState.collectAsState()
-    val isSpeechActive by viewModel.isSpeechRecognizerActive.collectAsState()
-    val wakePhrases by viewModel.wakePhrases.collectAsState()
+    val voiceState by viewModel.voiceSosService.voiceState.collectAsState()
+    val isSpeechActive by viewModel.voiceSosService.isSpeechRecognizerActive.collectAsState()
+    val wakePhrases by viewModel.voiceSosService.wakePhrases.collectAsState()
     val voiceSosPhrase by viewModel.voiceSosPhrase.collectAsState()
     var showVoicePhraseDialog by remember { mutableStateOf(false) }
     var tempPhrase by remember { mutableStateOf("") }
     val sosSoundEnabled by viewModel.sosSoundEnabled.collectAsState()
-    val sosVibrationEnabled by viewModel.sosVibrationEnabled.collectAsState()
     
     var showLogoutDialog by remember { mutableStateOf(false) }
     var showLanguageDialog by remember { mutableStateOf(false) }
@@ -95,12 +93,6 @@ fun SettingsScreen(
                         title = "Trusted Places",
                         subtitle = "Manage your safe zones",
                         onClick = onNavigateToTrustedPlaces
-                    )
-                    SettingsItem(
-                        icon = Icons.Default.Contacts,
-                        title = "Emergency Contacts",
-                        subtitle = "Manage who to notify",
-                        onClick = onNavigateToContacts
                     )
                     SettingsItem(
                         icon = Icons.Default.QrCode,
@@ -180,26 +172,14 @@ fun SettingsScreen(
             }
 
             item {
-                SettingsSection(title = "Emergency") {
+                SettingsSection(title = "Preferences") {
                     SettingsSwitchItem(
                         icon = if (sosSoundEnabled) Icons.AutoMirrored.Filled.VolumeUp else Icons.AutoMirrored.Filled.VolumeOff,
-                        title = "SOS Sound",
-                        subtitle = "Play an alarm sound when SOS is active",
+                        title = "SOS Trigger Sound",
+                        subtitle = if (sosSoundEnabled) "Sound siren automatically when SOS triggers" else "Silent SOS mode (alarm sound disabled)",
                         checked = sosSoundEnabled,
                         onCheckedChange = { enabled -> viewModel.setSosSoundEnabled(enabled) }
                     )
-                    SettingsSwitchItem(
-                        icon = Icons.Default.Vibration,
-                        title = "SOS Vibration",
-                        subtitle = "Vibrate the phone when SOS is active",
-                        checked = sosVibrationEnabled,
-                        onCheckedChange = { enabled -> viewModel.setSosVibrationEnabled(enabled) }
-                    )
-                }
-            }
-
-            item {
-                SettingsSection(title = "Preferences") {
                     SettingsSwitchItem(
                         icon = Icons.Default.DarkMode,
                         title = "Dark Theme",

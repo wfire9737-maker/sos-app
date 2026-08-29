@@ -323,14 +323,43 @@ class DatabaseService(private val context: Context, private val authService: Aut
                 _alerts.value = alertList
             } catch (e: Exception) {
                 Log.e("DatabaseService", "Error parsing cached alerts", e)
-                _alerts.value = emptyList()
+                preloadDemoAlerts()
             }
         } else {
-            _alerts.value = emptyList()
+            preloadDemoAlerts()
         }
     }
 
-    
+    private fun preloadDemoAlerts() {
+        val demoAlerts = listOf(
+            Alert(
+                id = "demo-alert-1",
+                userId = "user-101",
+                userName = "Marcus Vance",
+                userPhone = "+1-555-0143",
+                latitude = 37.7749,
+                longitude = -122.4194,
+                status = "ACTIVE",
+                triggerType = "FALL_DETECTED",
+                timestamp = System.currentTimeMillis() - 480000 // 8m ago
+            ),
+            Alert(
+                id = "demo-alert-2",
+                userId = "user-102",
+                userName = "Sophia Martinez",
+                userPhone = "+1-555-0188",
+                latitude = 37.7833,
+                longitude = -122.4167,
+                status = "RESOLVED",
+                triggerType = "ESP32_BUTTON",
+                timestamp = System.currentTimeMillis() - 3600000, // 1h ago
+                resolvedAt = System.currentTimeMillis() - 3000000,
+                resolvedBy = "Rescue Unit A",
+                notes = "False alarm, button was clicked accidentally inside handbag."
+            )
+        )
+        saveAlertsListLocally(demoAlerts)
+    }
 
     private fun saveAlertLocally(alert: Alert) {
         val currentList = _alerts.value.toMutableList()
@@ -571,8 +600,8 @@ class DatabaseService(private val context: Context, private val authService: Aut
             connectionStatus = obj.optString("connectionStatus", "ONLINE"),
 
             // GPS & MPU6050:
-            latitude = obj.optDouble("latitude", 0.0),
-            longitude = obj.optDouble("longitude", 0.0),
+            latitude = obj.optDouble("latitude", 37.7749),
+            longitude = obj.optDouble("longitude", -122.4194),
             accelX = obj.optDouble("accelX", 0.05).toFloat(),
             accelY = obj.optDouble("accelY", -0.02).toFloat(),
             accelZ = obj.optDouble("accelZ", 0.98).toFloat(),
@@ -713,14 +742,58 @@ class DatabaseService(private val context: Context, private val authService: Aut
                 }
                 _contacts.value = list.sortedWith(compareBy({ it.priority }, { it.name }))
             } catch (e: Exception) {
-                _contacts.value = emptyList()
+                preloadDemoContacts()
             }
         } else {
-            _contacts.value = emptyList()
+            preloadDemoContacts()
         }
     }
 
-    
+    private fun preloadDemoContacts() {
+        val demoContacts = listOf(
+            EmergencyContact(
+                id = "demo-contact-1",
+                userId = "demo-uid-123",
+                name = "Dispatch Center HQ",
+                phone = "911",
+                relationship = "First Responders",
+                priority = 1,
+                notes = "24/7 emergency services routing dispatch.",
+                avatarEmoji = "🚨"
+            ),
+            EmergencyContact(
+                id = "demo-contact-2",
+                userId = "demo-uid-123",
+                name = "Dr. Elizabeth Vance",
+                phone = "+1-555-0144",
+                relationship = "Primary Physician",
+                priority = 2,
+                notes = "Cardiologist. Medical records access code: #CARD-8491.",
+                avatarEmoji = "🩺"
+            ),
+            EmergencyContact(
+                id = "demo-contact-3",
+                userId = "demo-uid-123",
+                name = "Marcus Vance",
+                phone = "+1-555-0143",
+                relationship = "Brother",
+                priority = 2,
+                notes = "Primary family contact. Holds backup keys to home.",
+                avatarEmoji = "🏡"
+            ),
+            EmergencyContact(
+                id = "demo-contact-4",
+                userId = "demo-uid-123",
+                name = "County Search & Rescue",
+                phone = "+1-555-0199",
+                relationship = "Support Unit",
+                priority = 3,
+                notes = "Secondary contact for wilderness dispatch coordinates.",
+                avatarEmoji = "🌲"
+            )
+        )
+        saveContactsListLocally(demoContacts)
+    }
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 

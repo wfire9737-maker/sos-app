@@ -21,7 +21,7 @@ abstract class FallDatabase : RoomDatabase() {
                     FallDatabase::class.java,
                     "fall_database"
                 )
-                .fallbackToDestructiveMigration(true)
+                .fallbackToDestructiveMigration()
                 .build()
                 INSTANCE = instance
                 instance

@@ -3,35 +3,30 @@ import re
 with open("app/src/main/java/com/example/ui/navigation/NavGraph.kt", "r") as f:
     content = f.read()
 
-bad_block = """    // Determine starting route depending on session availability
-    val authState = viewModel.authState.value
-    val startDestination = if (authState is AuthState.Success) Screen.Home.route else Screen.Onboarding.route"""
+bad_str = """        composable(Screen.About.route) {
+            AboutScreen(
+                viewModel = viewModel,
+                onNavigateBack = { navController.navigateUp() }
+            )
 
-good_block = """    // Determine starting route depending on session availability
-    val authStateValue by viewModel.authState.collectAsState()
-    val startDestination = if (viewModel.authState.value is AuthState.Success) Screen.Home.route else Screen.Onboarding.route
+        composable(Screen.DeveloperDashboard.route) {"""
 
-    LaunchedEffect(authStateValue) {
-        if (authStateValue is AuthState.Success) {
-            val currentRoute = navController.currentBackStackEntry?.destination?.route
-            if (currentRoute == Screen.Login.route || currentRoute == Screen.Register.route || currentRoute == Screen.Onboarding.route) {
-                navController.navigate(Screen.Home.route) {
-                    popUpTo(0) { inclusive = true }
-                }
-            }
-        } else if (authStateValue is AuthState.Initial) {
-            val currentRoute = navController.currentBackStackEntry?.destination?.route
-            if (currentRoute != Screen.Onboarding.route && currentRoute != Screen.Login.route && currentRoute != Screen.Register.route) {
-                if (currentRoute != null) {
-                    navController.navigate(Screen.Onboarding.route) {
-                        popUpTo(0) { inclusive = true }
-                    }
-                }
-            }
+good_str = """        composable(Screen.About.route) {
+            AboutScreen(
+                viewModel = viewModel,
+                onNavigateBack = { navController.navigateUp() }
+            )
         }
-    }"""
+        composable(Screen.DeveloperDashboard.route) {"""
 
-content = content.replace(bad_block, good_block)
+content = content.replace(bad_str, good_str)
 
-with open("app/src/main/java/com/example/ui/navigation/NavGraph.kt", "w") as f:
-    f.write(content)
+# and then at the end we have:
+#     if (fallState == "FALL_COUNTDOWN") {
+#         FallCountdownDialog(
+#             secondsLeft = countdown,
+#             onCancel = { viewModel.fallDetectionService.cancelFallCountdown() }
+#         )
+#     }
+#     }
+# let's fix that too. Wait, NavHost closing brace is before `if (fallState == "FALL_COUNTDOWN")`?

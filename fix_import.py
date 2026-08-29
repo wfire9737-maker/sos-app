@@ -1,9 +1,17 @@
-import re
+import os
 
-with open("app/src/main/java/com/example/ui/GuardianViewModel.kt", "r") as f:
+filepath = "app/src/main/java/com/example/ui/screens/PermissionsScreen.kt"
+with open(filepath, "r") as f:
     content = f.read()
 
-content = content.replace("import android.content.Context\npackage com.example.ui", "package com.example.ui\nimport android.content.Context")
+target = """import androidx.compose.material.icons.filled.Message"""
+replacement = """import androidx.compose.material.icons.filled.Message
+import androidx.compose.material.icons.filled.Warning"""
 
-with open("app/src/main/java/com/example/ui/GuardianViewModel.kt", "w") as f:
-    f.write(content)
+if target in content:
+    content = content.replace(target, replacement)
+    with open(filepath, "w") as f:
+        f.write(content)
+    print("Fixed import")
+else:
+    print("Target not found")

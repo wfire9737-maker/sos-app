@@ -45,7 +45,7 @@ class GuardianFirebaseMessagingService : FirebaseMessagingService() {
         // Inject this directly using the global NotificationService provider
         try {
             val dbService = DatabaseService(applicationContext)
-            val notificationService = NotificationService(applicationContext, dbService.firestoreInstance, com.example.data.SettingsDataStore(applicationContext))
+            val notificationService = NotificationService(applicationContext, dbService.firestoreInstance)
             notificationService.addNotification(item)
             Log.d("GuardianFCMService", "FCM notification processed and synced successfully.")
         } catch (e: Exception) {

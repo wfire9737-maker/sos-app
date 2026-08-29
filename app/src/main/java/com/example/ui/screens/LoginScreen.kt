@@ -44,7 +44,7 @@ fun LoginScreen(
     onNavigateToForgotPassword: () -> Unit
 ) {
     val authState by viewModel.authState.collectAsState()
-    val isDemo = viewModel.isDemoMode()
+    val isDemo = viewModel.isDemoMode
 
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
