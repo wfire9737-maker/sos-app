@@ -36,73 +36,24 @@ import dagger.hilt.android.AndroidEntryPoint
 class MainActivity : ComponentActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
-    
-    val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
-    Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
-        val stackTrace = android.util.Log.getStackTraceString(throwable)
-        getSharedPreferences("crash_prefs", android.content.Context.MODE_PRIVATE)
-            .edit()
-            .putString("last_crash", stackTrace)
-            .commit()
-        defaultHandler?.uncaughtException(thread, throwable)
-    }
-    
-    val lastCrash = getSharedPreferences("crash_prefs", android.content.Context.MODE_PRIVATE)
-        .getString("last_crash", null)
-    if (lastCrash != null) {
-        android.util.Log.e("CRASH_LOG", "Last crash: $lastCrash")
-    }
-
-    try {
-        enableEdgeToEdge()
-        setContent {
-          if (lastCrash != null) {
-             Box(
-                 modifier = Modifier.fillMaxSize().background(Color.Red)
-             ) {
-                 LazyColumn {
-                     item {
-                         Text(
-                             text = lastCrash,
-                             color = Color.White,
-                             modifier = Modifier.padding(16.dp)
-                         )
-                     }
-                     item {
-                         androidx.compose.material3.Button(onClick = {
-                             getSharedPreferences("crash_prefs", android.content.Context.MODE_PRIVATE)
-                                .edit()
-                                .remove("last_crash")
-                                .commit()
-                         }, modifier = Modifier.padding(16.dp)) {
-                             Text("Clear Crash Log")
-                         }
-                     }
-                 }
-             }
-             return@setContent
-          }
-          val guardianViewModel: GuardianViewModel = androidx.hilt.navigation.compose.hiltViewModel()
-          val themeMode by guardianViewModel.themeMode.collectAsState()
-          val isDarkTheme = when (themeMode) {
-            "DARK" -> true
-            "LIGHT" -> false
-            else -> isSystemInDarkTheme()
-          }
-          GuardianTheme(darkTheme = isDarkTheme) {
-            Surface(
-              modifier = Modifier.fillMaxSize(),
-              color = androidx.compose.material3.MaterialTheme.colorScheme.background
-            ) {
-              AppPermissionChecker()
-              NavGraph(viewModel = guardianViewModel)
-            }
-          }
+    enableEdgeToEdge()
+    setContent {
+      val guardianViewModel: GuardianViewModel = androidx.hilt.navigation.compose.hiltViewModel()
+      val themeMode by guardianViewModel.themeMode.collectAsState()
+      val isDarkTheme = when (themeMode) {
+        "DARK" -> true
+        "LIGHT" -> false
+        else -> isSystemInDarkTheme()
+      }
+      GuardianTheme(darkTheme = isDarkTheme) {
+        Surface(
+          modifier = Modifier.fillMaxSize(),
+          color = androidx.compose.material3.MaterialTheme.colorScheme.background
+        ) {
+          AppPermissionChecker()
+          NavGraph(viewModel = guardianViewModel)
         }
-    } catch (e: Throwable) {
-        val stackTrace = android.util.Log.getStackTraceString(e)
-        System.err.println("CRASH_IN_MAIN_ACTIVITY: $stackTrace")
-        throw e
+      }
     }
   }
 }
@@ -127,12 +78,7 @@ fun AppPermissionChecker() {
     }
 
     fun promptEnableLocation() {
-        val intent = android.content.Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS)
-        try {
-            context.startActivity(intent)
-        } catch (e: Exception) {
-            Toast.makeText(context, "Please enable Location Services", Toast.LENGTH_LONG).show()
-        }
+        Toast.makeText(context, "Please ensure Location Services (GPS) are enabled for full functionality.", Toast.LENGTH_LONG).show()
     }
 
     val launcher = rememberLauncherForActivityResult(

@@ -12,10 +12,10 @@ plugins {
 
 android {
   namespace = "com.example"
-  compileSdk { version = release(36) { minorApiLevel = 1 } }
+  compileSdk = 35
 
   defaultConfig {
-    applicationId = "com.aistudio.smartsos.xzkqwa"
+    applicationId = "com.aistudio.smartsos.fixer123"
     minSdk = 24
     targetSdk = 35
     versionCode = 1

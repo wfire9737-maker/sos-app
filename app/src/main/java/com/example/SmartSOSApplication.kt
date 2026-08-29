@@ -8,15 +8,6 @@ import com.google.firebase.FirebaseApp
 class SmartSOSApplication : Application() {
     override fun onCreate() {
         super.onCreate()
-        val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
-        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
-            val stackTrace = android.util.Log.getStackTraceString(throwable)
-            getSharedPreferences("crash_prefs", android.content.Context.MODE_PRIVATE)
-                .edit()
-                .putString("last_crash", stackTrace)
-                .commit()
-            defaultHandler?.uncaughtException(thread, throwable)
-        }
         try {
             if (FirebaseApp.getApps(this).isEmpty()) {
                 FirebaseApp.initializeApp(this)
