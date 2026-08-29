@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <domain-config cleartextTrafficPermitted="true">
+    <domain-config cleartextTrafficPermitted="false">
         <domain includeSubdomains="true">10.63.183.90</domain>
         <!-- Include other common local testing IPs if needed -->
         <domain includeSubdomains="true">localhost</domain>
