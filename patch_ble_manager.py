@@ -1,17 +1,49 @@
 import re
 
-with open('app/src/main/java/com/example/ble/BleManager.kt', 'r') as f:
+with open("app/src/main/java/com/example/ble/nearby/NearbyBleManager.kt", "r") as f:
     content = f.read()
 
-# Replace scanning device name
-content = content.replace('device.name?.contains("PhysicalSOS-ESP32", true) == true || device.name?.contains("ESP32-SOS", true) == true', 'device.name?.contains("Physical-SOS-ESP32", true) == true')
+target = """@Singleton
+class NearbyBleManager @Inject constructor(
+    private val advertiser: NearbyPresenceAdvertiser,
+    private val scanner: NearbyDeviceScanner
+) {"""
 
-# Replace SOS characteristic with Status characteristic
-content = content.replace('var sosCharacteristic', 'var statusCharacteristic')
-content = content.replace('BleProtocol.SOS_CHARACTERISTIC_UUID', 'BleProtocol.STATUS_CHARACTERISTIC_UUID')
-content = content.replace('sosCharacteristic = service.getCharacteristic', 'statusCharacteristic = service.getCharacteristic')
-content = content.replace('sosCharacteristic?.let {', 'statusCharacteristic?.let {')
-content = content.replace('sosCharacteristic = null', 'statusCharacteristic = null')
+replacement = """@Singleton
+class NearbyBleManager @Inject constructor(
+    private val advertiser: NearbyPresenceAdvertiser,
+    private val scanner: NearbyDeviceScanner,
+    private val gattServer: NearbyGattServer,
+    private val gattClient: NearbyGattClient
+) {"""
+content = content.replace(target, replacement)
 
-with open('app/src/main/java/com/example/ble/BleManager.kt', 'w') as f:
+target2 = """    val nearbyDevices: StateFlow<Map<String, NearbyDevice>> = scanner.nearbyDevices
+    
+    private val handler = Handler(Looper.getMainLooper())"""
+replacement2 = """    val nearbyDevices: StateFlow<Map<String, NearbyDevice>> = scanner.nearbyDevices
+    
+    private val handler = Handler(Looper.getMainLooper())
+    
+    init {
+        gattServer.onRemoteDeviceDisconnected = { macAddress ->
+            updateDeviceConnectionState(macAddress, NearbyConnectionState.DISCONNECTED)
+        }
+        gattClient.onConnectionStateChanged = { macAddress, newState ->
+            updateDeviceConnectionState(macAddress, newState)
+        }
+    }
+    
+    private fun updateDeviceConnectionState(macAddress: String, state: NearbyConnectionState) {
+        val currentDevices = scanner.nearbyDevices.value
+        val device = currentDevices[macAddress]
+        if (device != null) {
+            val updatedDevice = device.copy(connectionState = state)
+            // We need a way to push updates to the scanner's state flow, but scanner owns it.
+            // Let's create a proxy stateflow in NearbyBleManager or add update method to scanner.
+        }
+    }"""
+content = content.replace(target2, replacement2)
+
+with open("app/src/main/java/com/example/ble/nearby/NearbyBleManager.kt", "w") as f:
     f.write(content)

@@ -3,14 +3,14 @@ import re
 with open("app/src/main/java/com/example/MainActivity.kt", "r") as f:
     content = f.read()
 
-replacement = """            com.example.service.BleForegroundService.start(context)
-            try {
+target = """            try {
                 context.startService(android.content.Intent(context, com.example.service.NearbyBleService::class.java))
             } catch(e: Exception) {
                 android.util.Log.e("MainActivity", "Failed to start NearbyBleService", e)
             }"""
+replacement = "            com.example.service.NearbyBleService.startOrStop(context)"
 
-content = content.replace("            com.example.service.BleForegroundService.start(context)", replacement)
+content = content.replace(target, replacement)
 
 with open("app/src/main/java/com/example/MainActivity.kt", "w") as f:
     f.write(content)

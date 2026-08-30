@@ -9,6 +9,12 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
+import android.os.Build
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -24,6 +30,7 @@ import com.example.ui.theme.*
 fun SettingsScreen(
     viewModel: GuardianViewModel,
     onNavigateBack: () -> Unit,
+    onNavigateToNearbyDiscovery: () -> Unit,
     onNavigateToSecurity: () -> Unit,
     onNavigateToFallDetection: () -> Unit = {},
     onNavigateToAnalytics: () -> Unit = {},
@@ -46,7 +53,13 @@ fun SettingsScreen(
     val voiceState by viewModel.voiceSosService.voiceState.collectAsState()
     val isSpeechActive by viewModel.voiceSosService.isSpeechRecognizerActive.collectAsState()
     val wakePhrases by viewModel.voiceSosService.wakePhrases.collectAsState()
+
     val voiceSosPhrase by viewModel.voiceSosPhrase.collectAsState()
+    
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val prefs = context.getSharedPreferences("smart_sos_settings", android.content.Context.MODE_PRIVATE)
+    var nearbyPresenceInterval by remember { mutableStateOf(prefs.getInt("nearby_presence_interval", 0)) }
+
     var showVoicePhraseDialog by remember { mutableStateOf(false) }
     var tempPhrase by remember { mutableStateOf("") }
     val sosSoundEnabled by viewModel.sosSoundEnabled.collectAsState()
@@ -54,6 +67,31 @@ fun SettingsScreen(
     var showLogoutDialog by remember { mutableStateOf(false) }
     var showLanguageDialog by remember { mutableStateOf(false) }
     var showDeveloperWarningDialog by remember { mutableStateOf(false) }
+
+    val nearbyPermissions = mutableListOf<String>()
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        nearbyPermissions.add(Manifest.permission.BLUETOOTH_ADVERTISE)
+    }
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        nearbyPermissions.add(Manifest.permission.POST_NOTIFICATIONS)
+    }
+
+    var pendingNearbyInterval by remember { mutableStateOf<Int?>(null) }
+    
+    val nearbyPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val allGranted = permissions.entries.all { it.value }
+        if (allGranted && pendingNearbyInterval != null) {
+            nearbyPresenceInterval = pendingNearbyInterval!!
+            prefs.edit().putInt("nearby_presence_interval", nearbyPresenceInterval).apply()
+            com.example.service.NearbyBleService.startOrStop(context)
+        } else {
+            // Permission denied, fail gracefully (do not apply interval, it remains at current)
+            pendingNearbyInterval = null
+        }
+    }
+
 
     Scaffold(
         topBar = {
@@ -99,6 +137,54 @@ fun SettingsScreen(
                         title = "Medical QR Code",
                         subtitle = "View and share your medical information",
                         onClick = onNavigateToQRCode
+                    )
+                }
+            }
+
+
+            item {
+                SettingsSection(title = "Nearby Emergency Presence") {
+                    val presenceOptions = listOf(0, 5, 10, 30, 60)
+                    val presenceLabels = mapOf(0 to "Off", 5 to "5 seconds", 10 to "10 seconds", 30 to "30 seconds", 60 to "60 seconds")
+                    
+                    SettingsItem(
+                        icon = Icons.Default.Person,
+                        title = "Nearby People (Discovery)",
+                        subtitle = "Scan for nearby users",
+                        onClick = { onNavigateToNearbyDiscovery() }
+                    )
+                    
+                    SettingsItem(
+                        icon = Icons.Default.WifiTethering,
+                        title = "Nearby Presence (BLE)",
+                        subtitle = "Frequency: " + (presenceLabels[nearbyPresenceInterval] ?: "Off"),
+                        onClick = {
+                            val currentIndex = presenceOptions.indexOf(nearbyPresenceInterval)
+                            val nextIndex = (currentIndex + 1) % presenceOptions.size
+                            val nextVal = presenceOptions[nextIndex]
+                            
+                            if (nextVal == 0) {
+                                nearbyPresenceInterval = nextVal
+                                prefs.edit().putInt("nearby_presence_interval", nextVal).apply()
+                                com.example.service.NearbyBleService.startOrStop(context)
+                            } else {
+                                val hasAdvertise = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                    ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_ADVERTISE) == PackageManager.PERMISSION_GRANTED
+                                } else true
+                                val hasNotification = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                    ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+                                } else true
+
+                                if (hasAdvertise && hasNotification) {
+                                    nearbyPresenceInterval = nextVal
+                                    prefs.edit().putInt("nearby_presence_interval", nextVal).apply()
+                                    com.example.service.NearbyBleService.startOrStop(context)
+                                } else {
+                                    pendingNearbyInterval = nextVal
+                                    nearbyPermissionLauncher.launch(nearbyPermissions.toTypedArray())
+                                }
+                            }
+                        }
                     )
                 }
             }

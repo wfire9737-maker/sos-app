@@ -12,6 +12,8 @@
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     
     <!-- Bluetooth -->
+    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
+
     <uses-permission android:name="android.permission.BLUETOOTH" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />
@@ -102,6 +104,7 @@
             android:foregroundServiceType="microphone"
             android:exported="false" />
     
+        <service android:name=".service.NearbyBleService" android:exported="false" android:foregroundServiceType="connectedDevice" />
         <service
             android:name=".service.BleForegroundService"
             android:foregroundServiceType="connectedDevice"

@@ -92,6 +92,7 @@ fun AppPermissionChecker() {
     ) { _ ->
         try {
             com.example.service.BleForegroundService.start(context)
+            com.example.service.NearbyBleService.startOrStop(context)
         } catch (e: Exception) {
             // Ignore
         }
@@ -110,6 +111,7 @@ fun AppPermissionChecker() {
             if (event == Lifecycle.Event.ON_START) {
                 try {
                     com.example.service.BleForegroundService.start(context)
+            com.example.service.NearbyBleService.startOrStop(context)
                 } catch (e: Exception) {
                     // Ignore
                 }

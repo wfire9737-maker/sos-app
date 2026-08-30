@@ -77,6 +77,7 @@ class GuardianViewModel @Inject constructor(
     val notificationProvider: NotificationProvider,
     val historyService: HistoryService,
     val historyProvider: HistoryProvider,
+    val nearbyBleManager: com.example.ble.nearby.NearbyBleManager,
     val aiAnalysisService: AiAnalysisService,
     val deviceService: DeviceService,
     val fallDatabase: com.example.data.FallDatabase,

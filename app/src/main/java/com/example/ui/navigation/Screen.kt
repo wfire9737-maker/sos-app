@@ -33,4 +33,5 @@ sealed class Screen(val route: String) {
     object About : Screen("about")
     object DeveloperDashboard : Screen("developer_dashboard")
     object BleTest : Screen("ble_test")
+    object NearbyDiscovery : Screen("nearby_discovery")
 }

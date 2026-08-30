@@ -184,14 +184,14 @@ class BleManager(private val context: Context) {
         override fun onScanResult(callbackType: Int, result: ScanResult?) {
             result?.device?.let { device ->
                 try {
-                    val name = device.name ?: result.scanRecord?.deviceName
+                    val name = result.scanRecord?.deviceName ?: try { device.name } catch (e: SecurityException) { null }
                     if (name != null && name.contains(BleProtocol.DEVICE_NAME, ignoreCase = true)) {
                         Log.d("BleManager", "BLE: device discovered")
                         stopScan()
                         connectToDevice(device)
                     }
-                } catch (e: SecurityException) {
-                    Log.e("BleManager", "SecurityException in scanCallback", e)
+                } catch (e: Exception) {
+                    Log.e("BleManager", "Error in scanCallback", e)
                 }
             }
         }
@@ -207,6 +207,7 @@ class BleManager(private val context: Context) {
 
     private val gattCallback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
+            if (gatt != this@BleManager.gatt) return
             try {
                 if (status == BluetoothGatt.GATT_SUCCESS) {
                     if (newState == BluetoothProfile.STATE_CONNECTED) {
@@ -238,6 +239,7 @@ class BleManager(private val context: Context) {
         }
 
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
+            if (gatt != this@BleManager.gatt) return
             try {
                 if (status == BluetoothGatt.GATT_SUCCESS) {
                     Log.d("BleManager", "BLE: services discovered")
@@ -300,6 +302,7 @@ class BleManager(private val context: Context) {
         }
 
         override fun onDescriptorWrite(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
+            if (gatt != this@BleManager.gatt) return
             val charUuid = descriptor.characteristic?.uuid
             val descUuid = descriptor.uuid
 
@@ -310,6 +313,8 @@ class BleManager(private val context: Context) {
                 } else {
                     Log.w("BleManager", "BLE: Status CCCD write failed with status $status")
                 }
+                // FAST SOS: Status is ready, mark connected now!
+                finishConnectionSetup(gatt)
 
                 // Initialization Sequence Step 2: Enable GPS notifications & write CCCD
                 val service = gatt.getService(BleProtocol.SERVICE_UUID)
@@ -394,12 +399,14 @@ class BleManager(private val context: Context) {
         // For Android API < 33
         @Deprecated("Deprecated in Java")
         override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
+            if (gatt != this@BleManager.gatt) return
             val value = characteristic.value ?: byteArrayOf()
             handleCharacteristicNotification(characteristic.uuid, value)
         }
 
         // For Android API >= 33 (Tiramisu+)
         override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray) {
+            if (gatt != this@BleManager.gatt) return
             handleCharacteristicNotification(characteristic.uuid, value)
         }
 
@@ -704,15 +711,21 @@ class BleManager(private val context: Context) {
         }
     }
 
+    private var rssiJobActive = false
     private fun finishConnectionSetup(gatt: BluetoothGatt) {
+        if (_connectionState.value == BleState.CONNECTED) return // prevent duplicate calls
         _connectionState.value = BleState.CONNECTED
         _lastErrorMessage.value = null
         _notificationSubscribed.value = _statusNotificationSubscribed.value || _gpsNotificationSubscribed.value || _mpuNotificationSubscribed.value
         Log.d("BleManager", "BLE: monitoring active (Status, GPS, MPU6050)")
-        readRssiPeriodically()
+        if (!rssiJobActive) {
+            rssiJobActive = true
+            readRssiPeriodically()
+        }
     }
 
     private fun handleDisconnection(reason: String) {
+        rssiJobActive = false
         val wasConnected = _connectionState.value == BleState.CONNECTED || _connectionState.value == BleState.READY
         cleanGatt()
         _lastErrorMessage.value = reason
@@ -868,13 +881,14 @@ class BleManager(private val context: Context) {
     }
 
     private fun disconnectGattInternal() {
+        val currentGatt = gatt
+        gatt = null // clear immediately to prevent incoming callbacks
         try {
-            gatt?.disconnect()
-            gatt?.close()
+            currentGatt?.disconnect()
+            currentGatt?.close()
         } catch (e: SecurityException) {
             Log.e("BleManager", "SecurityException closing GATT", e)
         } finally {
-            gatt = null
             _rssi.value = null
         }
     }

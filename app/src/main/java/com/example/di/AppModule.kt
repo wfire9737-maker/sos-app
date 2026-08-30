@@ -37,6 +37,9 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
+import com.example.ble.nearby.NearbyPresenceAdvertiser
+import com.example.ble.nearby.NearbyDeviceScanner
+import com.example.ble.nearby.NearbyBleManager
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -193,4 +196,27 @@ object AppModule {
     @Provides
     @Singleton
     fun provideTrustedPlaceDao(database: SmartSosDatabase): com.example.data.local.dao.TrustedPlaceDao = database.trustedPlaceDao()
+    @Provides
+    @Singleton
+    fun provideNearbyPresenceAdvertiser(@ApplicationContext context: Context): NearbyPresenceAdvertiser {
+        return NearbyPresenceAdvertiser(context)
+    }
+
+    @Provides
+    @Singleton
+    fun provideNearbyDeviceScanner(@ApplicationContext context: Context): NearbyDeviceScanner {
+        return NearbyDeviceScanner(context)
+    }
+
+    @Provides
+    @Singleton
+    fun provideNearbyGattServer(@ApplicationContext context: Context): com.example.ble.nearby.NearbyGattServer {
+        return com.example.ble.nearby.NearbyGattServer(context)
+    }
+
+    @Provides
+    @Singleton
+    fun provideNearbyGattClient(@ApplicationContext context: Context): com.example.ble.nearby.NearbyGattClient {
+        return com.example.ble.nearby.NearbyGattClient(context)
+    }
 }

@@ -270,6 +270,7 @@ fun NavGraph(
             SettingsScreen(
                 viewModel = viewModel,
                 onNavigateBack = { navController.navigateUp() },
+                onNavigateToNearbyDiscovery = { navController.navigate(Screen.NearbyDiscovery.route) },
                 onNavigateToSecurity = { navController.navigate(Screen.Security.route) },
                 onNavigateToFallDetection = { navController.navigate(Screen.FallDetection.route) },
                 onNavigateToAnalytics = { navController.navigate(Screen.Analytics.route) },
@@ -367,6 +368,12 @@ fun NavGraph(
         composable(Screen.BleTest.route) {
             com.example.ui.screens.BleTestScreen(
                 bleManager = viewModel.deviceService.bleManager,
+                onNavigateBack = { navController.navigateUp() }
+            )
+        }
+        composable(Screen.NearbyDiscovery.route) {
+            com.example.ui.screens.NearbyDiscoveryScreen(
+                viewModel = viewModel,
                 onNavigateBack = { navController.navigateUp() }
             )
         }

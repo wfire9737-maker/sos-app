@@ -1,7 +1,12 @@
-with open('app/src/main/java/com/example/ui/navigation/Screen.kt', 'r') as f:
+import re
+
+with open("app/src/main/java/com/example/ui/navigation/Screen.kt", "r") as f:
     content = f.read()
 
-content = content.replace('object DeveloperDashboard : Screen("developer_dashboard")', 'object DeveloperDashboard : Screen("developer_dashboard")\n    object BleTest : Screen("ble_test")')
+target = '    object BleTest : Screen("ble_test")'
+replacement = '    object BleTest : Screen("ble_test")\n    object NearbyDiscovery : Screen("nearby_discovery")'
 
-with open('app/src/main/java/com/example/ui/navigation/Screen.kt', 'w') as f:
+content = content.replace(target, replacement)
+
+with open("app/src/main/java/com/example/ui/navigation/Screen.kt", "w") as f:
     f.write(content)
