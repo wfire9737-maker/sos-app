@@ -190,6 +190,9 @@ fun NavGraph(
                 },
                 onNavigateToBleTest = {
                     navController.navigate(Screen.BleTest.route)
+                },
+                onNavigateToNearbyDiscovery = {
+                    navController.navigate(Screen.NearbyDiscovery.route)
                 }
             )
         }
@@ -270,7 +273,6 @@ fun NavGraph(
             SettingsScreen(
                 viewModel = viewModel,
                 onNavigateBack = { navController.navigateUp() },
-                onNavigateToNearbyDiscovery = { navController.navigate(Screen.NearbyDiscovery.route) },
                 onNavigateToSecurity = { navController.navigate(Screen.Security.route) },
                 onNavigateToFallDetection = { navController.navigate(Screen.FallDetection.route) },
                 onNavigateToAnalytics = { navController.navigate(Screen.Analytics.route) },

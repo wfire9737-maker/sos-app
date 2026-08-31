@@ -30,7 +30,6 @@ import com.example.ui.theme.*
 fun SettingsScreen(
     viewModel: GuardianViewModel,
     onNavigateBack: () -> Unit,
-    onNavigateToNearbyDiscovery: () -> Unit,
     onNavigateToSecurity: () -> Unit,
     onNavigateToFallDetection: () -> Unit = {},
     onNavigateToAnalytics: () -> Unit = {},
@@ -146,13 +145,6 @@ fun SettingsScreen(
                 SettingsSection(title = "Nearby Emergency Presence") {
                     val presenceOptions = listOf(0, 5, 10, 30, 60)
                     val presenceLabels = mapOf(0 to "Off", 5 to "5 seconds", 10 to "10 seconds", 30 to "30 seconds", 60 to "60 seconds")
-                    
-                    SettingsItem(
-                        icon = Icons.Default.Person,
-                        title = "Nearby People (Discovery)",
-                        subtitle = "Scan for nearby users",
-                        onClick = { onNavigateToNearbyDiscovery() }
-                    )
                     
                     SettingsItem(
                         icon = Icons.Default.WifiTethering,

@@ -39,6 +39,7 @@ fun HomeScreen(
     onNavigateToDevicePairing: () -> Unit,
     onNavigateToMap: () -> Unit = {},
     onNavigateToBleTest: () -> Unit = {},
+    onNavigateToNearbyDiscovery: () -> Unit = {},
     onNavigateToEmergency: () -> Unit,
     onNavigateToNotifications: () -> Unit,
     onNavigateToHistory: () -> Unit,
@@ -141,6 +142,34 @@ fun HomeScreen(
             // Quick Status Grid
             item {
                 StatusGrid(devices = devices, onBluetoothClick = onNavigateToBleTest)
+            }
+            
+            // Nearby Discovery Section
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth().clickable { onNavigateToNearbyDiscovery() },
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .background(MaterialTheme.colorScheme.primary, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Person, contentDescription = "Nearby People", tint = MaterialTheme.colorScheme.onPrimary)
+                        }
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Column {
+                            Text("Nearby People", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                            Text("Find and connect with nearby users", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f))
+                        }
+                    }
+                }
             }
 
             // Active Alerts

@@ -21,6 +21,11 @@ class NearbyBleManager @Inject constructor(
         gattServer.onRemoteDeviceDisconnected = { macAddress ->
             updateDeviceConnectionState(macAddress, NearbyConnectionState.DISCONNECTED)
         }
+        gattServer.onActiveConnectionsChanged = { count ->
+            if (count == 0 && isSessionActive && !isBurstActive) {
+                advertiser.stopAdvertising()
+            }
+        }
         gattClient.onConnectionStateChanged = { macAddress, newState ->
             updateDeviceConnectionState(macAddress, newState)
         }
@@ -41,6 +46,9 @@ class NearbyBleManager @Inject constructor(
     
     fun acceptIncomingConnection(macAddress: String) {
         gattServer.acceptConnection(macAddress)
+        if (isSessionActive && !isBurstActive) {
+            advertiser.stopAdvertising()
+        }
     }
     
     fun declineIncomingConnection(macAddress: String) {
@@ -48,17 +56,22 @@ class NearbyBleManager @Inject constructor(
     }
     private var currentIntervalMs: Long = 0L
     private var isSessionActive = false
+    private var isBurstActive = false
 
     private val advertiseRunnable = object : Runnable {
         override fun run() {
             if (!isSessionActive || currentIntervalMs <= 0) return
             
             // Expose presence for a short burst (e.g., 2 seconds)
+            isBurstActive = true
             advertiser.startAdvertising()
             
             handler.postDelayed({
+                isBurstActive = false
                 if (isSessionActive) {
-                    advertiser.stopAdvertising()
+                    if (!gattServer.hasActiveConnections()) {
+                        advertiser.stopAdvertising()
+                    }
                 }
             }, 2000L) // 2-second burst
 

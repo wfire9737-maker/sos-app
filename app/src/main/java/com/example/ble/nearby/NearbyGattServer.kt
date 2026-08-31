@@ -23,13 +23,24 @@ class NearbyGattServer(private val context: Context) {
     private var connectedDevice: BluetoothDevice? = null
     var onRemoteDeviceDisconnected: ((String) -> Unit)? = null
 
+    var activeConnections = 0
+        private set
+
+    fun hasActiveConnections(): Boolean = activeConnections > 0
+
+    var onActiveConnectionsChanged: ((Int) -> Unit)? = null
+
     private val gattServerCallback = object : BluetoothGattServerCallback() {
         override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) {
             super.onConnectionStateChange(device, status, newState)
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 Log.d("NearbyGattServer", "Device connected: ${device.address}")
+                activeConnections++
+                onActiveConnectionsChanged?.invoke(activeConnections)
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 Log.d("NearbyGattServer", "Device disconnected: ${device.address}")
+                if (activeConnections > 0) activeConnections--
+                onActiveConnectionsChanged?.invoke(activeConnections)
                 if (connectedDevice?.address == device.address) {
                     connectedDevice = null
                     onRemoteDeviceDisconnected?.invoke(device.address)
@@ -63,6 +74,23 @@ class NearbyGattServer(private val context: Context) {
                     if (responseNeeded) {
                         gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_FAILURE, offset, null)
                     }
+                } catch (e: SecurityException) {}
+            }
+        }
+
+        override fun onDescriptorWriteRequest(
+            device: BluetoothDevice,
+            requestId: Int,
+            descriptor: BluetoothGattDescriptor,
+            preparedWrite: Boolean,
+            responseNeeded: Boolean,
+            offset: Int,
+            value: ByteArray?
+        ) {
+            super.onDescriptorWriteRequest(device, requestId, descriptor, preparedWrite, responseNeeded, offset, value)
+            if (responseNeeded) {
+                try {
+                    gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, value)
                 } catch (e: SecurityException) {}
             }
         }
