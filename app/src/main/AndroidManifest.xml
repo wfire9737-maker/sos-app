@@ -108,7 +108,8 @@
         <service
             android:name=".service.BleForegroundService"
             android:foregroundServiceType="connectedDevice"
-            android:exported="false" />
+            android:exported="false"
+            android:stopWithTask="false" />
     
     </application>
 

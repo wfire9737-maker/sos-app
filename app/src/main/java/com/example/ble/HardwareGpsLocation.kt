@@ -12,7 +12,9 @@ data class HardwareGpsLocation(
     val longitude: Double,
     val receivedAt: Long = System.currentTimeMillis(),
     val rawPayload: String = "",
-    val locationSource: String = "ESP32_NEO6M"
+    val locationSource: String = "ESP32_NEO6M",
+    val satellites: Int = 0,
+    val hasFix: Boolean = true
 ) {
     /**
      * Checks if this GPS coordinate fix was received within the given freshness threshold (default 2 minutes).

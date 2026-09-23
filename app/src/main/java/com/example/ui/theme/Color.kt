@@ -72,3 +72,50 @@ val TextPrimaryDark = OnSurfaceDark
 val TextSecondaryDark = OnSurfaceVariantDark
 val TextPrimaryLight = OnSurfaceLight
 val TextSecondaryLight = OnSurfaceVariantLight
+
+// High Contrast Mode Colors (Light)
+val HighContrastPrimary = Color(0xFF003D80)
+val HighContrastOnPrimary = Color(0xFFFFFFFF)
+val HighContrastPrimaryContainerLight = Color(0xFF0055B3)
+val HighContrastOnPrimaryContainerLight = Color(0xFFFFFFFF)
+
+val HighContrastSecondary = Color(0xFF005B66)
+val HighContrastOnSecondary = Color(0xFFFFFFFF)
+val HighContrastSecondaryContainerLight = Color(0xFF00808F)
+val HighContrastOnSecondaryContainerLight = Color(0xFFFFFFFF)
+
+val HighContrastBackgroundLight = Color(0xFFFFFFFF)
+val HighContrastOnBackgroundLight = Color(0xFF000000)
+
+val HighContrastSurfaceLight = Color(0xFFFFFFFF)
+val HighContrastOnSurfaceLight = Color(0xFF000000)
+val HighContrastSurfaceVariantLight = Color(0xFFE0E0E0)
+val HighContrastOnSurfaceVariantLight = Color(0xFF000000)
+
+val HighContrastErrorLight = Color(0xFF8B0000)
+val HighContrastOnErrorLight = Color(0xFFFFFFFF)
+val HighContrastErrorContainerLight = Color(0xFFB20000)
+val HighContrastOnErrorContainerLight = Color(0xFFFFFFFF)
+val HighContrastOutlineLight = Color(0xFF000000)
+
+// High Contrast Mode Colors (Dark)
+val HighContrastPrimaryContainerDark = Color(0xFF4D9BFF)
+val HighContrastOnPrimaryContainerDark = Color(0xFF000000)
+
+val HighContrastSecondaryContainerDark = Color(0xFF4DE6FF)
+val HighContrastOnSecondaryContainerDark = Color(0xFF000000)
+
+val HighContrastBackgroundDark = Color(0xFF000000)
+val HighContrastOnBackgroundDark = Color(0xFFFFFFFF)
+
+val HighContrastSurfaceDark = Color(0xFF000000)
+val HighContrastOnSurfaceDark = Color(0xFFFFFFFF)
+val HighContrastSurfaceVariantDark = Color(0xFF1F1F1F)
+val HighContrastOnSurfaceVariantDark = Color(0xFFFFFFFF)
+
+val HighContrastErrorDark = Color(0xFFFF6666)
+val HighContrastOnErrorDark = Color(0xFF000000)
+val HighContrastErrorContainerDark = Color(0xFFFF9999)
+val HighContrastOnErrorContainerDark = Color(0xFF000000)
+val HighContrastOutlineDark = Color(0xFFFFFFFF)
+

@@ -153,6 +153,20 @@ class MotionProcessor(
     }
 
     /**
+     * Triggered directly by the ESP32 when it detects abnormal motion locally.
+     * Bypasses the local state machine and directly enters POSSIBLE_FALL state.
+     */
+    fun triggerHardwareFallEvent(reading: Mpu6050Reading) {
+        val now = System.currentTimeMillis()
+        val eventId = "FALL_ESP32_${fallEventCounter.incrementAndGet()}_${now}"
+        _motionState.value = MotionState.POSSIBLE_FALL
+        Log.d(TAG, "MOTION: ESP32 hardware motion alert received (Event ID: $eventId)")
+        inCooldown = true
+        lastFallEventTimestamp = now
+        onPossibleFallDetected?.invoke(reading, eventId)
+    }
+
+    /**
      * Resets the motion state to NORMAL (e.g. when user cancels fall dialog or upon reconnection).
      */
     fun resetToNormal() {

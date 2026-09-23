@@ -660,6 +660,124 @@ class BleManager(private val context: Context) {
 
             // Emit to SharedFlow without deduplication so consecutive presses always trigger
             _sosEvents.tryEmit(event)
+        } else if (text.startsWith("A:", ignoreCase = true)) {
+            try {
+                val parts = text.substringAfter(":").split(",")
+                if (parts.size >= 3) {
+                    val ax = parts[0].trim().toFloatOrNull() ?: 0f
+                    val ay = parts[1].trim().toFloatOrNull() ?: 0f
+                    val az = parts[2].trim().toFloatOrNull() ?: 0f
+                    val old = _latestMpuReading.value
+                    val reading = old?.copy(accelerationX = ax, accelerationY = ay, accelerationZ = az)
+                        ?: Mpu6050Reading(ax, ay, az, 0f, 0f, 0f, 0f)
+                    _latestMpuReading.value = reading
+                    _mpuRawString.value = text
+                    _lastMpuTimestamp.value = System.currentTimeMillis()
+                    _mpuHardwareState.value = MpuHardwareState.Receiving(reading, motionProcessor.motionState.value)
+                    motionProcessor.onNewReading(reading)
+                }
+            } catch (e: Exception) {
+                Log.e("BleManager", "Failed to parse A: $text", e)
+            }
+        } else if (text.startsWith("G:", ignoreCase = true)) {
+            try {
+                val parts = text.substringAfter(":").split(",")
+                if (parts.size >= 3) {
+                    val gx = parts[0].trim().toFloatOrNull() ?: 0f
+                    val gy = parts[1].trim().toFloatOrNull() ?: 0f
+                    val gz = parts[2].trim().toFloatOrNull() ?: 0f
+                    val old = _latestMpuReading.value
+                    val reading = old?.copy(gyroX = gx, gyroY = gy, gyroZ = gz)
+                        ?: Mpu6050Reading(0f, 0f, 0f, gx, gy, gz, 0f)
+                    _latestMpuReading.value = reading
+                    _mpuRawString.value = text
+                    _lastMpuTimestamp.value = System.currentTimeMillis()
+                    _mpuHardwareState.value = MpuHardwareState.Receiving(reading, motionProcessor.motionState.value)
+                    motionProcessor.onNewReading(reading)
+                }
+            } catch (e: Exception) {
+                Log.e("BleManager", "Failed to parse G: $text", e)
+            }
+        } else if (text.startsWith("F:", ignoreCase = true)) {
+            try {
+                val parts = text.substringAfter(":").split(",")
+                if (parts.size >= 2) {
+                    val fixVal = parts[0].trim().toIntOrNull() ?: 0
+                    val satVal = parts[1].trim().toIntOrNull() ?: 0
+                    val hasFix = fixVal == 1
+                    
+                    val old = _latestHardwareGpsLocation.value
+                    if (old != null) {
+                        _latestHardwareGpsLocation.value = old.copy(hasFix = hasFix, satellites = satVal, rawPayload = text)
+                    } else {
+                        _latestHardwareGpsLocation.value = HardwareGpsLocation(0.0, 0.0, rawPayload = text, hasFix = hasFix, satellites = satVal)
+                    }
+                    if (!hasFix) {
+                        _hardwareGpsState.value = HardwareGpsState.WaitingForFix
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("BleManager", "Failed to parse F: $text", e)
+            }
+        } else if (text.startsWith("P:", ignoreCase = true)) {
+            try {
+                val parts = text.substringAfter(":").split(",")
+                if (parts.size >= 2) {
+                    val latE5 = parts[0].trim().toLongOrNull() ?: 0L
+                    val lngE5 = parts[1].trim().toLongOrNull() ?: 0L
+                    val lat = latE5 / 100000.0
+                    val lng = lngE5 / 100000.0
+                    
+                    val old = _latestHardwareGpsLocation.value
+                    val sats = old?.satellites ?: 0
+                    val newLoc = HardwareGpsLocation(latitude = lat, longitude = lng, rawPayload = text, hasFix = true, satellites = sats)
+                    _latestHardwareGpsLocation.value = newLoc
+                    _hardwareGpsState.value = HardwareGpsState.ValidLocation(newLoc)
+                    _lastGpsTimestamp.value = System.currentTimeMillis()
+                }
+            } catch (e: Exception) {
+                Log.e("BleManager", "Failed to parse P: $text", e)
+            }
+        } else if (text.startsWith("MOTION_ALERT:", ignoreCase = true)) {
+            try {
+                // Example: MOTION_ALERT:A:1234,-500,18000:G:450,-320,800
+                val parts = text.split(":")
+                if (parts.size >= 5 && parts[1] == "A" && parts[3] == "G") {
+                    val accelParts = parts[2].split(",")
+                    val gyroParts = parts[4].split(",")
+                    
+                    if (accelParts.size >= 3 && gyroParts.size >= 3) {
+                        val ax = accelParts[0].trim().toFloatOrNull() ?: 0f
+                        val ay = accelParts[1].trim().toFloatOrNull() ?: 0f
+                        val az = accelParts[2].trim().toFloatOrNull() ?: 0f
+                        val gx = gyroParts[0].trim().toFloatOrNull() ?: 0f
+                        val gy = gyroParts[1].trim().toFloatOrNull() ?: 0f
+                        val gz = gyroParts[2].trim().toFloatOrNull() ?: 0f
+                        
+                        val mag = kotlin.math.sqrt((ax*ax + ay*ay + az*az).toDouble()).toFloat() / 9.80665f
+                        
+                        val reading = Mpu6050Reading(
+                            accelerationX = ax,
+                            accelerationY = ay,
+                            accelerationZ = az,
+                            gyroX = gx,
+                            gyroY = gy,
+                            gyroZ = gz,
+                            accelerationMagnitudeG = mag
+                        )
+                        
+                        _latestMpuReading.value = reading
+                        _mpuRawString.value = text
+                        _lastMpuTimestamp.value = System.currentTimeMillis()
+                        
+                        // Pass abnormal motion event to existing architecture
+                        motionProcessor.triggerHardwareFallEvent(reading)
+                        _mpuHardwareState.value = MpuHardwareState.Receiving(reading, motionProcessor.motionState.value)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("BleManager", "Failed to parse MOTION_ALERT: $text", e)
+            }
         }
     }
 

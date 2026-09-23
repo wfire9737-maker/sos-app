@@ -2,6 +2,8 @@ package com.example.ui.screens
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import com.example.utils.hasBluetoothAdvertisePermission
+import com.example.utils.hasPostNotificationsPermission
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -23,6 +25,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.GuardianViewModel
+import com.example.ui.components.SettingsItem
+import com.example.ui.components.SettingsSwitchItem
+import com.example.ui.components.SettingsSection
 import com.example.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -45,6 +50,7 @@ fun SettingsScreen(
     onNavigateToDeveloperDashboard: () -> Unit = {}
 ) {
     val themeMode by viewModel.themeMode.collectAsState()
+    val highContrast by viewModel.highContrast.collectAsState()
     val developerModeEnabled by viewModel.developerModeEnabled.collectAsState()
     val language by viewModel.language.collectAsState()
     val notificationsEnabled by viewModel.criticalAlarmsEnabled.collectAsState()
@@ -58,10 +64,14 @@ fun SettingsScreen(
     val context = androidx.compose.ui.platform.LocalContext.current
     val prefs = context.getSharedPreferences("smart_sos_settings", android.content.Context.MODE_PRIVATE)
     var nearbyPresenceInterval by remember { mutableStateOf(prefs.getInt("nearby_presence_interval", 0)) }
+    var nearbyDeviceName by remember {
+        mutableStateOf(prefs.getString("nearby_device_name", com.example.ble.nearby.NearbyBleProtocol.DEFAULT_DEVICE_NAME) ?: com.example.ble.nearby.NearbyBleProtocol.DEFAULT_DEVICE_NAME)
+    }
 
     var showVoicePhraseDialog by remember { mutableStateOf(false) }
     var tempPhrase by remember { mutableStateOf("") }
     val sosSoundEnabled by viewModel.sosSoundEnabled.collectAsState()
+    val sosVibrationEnabled by viewModel.sosVibrationEnabled.collectAsState()
     
     var showLogoutDialog by remember { mutableStateOf(false) }
     var showLanguageDialog by remember { mutableStateOf(false) }
@@ -143,6 +153,30 @@ fun SettingsScreen(
 
             item {
                 SettingsSection(title = "Nearby Emergency Presence") {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                    ) {
+                        androidx.compose.material3.OutlinedTextField(
+                            value = nearbyDeviceName,
+                            onValueChange = { newName ->
+                                nearbyDeviceName = newName
+                                prefs.edit().putString("nearby_device_name", newName).apply()
+                            },
+                            label = { Text("Nearby Device Name") },
+                            placeholder = { Text(com.example.ble.nearby.NearbyBleProtocol.DEFAULT_DEVICE_NAME) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "This name is visible to nearby Smart SOS users.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
                     val presenceOptions = listOf(0, 5, 10, 30, 60)
                     val presenceLabels = mapOf(0 to "Off", 5 to "5 seconds", 10 to "10 seconds", 30 to "30 seconds", 60 to "60 seconds")
                     
@@ -160,12 +194,8 @@ fun SettingsScreen(
                                 prefs.edit().putInt("nearby_presence_interval", nextVal).apply()
                                 com.example.service.NearbyBleService.startOrStop(context)
                             } else {
-                                val hasAdvertise = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                                    ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_ADVERTISE) == PackageManager.PERMISSION_GRANTED
-                                } else true
-                                val hasNotification = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                                    ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
-                                } else true
+                                val hasAdvertise = context.hasBluetoothAdvertisePermission()
+                                val hasNotification = context.hasPostNotificationsPermission()
 
                                 if (hasAdvertise && hasNotification) {
                                     nearbyPresenceInterval = nextVal
@@ -259,11 +289,25 @@ fun SettingsScreen(
                         onCheckedChange = { enabled -> viewModel.setSosSoundEnabled(enabled) }
                     )
                     SettingsSwitchItem(
+                        icon = Icons.Default.Vibration,
+                        title = "SOS Trigger Vibration",
+                        subtitle = if (sosVibrationEnabled) "Vibrate automatically when SOS triggers" else "No vibration when SOS triggers",
+                        checked = sosVibrationEnabled,
+                        onCheckedChange = { enabled -> viewModel.setSosVibrationEnabled(enabled) }
+                    )
+                    SettingsSwitchItem(
                         icon = Icons.Default.DarkMode,
                         title = "Dark Theme",
                         subtitle = "Toggle dark mode",
                         checked = themeMode == "DARK",
                         onCheckedChange = { isDark -> viewModel.setThemeMode(if (isDark) "DARK" else "LIGHT") }
+                    )
+                    SettingsSwitchItem(
+                        icon = Icons.Default.Contrast,
+                        title = "High Contrast",
+                        subtitle = "Increase readability and contrast",
+                        checked = highContrast,
+                        onCheckedChange = { enabled -> viewModel.setHighContrast(enabled) }
                     )
                     SettingsSwitchItem(
                         icon = Icons.Default.Notifications,
@@ -458,72 +502,6 @@ fun SettingsScreen(
                     Text("Cancel")
                 }
             }
-        )
-    }
-}
-
-
-@Composable
-fun SettingsSection(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Column {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.primary,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(start = 8.dp, bottom = 8.dp)
-        )
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-            shape = RoundedCornerShape(16.dp)
-        ) {
-            Column(modifier = Modifier.padding(vertical = 8.dp)) {
-                content()
-            }
-        }
-    }
-}
-
-@Composable
-fun SettingsItem(icon: ImageVector, title: String, subtitle: String, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(24.dp))
-        Spacer(modifier = Modifier.width(16.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(title, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
-            Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
-        }
-        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-}
-
-
-@Composable
-fun SettingsSwitchItem(icon: ImageVector, title: String, subtitle: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onCheckedChange(!checked) }
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(24.dp))
-        Spacer(modifier = Modifier.width(16.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(title, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
-            Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
-        }
-        Switch(
-            checked = checked,
-            onCheckedChange = onCheckedChange
         )
     }
 }

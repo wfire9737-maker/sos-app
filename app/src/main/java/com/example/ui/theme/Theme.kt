@@ -53,13 +53,62 @@ private val LightColorScheme = lightColorScheme(
     onErrorContainer = OnErrorContainerRed
 )
 
+private val HighContrastDarkColorScheme = darkColorScheme(
+    primary = HighContrastPrimary,
+    onPrimary = HighContrastOnPrimary,
+    primaryContainer = HighContrastPrimaryContainerDark,
+    onPrimaryContainer = HighContrastOnPrimaryContainerDark,
+    secondary = HighContrastSecondary,
+    onSecondary = HighContrastOnSecondary,
+    secondaryContainer = HighContrastSecondaryContainerDark,
+    onSecondaryContainer = HighContrastOnSecondaryContainerDark,
+    background = HighContrastBackgroundDark,
+    onBackground = HighContrastOnBackgroundDark,
+    surface = HighContrastSurfaceDark,
+    onSurface = HighContrastOnSurfaceDark,
+    surfaceVariant = HighContrastSurfaceVariantDark,
+    onSurfaceVariant = HighContrastOnSurfaceVariantDark,
+    error = HighContrastErrorDark,
+    onError = HighContrastOnErrorDark,
+    errorContainer = HighContrastErrorContainerDark,
+    onErrorContainer = HighContrastOnErrorContainerDark,
+    outline = HighContrastOutlineDark,
+    outlineVariant = HighContrastOutlineDark
+)
+
+private val HighContrastLightColorScheme = lightColorScheme(
+    primary = HighContrastPrimary,
+    onPrimary = HighContrastOnPrimary,
+    primaryContainer = HighContrastPrimaryContainerLight,
+    onPrimaryContainer = HighContrastOnPrimaryContainerLight,
+    secondary = HighContrastSecondary,
+    onSecondary = HighContrastOnSecondary,
+    secondaryContainer = HighContrastSecondaryContainerLight,
+    onSecondaryContainer = HighContrastOnSecondaryContainerLight,
+    background = HighContrastBackgroundLight,
+    onBackground = HighContrastOnBackgroundLight,
+    surface = HighContrastSurfaceLight,
+    onSurface = HighContrastOnSurfaceLight,
+    surfaceVariant = HighContrastSurfaceVariantLight,
+    onSurfaceVariant = HighContrastOnSurfaceVariantLight,
+    error = HighContrastErrorLight,
+    onError = HighContrastOnErrorLight,
+    errorContainer = HighContrastErrorContainerLight,
+    onErrorContainer = HighContrastOnErrorContainerLight,
+    outline = HighContrastOutlineLight,
+    outlineVariant = HighContrastOutlineLight
+)
+
 @Composable
 fun GuardianTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
+    highContrast: Boolean = false,
     dynamicColor: Boolean = false,
     content: @Composable () -> Unit
 ) {
     val colorScheme = when {
+        highContrast && darkTheme -> HighContrastDarkColorScheme
+        highContrast && !darkTheme -> HighContrastLightColorScheme
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             val context = LocalContext.current
             if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
@@ -78,8 +127,9 @@ fun GuardianTheme(
 @Composable
 fun MyApplicationTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
+    highContrast: Boolean = false,
     dynamicColor: Boolean = false,
     content: @Composable () -> Unit
 ) {
-    GuardianTheme(darkTheme = darkTheme, dynamicColor = dynamicColor, content = content)
+    GuardianTheme(darkTheme = darkTheme, highContrast = highContrast, dynamicColor = dynamicColor, content = content)
 }

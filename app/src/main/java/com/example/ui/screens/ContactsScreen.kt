@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
+import com.example.utils.hasCallPhonePermission
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -250,14 +251,11 @@ fun ContactCard(
             // Actions
             Row {
                 IconButton(onClick = {
-                    when (PackageManager.PERMISSION_GRANTED) {
-                        ContextCompat.checkSelfPermission(context, Manifest.permission.CALL_PHONE) -> {
-                            val intent = Intent(Intent.ACTION_CALL).apply { data = Uri.parse("tel:${contact.phone}") }
-                            context.startActivity(intent)
-                        }
-                        else -> {
-                            callPermissionLauncher.launch(Manifest.permission.CALL_PHONE)
-                        }
+                    if (context.hasCallPhonePermission()) {
+                        val intent = Intent(Intent.ACTION_CALL).apply { data = Uri.parse("tel:${contact.phone}") }
+                        context.startActivity(intent)
+                    } else {
+                        callPermissionLauncher.launch(Manifest.permission.CALL_PHONE)
                     }
                 }) {
                     Icon(Icons.Default.Phone, contentDescription = "Call", tint = MaterialTheme.colorScheme.primary)

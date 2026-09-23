@@ -21,6 +21,7 @@ import android.net.Uri
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
+import android.telecom.TelecomManager
 
 import com.example.data.local.dao.SosHistoryDao
 import com.example.data.local.dao.EmergencyContactDao
@@ -144,17 +145,20 @@ class EmergencyService(
                     lastCalledEmergencyId = emergencyId
                     if (ContextCompat.checkSelfPermission(context, Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED) {
                         Log.d("EmergencyService", "CALL_REQUESTED: Attempting background dial to $phoneToCall")
-                        val callIntent = Intent(Intent.ACTION_CALL).apply {
-                            data = Uri.parse("tel:$phoneToCall")
-                            flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                        }
                         try {
-                            context.startActivity(callIntent)
-                            databaseService.addDeveloperLog("CALL_STARTED: tel:$phoneToCall", "SUCCESS")
-                            Log.d("EmergencyService", "CALL_STARTED: Successfully launched dialer activity.")
+                            val telecomManager = context.getSystemService(Context.TELECOM_SERVICE) as? TelecomManager
+                            val uri = Uri.fromParts("tel", phoneToCall, null)
+                            if (telecomManager != null) {
+                                telecomManager.placeCall(uri, null)
+                                databaseService.addDeveloperLog("CALL_STARTED: tel:$phoneToCall via TelecomManager", "SUCCESS")
+                                Log.d("EmergencyService", "CALL_STARTED: Successfully placed call via TelecomManager.")
+                            } else {
+                                databaseService.addDeveloperLog("CALL_FAILED: TelecomManager.placeCall: TelecomManager is null", "ERROR")
+                                Log.e("EmergencyService", "CALL_FAILED: TelecomManager is null")
+                            }
                         } catch (e: Exception) {
-                            databaseService.addDeveloperLog("CALL_FAILED: ${e.message}", "ERROR")
-                            Log.e("EmergencyService", "CALL_FAILED: Failed to start background call activity: ${e.message}")
+                            databaseService.addDeveloperLog("CALL_FAILED: TelecomManager.placeCall: ${e.message}", "ERROR")
+                            Log.e("EmergencyService", "CALL_FAILED: TelecomManager.placeCall failed: ${e.message}")
                         }
                     } else {
                         databaseService.addDeveloperLog("CALL_PERMISSION_DENIED: CALL_PHONE permission not granted", "ERROR")

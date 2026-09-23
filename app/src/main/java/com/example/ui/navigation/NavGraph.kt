@@ -376,6 +376,40 @@ fun NavGraph(
         composable(Screen.NearbyDiscovery.route) {
             com.example.ui.screens.NearbyDiscoveryScreen(
                 viewModel = viewModel,
+                onNavigateBack = { navController.navigateUp() },
+                onNavigateToChat = { macAddress, deviceName -> 
+                    navController.navigate(Screen.NearbyChat.createRoute(macAddress, deviceName))
+                },
+                onNavigateToLocations = {
+                    navController.navigate(Screen.NearbyLocations.route)
+                }
+            )
+        }
+        composable(
+            route = Screen.NearbyChat.route,
+            arguments = listOf(
+                androidx.navigation.navArgument("macAddress") { type = androidx.navigation.NavType.StringType },
+                androidx.navigation.navArgument("deviceName") { type = androidx.navigation.NavType.StringType; nullable = true }
+            )
+        ) { backStackEntry ->
+            val macAddress = backStackEntry.arguments?.getString("macAddress") ?: ""
+            val deviceName = backStackEntry.arguments?.getString("deviceName") ?: "Smart SOS Phone"
+            com.example.ui.screens.NearbyChatScreen(
+                macAddress = macAddress,
+                deviceName = deviceName,
+                onNavigateBack = { navController.navigateUp() }
+            )
+        }
+        composable(
+            route = Screen.NearbyEmergencyAlerts.route,
+            deepLinks = listOf(androidx.navigation.navDeepLink { uriPattern = "smartsos://nearby_alerts" })
+        ) {
+            com.example.ui.screens.NearbyEmergencyAlertScreen(
+                onNavigateBack = { navController.navigateUp() }
+            )
+        }
+        composable(Screen.NearbyLocations.route) {
+            com.example.ui.screens.NearbyLocationScreen(
                 onNavigateBack = { navController.navigateUp() }
             )
         }

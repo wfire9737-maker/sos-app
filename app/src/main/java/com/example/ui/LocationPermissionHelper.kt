@@ -11,6 +11,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
+import com.example.utils.*
 
 @Composable
 fun rememberLocationPermissionHandler(
@@ -110,26 +111,13 @@ fun rememberLocationPermissionHandler(
     }
 
     val triggerCheck = {
-        val fineLoc = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        val backgroundLoc = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_BACKGROUND_LOCATION) == PackageManager.PERMISSION_GRANTED
-        } else {
-            true
-        }
-        val callPhone = ContextCompat.checkSelfPermission(context, Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED
-        val sendSms = ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) == PackageManager.PERMISSION_GRANTED
-
-        val bluetoothScan = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-            ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED
-        } else true
-        
-        val bluetoothConnect = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-            ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
-        } else true
-        
-        val notifications = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
-        } else true
+        val fineLoc = context.hasFineLocationPermission()
+        val backgroundLoc = context.hasBackgroundLocationPermission()
+        val callPhone = context.hasCallPhonePermission()
+        val sendSms = context.hasSendSmsPermission()
+        val bluetoothScan = context.hasBluetoothScanPermission()
+        val bluetoothConnect = context.hasBluetoothConnectPermission()
+        val notifications = context.hasPostNotificationsPermission()
 
         if (fineLoc && backgroundLoc && callPhone && sendSms && bluetoothScan && bluetoothConnect && notifications) {
             val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager

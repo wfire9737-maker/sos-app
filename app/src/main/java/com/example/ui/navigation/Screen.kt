@@ -34,4 +34,10 @@ sealed class Screen(val route: String) {
     object DeveloperDashboard : Screen("developer_dashboard")
     object BleTest : Screen("ble_test")
     object NearbyDiscovery : Screen("nearby_discovery")
+    object NearbyChat : Screen("nearby_chat?macAddress={macAddress}&deviceName={deviceName}") {
+        fun createRoute(macAddress: String, deviceName: String) = 
+            "nearby_chat?macAddress=$macAddress&deviceName=${android.net.Uri.encode(deviceName)}"
+    }
+    object NearbyEmergencyAlerts : Screen("nearby_emergency_alerts")
+    object NearbyLocations : Screen("nearby_locations")
 }

@@ -88,6 +88,12 @@ class BleForegroundService : Service() {
         return START_STICKY
     }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        Log.d("BleForegroundService", "App task removed from Recents; maintaining BLE foreground service.")
+        deviceService.startEsp32Polling()
+    }
+
     private fun observeBleConnectionState() {
         stateObserverJob?.cancel()
         stateObserverJob = serviceScope.launch {

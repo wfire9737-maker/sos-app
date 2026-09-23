@@ -38,6 +38,13 @@ class NearbyPresenceAdvertiser(private val context: Context) {
                 return
             }
 
+            val prefs = context.getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE)
+            val configuredName = prefs.getString("nearby_device_name", NearbyBleProtocol.DEFAULT_DEVICE_NAME)?.trim()
+            val deviceName = if (configuredName.isNullOrBlank()) NearbyBleProtocol.DEFAULT_DEVICE_NAME else configuredName
+            val nameBytes = deviceName.toByteArray(Charsets.UTF_8).let {
+                if (it.size > 24) it.copyOfRange(0, 24) else it
+            }
+
             val settings = AdvertiseSettings.Builder()
                 .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
                 .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM)
@@ -49,7 +56,12 @@ class NearbyPresenceAdvertiser(private val context: Context) {
                 .addServiceUuid(ParcelUuid(NearbyBleProtocol.NEARBY_SERVICE_UUID))
                 .build()
 
-            advertiser.startAdvertising(settings, data, advertiseCallback)
+            val scanResponse = AdvertiseData.Builder()
+                .setIncludeDeviceName(false)
+                .addServiceData(ParcelUuid(NearbyBleProtocol.NEARBY_NAME_SERVICE_UUID), nameBytes)
+                .build()
+
+            advertiser.startAdvertising(settings, data, scanResponse, advertiseCallback)
         } catch (e: SecurityException) {
             Log.e("NearbyAdvertiser", "Missing BLUETOOTH_ADVERTISE permission", e)
         }

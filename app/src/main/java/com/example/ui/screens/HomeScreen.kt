@@ -17,6 +17,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import com.example.ui.rememberLocationPermissionHandler
+import com.example.utils.hasMicrophonePermission
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
@@ -505,10 +506,7 @@ fun VoiceCommandSection(
     }
 
     fun toggleMic() {
-        val hasPermission = androidx.core.content.ContextCompat.checkSelfPermission(
-            context,
-            android.Manifest.permission.RECORD_AUDIO
-        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        val hasPermission = context.hasMicrophonePermission()
 
         if (isSpeechActive) {
             viewModel.stopVoiceRecognition()

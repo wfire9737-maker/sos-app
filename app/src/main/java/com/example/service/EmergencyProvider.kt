@@ -91,12 +91,26 @@ class EmergencyProvider(
         locationSource: String = "PHONE_GPS"
     ) {
         scope.launch {
+            val isSoundEnabled = context.getSharedPreferences(
+                "smart_sos_settings",
+                Context.MODE_PRIVATE
+            ).getBoolean("sos_sound_enabled", true)
+
+            val isVibrationEnabled = context.getSharedPreferences(
+                "smart_sos_settings",
+                Context.MODE_PRIVATE
+            ).getBoolean("sos_vibration_enabled", true)
+
             if (isEmergencyInProgress()) {
                 emergencyService.activeEmergency.value?.let { model ->
                     emergencyService.notifyEmergencyContacts(model, isUpdate = true)
                 }
-                alarmVibratorService.startAlarm()
-                alarmVibratorService.startVibration()
+                if (isSoundEnabled) {
+                    alarmVibratorService.startAlarm()
+                }
+                if (isVibrationEnabled) {
+                    alarmVibratorService.startVibration()
+                }
                 return@launch
             }
             
@@ -105,9 +119,13 @@ class EmergencyProvider(
             val userName = user?.name ?: "Marcus Vance"
             val userPhone = user?.phone ?: "+1-555-0143"
 
-            // Trigger alarm/vibrator (assuming sound is enabled globally for emergencies)
-            alarmVibratorService.startAlarm()
-            alarmVibratorService.startVibration()
+            // Trigger alarm conditionally based on sos_sound_enabled setting
+            if (isSoundEnabled) {
+                alarmVibratorService.startAlarm()
+            }
+            if (isVibrationEnabled) {
+                alarmVibratorService.startVibration()
+            }
 
             val model = emergencyService.startEmergency(
                 userId = userId,

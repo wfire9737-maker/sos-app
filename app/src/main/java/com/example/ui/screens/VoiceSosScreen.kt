@@ -27,6 +27,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.GuardianViewModel
+import com.example.utils.hasMicrophonePermission
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -235,10 +236,7 @@ fun VoiceSosScreen(
 
                         Button(
                             onClick = {
-                                val hasPermission = androidx.core.content.ContextCompat.checkSelfPermission(
-                                    context,
-                                    android.Manifest.permission.RECORD_AUDIO
-                                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                                val hasPermission = context.hasMicrophonePermission()
 
                                 if (isSpeechActive) {
                                     viewModel.stopVoiceRecognition()

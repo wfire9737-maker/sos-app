@@ -92,7 +92,10 @@ class GuardianViewModel @Inject constructor(
     val analyticsService: AnalyticsService,
     val securityService: com.example.service.SecurityService,
     val trustedPlacesService: com.example.service.TrustedPlacesService,
-    val settingsDataStore: com.example.data.SettingsDataStore
+    val settingsDataStore: com.example.data.SettingsDataStore,
+    val nearbyEmergencyAlertRepository: com.example.repository.NearbyEmergencyAlertRepository,
+    val nearbyEmergencyNotificationManager: com.example.service.NearbyEmergencyNotificationManager,
+    val nearbyLocationRepository: com.example.repository.NearbyLocationRepository
 ) : AndroidViewModel(application) {
 
     
@@ -131,6 +134,16 @@ class GuardianViewModel @Inject constructor(
         }
     )
     val sosSoundEnabled = _sosSoundEnabled.asStateFlow()
+
+    private val _sosVibrationEnabled = MutableStateFlow(
+        try {
+            getApplication<Application>().getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE)
+                .getBoolean("sos_vibration_enabled", true)
+        } catch (e: Exception) {
+            true
+        }
+    )
+    val sosVibrationEnabled = _sosVibrationEnabled.asStateFlow()
     private val _voiceSosEnabled = MutableStateFlow(
         try {
             getApplication<Application>().getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE)
@@ -236,6 +249,16 @@ class GuardianViewModel @Inject constructor(
     val themeMode: StateFlow<String> = _themeMode.asStateFlow()
     fun setThemeMode(mode: String) { _themeMode.value = mode; databaseService.saveUserSetting("theme_mode", mode) }
 
+    private val _highContrast = MutableStateFlow(try { getApplication<Application>().getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE).getBoolean("high_contrast", false) } catch(e:Exception) { false })
+    val highContrast: StateFlow<Boolean> = _highContrast.asStateFlow()
+    fun setHighContrast(enabled: Boolean) { 
+        _highContrast.value = enabled
+        try {
+            getApplication<Application>().getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE)
+                .edit().putBoolean("high_contrast", enabled).apply()
+        } catch(e:Exception) {}
+    }
+
     private val _language = MutableStateFlow(try { getApplication<Application>().getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE).getString("language", "en") ?: "en" } catch(e:Exception) { "en" })
     val language: StateFlow<String> = _language.asStateFlow()
     fun setLanguage(lang: String) { _language.value = lang; databaseService.saveUserSetting("language", lang) }
@@ -243,6 +266,11 @@ class GuardianViewModel @Inject constructor(
     fun setSosSoundEnabled(enabled: Boolean) {
         _sosSoundEnabled.value = enabled
         databaseService.saveUserSetting("sos_sound_enabled", enabled)
+    }
+
+    fun setSosVibrationEnabled(enabled: Boolean) {
+        _sosVibrationEnabled.value = enabled
+        databaseService.saveUserSetting("sos_vibration_enabled", enabled)
     }
 
     fun toggleSirenAlarm() {
@@ -1208,7 +1236,6 @@ fun startVoiceRecognition(context: Context) {
         alarmVibratorService.cleanUp()
         fallDetectionService.cleanup()
         voiceSosService.cleanup()
-        deviceService.stopEsp32Polling()
     }
 
 

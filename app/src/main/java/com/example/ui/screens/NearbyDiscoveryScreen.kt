@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -28,17 +29,26 @@ import java.util.*
 @Composable
 fun NearbyDiscoveryScreen(
     viewModel: GuardianViewModel,
-    onNavigateBack: () -> Unit
+    onNavigateBack: () -> Unit,
+    onNavigateToChat: (String, String) -> Unit = { _, _ -> },
+    onNavigateToLocations: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val nearbyDevices by viewModel.nearbyBleManager.nearbyDevices.collectAsState()
 
-    val permissions = mutableListOf<String>()
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        permissions.add(Manifest.permission.BLUETOOTH_SCAN)
-        permissions.add(Manifest.permission.BLUETOOTH_CONNECT)
-    } else {
-        permissions.add(Manifest.permission.ACCESS_FINE_LOCATION)
+    val permissions = remember {
+        mutableListOf<String>().apply {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                add(Manifest.permission.BLUETOOTH_SCAN)
+                add(Manifest.permission.BLUETOOTH_CONNECT)
+                add(Manifest.permission.BLUETOOTH_ADVERTISE)
+            } else {
+                add(Manifest.permission.ACCESS_FINE_LOCATION)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                add(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
     }
 
     var hasPermissions by remember { mutableStateOf(false) }
@@ -75,6 +85,11 @@ fun NearbyDiscoveryScreen(
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    IconButton(onClick = onNavigateToLocations) {
+                        Icon(Icons.Default.LocationOn, contentDescription = "View Shared Locations")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -118,7 +133,10 @@ fun NearbyDiscoveryScreen(
                 LazyColumn(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(nearbyDevices.values.toList().sortedByDescending { it.lastSeen }) { device ->
+                    items(
+                        items = nearbyDevices.values.toList().sortedByDescending { it.lastSeen },
+                        key = { it.macAddress }
+                    ) { device ->
                         Card(
                             modifier = Modifier.fillMaxWidth(),
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
@@ -137,19 +155,32 @@ fun NearbyDiscoveryScreen(
                                 )
                                 Spacer(modifier = Modifier.width(16.dp))
                                 Column {
-                                    val safeId = device.macAddress.takeLast(4)
                                     Text(
-                                        text = "Nearby User ($safeId)",
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        fontWeight = FontWeight.SemiBold
+                                        text = device.deviceName.ifBlank { "Smart SOS Phone" },
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold
                                     )
                                     Text(
-                                        text = "Signal: ${device.rssi} dBm",
-                                        style = MaterialTheme.typography.bodyMedium
+                                        text = "Smart SOS device",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
-                                    val timeString = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(device.lastSeen))
                                     Text(
-                                        text = "Last seen: $timeString",
+                                        text = when (device.connectionState) {
+                                            com.example.ble.nearby.NearbyConnectionState.CONNECTED -> "Connected"
+                                            com.example.ble.nearby.NearbyConnectionState.REQUESTING -> "Connecting..."
+                                            com.example.ble.nearby.NearbyConnectionState.DISCONNECTED -> "Available"
+                                        },
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Medium,
+                                        color = when (device.connectionState) {
+                                            com.example.ble.nearby.NearbyConnectionState.CONNECTED -> Color(0xFF4CAF50)
+                                            com.example.ble.nearby.NearbyConnectionState.REQUESTING -> MaterialTheme.colorScheme.primary
+                                            com.example.ble.nearby.NearbyConnectionState.DISCONNECTED -> MaterialTheme.colorScheme.onSurface
+                                        }
+                                    )
+                                    Text(
+                                        text = "RSSI: ${device.rssi} dBm",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -173,11 +204,21 @@ fun NearbyDiscoveryScreen(
                                         }
                                     }
                                     com.example.ble.nearby.NearbyConnectionState.CONNECTED -> {
-                                        Button(
-                                            onClick = { viewModel.nearbyBleManager.disconnect(device.macAddress) },
-                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50))
+                                        Row(
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Text("Connected")
+                                            OutlinedButton(
+                                                onClick = { viewModel.nearbyBleManager.disconnect(device.macAddress) }
+                                            ) {
+                                                Text("Disconnect")
+                                            }
+                                            Button(
+                                                onClick = { onNavigateToChat(device.macAddress, device.deviceName) },
+                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50))
+                                            ) {
+                                                Text("Chat")
+                                            }
                                         }
                                     }
                                 }

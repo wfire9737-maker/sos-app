@@ -219,4 +219,22 @@ object AppModule {
     fun provideNearbyGattClient(@ApplicationContext context: Context): com.example.ble.nearby.NearbyGattClient {
         return com.example.ble.nearby.NearbyGattClient(context)
     }
+
+    @Provides
+    @Singleton
+    fun provideNearbyChatRepository(@ApplicationContext context: Context, nearbyBleManager: com.example.ble.nearby.NearbyBleManager): com.example.repository.NearbyChatRepository {
+        return com.example.repository.NearbyChatRepository(context, nearbyBleManager)
+    }
+
+    @Provides
+    @Singleton
+    fun provideNearbyEmergencyAlertRepository(@ApplicationContext context: Context, nearbyBleManager: com.example.ble.nearby.NearbyBleManager): com.example.repository.NearbyEmergencyAlertRepository {
+        return com.example.repository.NearbyEmergencyAlertRepository(context, nearbyBleManager)
+    }
+
+    @Provides
+    @Singleton
+    fun provideNearbyLocationRepository(@ApplicationContext context: Context, nearbyBleManager: com.example.ble.nearby.NearbyBleManager): com.example.repository.NearbyLocationRepository {
+        return com.example.repository.NearbyLocationRepository(context, nearbyBleManager)
+    }
 }
