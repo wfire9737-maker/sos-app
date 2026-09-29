@@ -105,25 +105,21 @@ class GuardianViewModel @Inject constructor(
         initialValue = false
     )
 
-    init {
-        fallDetectionService.onSosTriggeredCallback = {
-            triggerFallDetectedSOS()
-        }
-
-        // Wire real MPU6050 motion processor from BLE hardware
-        deviceService.bleManager.motionProcessor.onPossibleFallDetected = { reading, eventId ->
-            android.util.Log.d("GuardianViewModel", "MOTION: possible fall detected from MPU6050 event $eventId (MAG=${reading.accelerationMagnitudeG}g)")
-            if (!emergencyService.isEmergencyActive() && fallDetectionService.currentState.value != "FALL_COUNTDOWN") {
-                fallDetectionService.triggerFall()
-            }
-        }
-    }
-
     fun setDeveloperModeEnabled(enabled: Boolean) {
         viewModelScope.launch {
             settingsDataStore.setDeveloperMode(enabled)
         }
     }
+
+    private val _fallDetectionEnabled = MutableStateFlow(
+        try {
+            getApplication<Application>().getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE)
+                .getBoolean("fall_detection_enabled", true)
+        } catch (e: Exception) {
+            true
+        }
+    )
+    val fallDetectionEnabled = _fallDetectionEnabled.asStateFlow()
 
     private val _sosSoundEnabled = MutableStateFlow(
         try {
@@ -263,14 +259,42 @@ class GuardianViewModel @Inject constructor(
     val language: StateFlow<String> = _language.asStateFlow()
     fun setLanguage(lang: String) { _language.value = lang; databaseService.saveUserSetting("language", lang) }
 
+    fun setFallDetectionEnabled(enabled: Boolean) {
+        _fallDetectionEnabled.value = enabled
+        try {
+            getApplication<Application>().getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean("fall_detection_enabled", enabled)
+                .apply()
+        } catch (e: Exception) {
+            // Ignore
+        }
+        databaseService.saveUserSetting("fall_detection_enabled", enabled)
+    }
+
+    fun cancelFallCountdown() {
+        fallDetectionService.cancelFallCountdown()
+        deviceService.bleManager.motionProcessor.resetToNormal()
+    }
+
     fun setSosSoundEnabled(enabled: Boolean) {
         _sosSoundEnabled.value = enabled
         databaseService.saveUserSetting("sos_sound_enabled", enabled)
+        getApplication<Application>()
+            .getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean("sos_sound_enabled", enabled)
+            .apply()
     }
 
     fun setSosVibrationEnabled(enabled: Boolean) {
         _sosVibrationEnabled.value = enabled
         databaseService.saveUserSetting("sos_vibration_enabled", enabled)
+        getApplication<Application>()
+            .getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean("sos_vibration_enabled", enabled)
+            .apply()
     }
 
     fun toggleSirenAlarm() {
@@ -546,13 +570,48 @@ class GuardianViewModel @Inject constructor(
         return isReady
     }
 
-    private fun getMatchedTrustedPlace(lat: Double, lng: Double): com.example.model.TrustedPlace? {
-        val results = FloatArray(1)
-        for (place in trustedPlacesService.trustedPlaces.value) {
-            android.location.Location.distanceBetween(lat, lng, place.latitude, place.longitude, results)
-            if (results[0] <= place.radius) return place
-        }
-        return null
+    fun getMatchedTrustedPlace(lat: Double, lng: Double): com.example.model.TrustedPlace? {
+        return emergencyProvider.getMatchedTrustedPlace(lat, lng)
+    }
+
+    fun shouldSkipPhoneCall(lat: Double? = null, lng: Double? = null): Boolean {
+        return emergencyProvider.shouldSkipPhoneCall(lat, lng)
+    }
+
+    fun shouldSendSos(lat: Double? = null, lng: Double? = null): Boolean {
+        return emergencyProvider.shouldSendSos(lat, lng)
+    }
+
+    fun getDelaySosSeconds(lat: Double? = null, lng: Double? = null): Int {
+        return emergencyProvider.getDelaySosSeconds(lat, lng)
+    }
+
+    fun shouldShowConfirmationDialog(lat: Double? = null, lng: Double? = null): Boolean {
+        return emergencyProvider.shouldShowConfirmationDialog(lat, lng)
+    }
+
+    private val _isUiInForeground = MutableStateFlow(false)
+    val isUiInForeground: StateFlow<Boolean> = _isUiInForeground.asStateFlow()
+
+    fun setUiForeground(inForeground: Boolean) {
+        _isUiInForeground.value = inForeground
+    }
+
+    private val _showSosConfirmationDialog = MutableStateFlow(false)
+    val showSosConfirmationDialog: StateFlow<Boolean> = _showSosConfirmationDialog.asStateFlow()
+
+    private var pendingSosConfirmationAction: (() -> Unit)? = null
+
+    fun confirmPendingSos() {
+        _showSosConfirmationDialog.value = false
+        val action = pendingSosConfirmationAction
+        pendingSosConfirmationAction = null
+        action?.invoke()
+    }
+
+    fun cancelPendingSos() {
+        _showSosConfirmationDialog.value = false
+        pendingSosConfirmationAction = null
     }
 
     private suspend fun initiateEmergencySequence(
@@ -564,21 +623,34 @@ class GuardianViewModel @Inject constructor(
         altitude: Double? = null,
         speed: Float? = null,
         bearing: Float? = null
-    ): com.example.model.EmergencyModel {
+    ): com.example.model.EmergencyModel? {
+        val effectiveLat = lat ?: locationService.currentLocation.value.latitude
+        val effectiveLng = lng ?: locationService.currentLocation.value.longitude
+
+        if (!emergencyProvider.shouldSendSos(effectiveLat, effectiveLng)) {
+            val placeName = emergencyProvider.getMatchedTrustedPlace(effectiveLat, effectiveLng)?.name ?: "Trusted Place"
+            android.util.Log.d("GuardianViewModel", "SOS dispatch prevented: Inside Trusted Place $placeName (alwaysSendSos=false)")
+            databaseService.addDeveloperLog("SOS_DISPATCH_PREVENTED: Trusted Place $placeName has alwaysSendSos=false", "INFO")
+            _uiEvents.emit(UiEvent.ShowToast("SOS dispatch prevented: Inside $placeName"))
+            return null
+        }
+
         checkSystemReadiness()
         val user = (authState.value as? AuthState.Success)?.user
         val userId = user?.uid ?: "user-101"
         val userName = user?.name ?: "Marcus Vance"
         val userPhone = user?.phone ?: "+1-555-0143"
 
-        val matchedPlace = getMatchedTrustedPlace(lat ?: locationService.currentLocation.value.latitude, lng ?: locationService.currentLocation.value.longitude)
-        if (_sosSoundEnabled.value && matchedPlace?.reduceNotificationSound != true) {
+        val shouldPlaySound = emergencyProvider.shouldPlaySosAlarm(effectiveLat, effectiveLng)
+        if (shouldPlaySound) {
             alarmVibratorService.startAlarm()
             _isSirenPlaying.value = true
         } else {
             _isSirenPlaying.value = false
         }
-        alarmVibratorService.startVibration()
+        if (_sosVibrationEnabled.value) {
+            alarmVibratorService.startVibration()
+        }
 
         return emergencyProvider.initiateEmergency(
             userId = userId,
@@ -597,15 +669,17 @@ class GuardianViewModel @Inject constructor(
 
     fun triggerTimerSOS() {
         viewModelScope.launch {
-            initiateEmergencySequence(
+            val model = initiateEmergencySequence(
                 triggerSource = "SAFETY_TIMER_EXPIRED",
                 deviceId = "MOBILE-APP-TIMER"
             )
-            _uiEvents.emit(UiEvent.ShowToast("🚨 SAFETY TIMER EXPIRED: AUTOMATIC SOS DISPATCHED!"))
+            if (model != null) {
+                _uiEvents.emit(UiEvent.ShowToast("🚨 SAFETY TIMER EXPIRED: AUTOMATIC SOS DISPATCHED!"))
+            }
         }
     }
 
-    fun triggerManualSOS(lat: Double = 37.7749, lng: Double = -122.4194) {
+    fun triggerManualSOS(lat: Double = 37.7749, lng: Double = -122.4194, onEmergencyStarted: (() -> Unit)? = null) {
         viewModelScope.launch {
             if (_sosWorkflowState.value != com.example.model.SosWorkflowState.IDLE && _sosWorkflowState.value != com.example.model.SosWorkflowState.COMPLETED) {
                 return@launch
@@ -615,69 +689,54 @@ class GuardianViewModel @Inject constructor(
                      emergencyService.notifyEmergencyContacts(model, isUpdate = true)
                  }
                  _uiEvents.emit(UiEvent.ShowToast("ALERT TRANSMITTED: Contacts Notified Again!"))
+                 onEmergencyStarted?.invoke()
                  return@launch
             }
-            
+
+            val effectiveLat = locationService.currentLocation.value.latitude
+            val effectiveLng = locationService.currentLocation.value.longitude
+
+            // If interactive foreground UI and confirmation is configured for this Trusted Place, prompt user first
+            if (_isUiInForeground.value && shouldShowConfirmationDialog(effectiveLat, effectiveLng)) {
+                if (_showSosConfirmationDialog.value) return@launch // Prevent multiple dialogs
+                pendingSosConfirmationAction = {
+                    executeManualSos(onEmergencyStarted)
+                }
+                _showSosConfirmationDialog.value = true
+                return@launch
+            }
+
+            executeManualSos(onEmergencyStarted)
+        }
+    }
+
+    private fun executeManualSos(onEmergencyStarted: (() -> Unit)? = null) {
+        viewModelScope.launch {
             _sosWorkflowState.value = com.example.model.SosWorkflowState.IDLE
-            
-            initiateEmergencySequence(
+            val model = initiateEmergencySequence(
                 triggerSource = "MANUAL",
                 deviceId = "MOBILE-APP-SOS"
             )
-            
+            if (model != null) {
+                onEmergencyStarted?.invoke()
+            }
         }
     }
 
     fun triggerFallDetectedSOS() {
-        viewModelScope.launch {
-            val hwGps = deviceService.bleManager.latestHardwareGpsLocation.value
-            val isGpsValid = deviceService.bleManager.hardwareGpsState.value is com.example.ble.HardwareGpsState.ValidLocation && hwGps != null
-
-            val model = if (isGpsValid && hwGps != null) {
-                initiateEmergencySequence(
-                    triggerSource = "FALL_DETECTED",
-                    deviceId = "ESP32-SOS-BAND-81F4",
-                    lat = hwGps.latitude,
-                    lng = hwGps.longitude,
-                    accuracy = 3.0f
-                )
-            } else {
-                initiateEmergencySequence(
-                    triggerSource = "FALL_DETECTED",
-                    deviceId = "ESP32-SOS-BAND-81F4"
-                )
-            }
-
-            val reading = deviceService.bleManager.latestMpuReading.value
-            val magStr = if (reading != null) String.format(Locale.US, "%.2fg", reading.accelerationMagnitudeG) else "4.1G"
-
-            // Trigger AI Emergency Analysis for our new service as well
-            val analysis = AIAnalysisModel(
-                alertId = model.emergencyId,
-                confidenceScore = 98,
-                falseAlarmProbability = 2,
-                motionAnalysis = "CRITICAL_ACCELERATION_SPIKE_FOLLOWED_BY_HORIZONTAL_AXIS_SHIFT",
-                activityRecognition = "SUDDEN FALL DETECTED (STATIC LAYING)",
-                riskLevel = "CRITICAL",
-                suggestedAction = "ALERT ALL PRIMARY FAMILY CONTACTS AND LAUNCH COUNTY DISPATCH CODES",
-                timeline = listOf(
-                    AITimelineEvent("10:44:00 AM", "Impact Shock", "MPU6050 accelerometer spike ($magStr) logged.", "💥"),
-                    AITimelineEvent("10:44:05 AM", "Countdown Commenced", "Wearer unresponsive. 15-second countdown started.", "⏱️"),
-                    AITimelineEvent("10:44:20 AM", "Auto SOS Dispatch", "No cancel received. Dispatched emergency broadcast.", "🚨")
-                )
-            )
-            aiService.addAnalysisLog(analysis)
-
-            _uiEvents.emit(UiEvent.ShowToast("🚨 FALL DETECTED: AUTOMATIC SOS DISPATCHED!"))
-        }
+        emergencyProvider.triggerFallEmergency()
     }
 
     fun triggerVoiceSOS(matchedPhrase: String, confidence: Int) {
         viewModelScope.launch {
+            if (emergencyService.isEmergencyActive()) {
+                android.util.Log.d("GuardianViewModel", "Voice SOS ignored: emergency is already active or in countdown.")
+                return@launch
+            }
             val model = initiateEmergencySequence(
                 triggerSource = "VOICE_SOS",
                 deviceId = "MOBILE-VOICE-RECOGNIZE"
-            )
+            ) ?: return@launch
 
             val analysis = AIAnalysisModel(
                 alertId = model.emergencyId,
@@ -702,10 +761,20 @@ class GuardianViewModel @Inject constructor(
         viewModelScope.launch {
             when (command) {
                 is com.example.service.VoiceCommand.Sos -> {
-                    triggerVoiceSOS(command.matchedPhrase, confidence)
-                    val confirmationMsg = "🚨 Voice SOS: Countdown Initiated (\"${command.matchedPhrase}\")"
-                    _voiceCommandConfirmation.value = confirmationMsg
-                    _uiEvents.emit(UiEvent.ShowToast(confirmationMsg))
+                    val effectiveLat = locationService.currentLocation.value.latitude
+                    val effectiveLng = locationService.currentLocation.value.longitude
+
+                    // Apply confirmation dialog only if voice SOS is currently operating in the foreground UI
+                    if (_isUiInForeground.value && shouldShowConfirmationDialog(effectiveLat, effectiveLng)) {
+                        if (_showSosConfirmationDialog.value) return@launch // Prevent multiple dialogs
+                        pendingSosConfirmationAction = {
+                            executeVoiceSos(command.matchedPhrase, confidence, effectiveLat, effectiveLng)
+                        }
+                        _showSosConfirmationDialog.value = true
+                        return@launch
+                    }
+
+                    executeVoiceSos(command.matchedPhrase, confidence, effectiveLat, effectiveLng)
                 }
                 is com.example.service.VoiceCommand.CancelSos -> {
                     alarmVibratorService.stopAlarm()
@@ -739,6 +808,17 @@ class GuardianViewModel @Inject constructor(
                 is com.example.service.VoiceCommand.Unknown -> {
                     _voiceCommandConfirmation.value = "Recognized: \"${command.spokenText}\" (No actionable command matched)"
                 }
+            }
+        }
+    }
+
+    private fun executeVoiceSos(matchedPhrase: String, confidence: Int, effectiveLat: Double, effectiveLng: Double) {
+        viewModelScope.launch {
+            triggerVoiceSOS(matchedPhrase, confidence)
+            if (emergencyProvider.shouldSendSos(effectiveLat, effectiveLng)) {
+                val confirmationMsg = "🚨 Voice SOS: Countdown Initiated (\"$matchedPhrase\")"
+                _voiceCommandConfirmation.value = confirmationMsg
+                _uiEvents.emit(UiEvent.ShowToast(confirmationMsg))
             }
         }
     }
@@ -907,7 +987,7 @@ fun startVoiceRecognition(context: Context) {
             val model = initiateEmergencySequence(
                 triggerSource = triggerType,
                 deviceId = "ESP32-SOS-BAND-81F4"
-            )
+            ) ?: return@launch
 
             // Trigger AI Emergency Analysis
             aiAnalysisService.generateAnalysisForAlert(model.emergencyId, triggerType)
@@ -1185,6 +1265,13 @@ fun startVoiceRecognition(context: Context) {
     // --- MODULE 8: DEVELOPER LOGS ---
     val developerLogs: StateFlow<List<DeveloperLog>> = databaseService.developerLogs
 
+    val fallDebugEvents: StateFlow<List<com.example.ble.FallDebugEvent>> = com.example.ble.FallDebugBridge.events
+    val fallDebugStageStatus: StateFlow<Map<String, String>> = com.example.ble.FallDebugBridge.stageStatus
+
+    fun clearFallDebugEvents() {
+        com.example.ble.FallDebugBridge.clear()
+    }
+
     fun addDeveloperLog(event: String, status: String) {
         databaseService.addDeveloperLog(event, status)
     }
@@ -1260,12 +1347,6 @@ fun startVoiceRecognition(context: Context) {
         safetyTimerService.onTimerExpiredCallback = {
             triggerTimerSOS()
         }
-        fallDetectionService.onSosTriggeredCallback = {
-            triggerFallDetectedSOS()
-        }
-        voiceSosService.onVoiceSosTriggered = { matchedPhrase, confidence ->
-            triggerVoiceSOS(matchedPhrase, confidence)
-        }
         voiceSosService.onVoiceCommandRecognized = { command, confidence ->
             handleVoiceCommand(command, confidence)
         }
@@ -1275,6 +1356,11 @@ fun startVoiceRecognition(context: Context) {
         viewModelScope.launch {
             emergencyProvider.activeEmergencyState.collect { model ->
                 if (model != null) {
+                    if (model.status == "ACTIVE" || model.status == "COUNTDOWN") {
+                        _isSirenPlaying.value = emergencyProvider.shouldPlaySosAlarm(model.latitude, model.longitude)
+                    } else if (model.status == "MARKED_SAFE" || model.status == "RESOLVED" || model.status == "CANCELLED") {
+                        _isSirenPlaying.value = false
+                    }
                     val alert = _emergencySession.value.activeAlert ?: Alert(
                         id = model.emergencyId,
                         userId = model.userId,

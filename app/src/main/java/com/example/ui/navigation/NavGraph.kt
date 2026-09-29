@@ -5,6 +5,17 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.runtime.DisposableEffect
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -83,6 +94,61 @@ fun NavGraph(
     // Determine starting route depending on session availability
     val authState = viewModel.authState.value
     val startDestination = Screen.Splash.route
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.setUiForeground(true)
+            } else if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) {
+                viewModel.setUiForeground(false)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            viewModel.setUiForeground(false)
+        }
+    }
+
+    val showSosConfirmationDialog by viewModel.showSosConfirmationDialog.collectAsState()
+    if (showSosConfirmationDialog) {
+        AlertDialog(
+            onDismissRequest = { viewModel.cancelPendingSos() },
+            title = {
+                Text(
+                    text = "Confirm SOS",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text(
+                    text = "Are you sure you want to trigger an emergency SOS?",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = { viewModel.confirmPendingSos() },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text(
+                        text = "Confirm",
+                        color = MaterialTheme.colorScheme.onError,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { viewModel.cancelPendingSos() }
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 
     val fallState by viewModel.fallState.collectAsState()
     val fallCountdown by viewModel.fallCountdown.collectAsState()
@@ -418,7 +484,7 @@ fun NavGraph(
     if (fallState == "FALL_COUNTDOWN") {
         FallCountdownDialog(
             secondsLeft = fallCountdown,
-            onCancel = { viewModel.fallDetectionService.cancelFallCountdown() }
+            onCancel = { viewModel.cancelFallCountdown() }
         )
     }
 

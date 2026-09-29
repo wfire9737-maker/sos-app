@@ -159,7 +159,19 @@ class BleManager(private val context: Context) {
     private var isScanning = false
     private var autoReconnectEnabled = true
     private var reconnectAttempt = 0
+    private var servicesDiscoveryStarted = false
     private val handler = Handler(Looper.getMainLooper())
+
+    private fun startServiceDiscovery(gatt: BluetoothGatt) {
+        if (servicesDiscoveryStarted) return
+        servicesDiscoveryStarted = true
+        try {
+            Log.d("BleManager", "BLE: starting service discovery")
+            gatt.discoverServices()
+        } catch (e: SecurityException) {
+            Log.e("BleManager", "SecurityException discovering services", e)
+        }
+    }
 
     private val reconnectRunnable = Runnable {
         if (autoReconnectEnabled && _connectionState.value != BleState.CONNECTED && _connectionState.value != BleState.READY && !isScanning) {
@@ -213,15 +225,34 @@ class BleManager(private val context: Context) {
                     if (newState == BluetoothProfile.STATE_CONNECTED) {
                         Log.d("BleManager", "BLE: GATT connected")
                         reconnectAttempt = 0
+                        servicesDiscoveryStarted = false
                         _deviceName.value = gatt.device.name ?: BleProtocol.DEVICE_NAME
                         _deviceMac.value = gatt.device.address ?: "00:00:00:00:00:00"
                         _connectionState.value = BleState.DISCOVERING_SERVICES
                         _lastErrorMessage.value = null
                         handler.post {
                             try {
-                                gatt.discoverServices()
+                                Log.d("BleManager", "BLE: requesting MTU 512")
+                                Log.d("SOS_FALL_DEBUG", "BLE: requesting MTU 512")
+                                FallDebugBridge.log("BLE MTU", "Requesting MTU 512...")
+                                val mtuRequested = gatt.requestMtu(512)
+                                if (!mtuRequested) {
+                                    Log.w("BleManager", "BLE: requestMtu returned false, proceeding to discoverServices")
+                                    FallDebugBridge.log("BLE MTU", "requestMtu returned false, discovering services")
+                                    startServiceDiscovery(gatt)
+                                } else {
+                                    // Safety fallback in case onMtuChanged is delayed or not invoked by BLE stack
+                                    handler.postDelayed({
+                                        if (!servicesDiscoveryStarted && (_connectionState.value == BleState.DISCOVERING_SERVICES || _connectionState.value == BleState.CONNECTED)) {
+                                            Log.d("BleManager", "BLE: MTU negotiation timeout, proceeding to discoverServices")
+                                            FallDebugBridge.log("BLE MTU", "Timeout waiting for onMtuChanged, discovering services")
+                                            startServiceDiscovery(gatt)
+                                        }
+                                    }, 1000L)
+                                }
                             } catch (e: SecurityException) {
-                                Log.e("BleManager", "SecurityException discovering services", e)
+                                Log.e("BleManager", "SecurityException requesting MTU, falling back to discoverServices", e)
+                                startServiceDiscovery(gatt)
                             }
                         }
                     } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
@@ -410,6 +441,16 @@ class BleManager(private val context: Context) {
             handleCharacteristicNotification(characteristic.uuid, value)
         }
 
+        override fun onMtuChanged(gatt: BluetoothGatt, mtu: Int, status: Int) {
+            if (gatt != this@BleManager.gatt) return
+            Log.d("BleManager", "BLE: onMtuChanged mtu=$mtu status=$status")
+            Log.d("SOS_FALL_DEBUG", "BLE: onMtuChanged mtu=$mtu status=$status")
+            FallDebugBridge.log("BLE MTU", "Negotiated MTU=$mtu (status=$status)")
+            handler.post {
+                startServiceDiscovery(gatt)
+            }
+        }
+
         override fun onReadRemoteRssi(gatt: BluetoothGatt, rssi: Int, status: Int) {
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 _rssi.value = rssi
@@ -571,6 +612,13 @@ class BleManager(private val context: Context) {
     }
 
     private fun handleCharacteristicNotification(uuid: UUID, value: ByteArray) {
+        val rawText = parseStatusValue(value)
+        Log.d("SOS_FALL_DEBUG", "BLE notification received: uuid=$uuid, value=$rawText")
+        FallDebugBridge.log("BLE notification", "uuid=${uuid.toString().take(8)}... val=$rawText")
+        if (rawText.startsWith("MOTION_ALERT", ignoreCase = true)) {
+            Log.d("SOS_FALL_DEBUG", "MOTION_ALERT received: uuid=$uuid raw='$rawText'")
+            FallDebugBridge.log("MOTION_ALERT", "raw='$rawText'")
+        }
         when (uuid) {
             BleProtocol.STATUS_CHARACTERISTIC_UUID -> {
                 handleStatusNotification(value)
@@ -593,6 +641,10 @@ class BleManager(private val context: Context) {
         val text = parseStatusValue(value)
         _mpuRawString.value = text
         _lastMpuTimestamp.value = System.currentTimeMillis()
+
+        if (text.startsWith("MOTION_ALERT", ignoreCase = true)) {
+            Log.d("SOS_FALL_DEBUG", "MOTION_ALERT received on MPU characteristic: '$text'")
+        }
 
         val reading = Mpu6050Reading.parse(text)
         if (reading != null) {
@@ -739,6 +791,8 @@ class BleManager(private val context: Context) {
                 Log.e("BleManager", "Failed to parse P: $text", e)
             }
         } else if (text.startsWith("MOTION_ALERT:", ignoreCase = true)) {
+            Log.d("SOS_FALL_DEBUG", "MOTION_ALERT received")
+            FallDebugBridge.log("MOTION_ALERT", "Received: '$text'")
             try {
                 // Example: MOTION_ALERT:A:1234,-500,18000:G:450,-320,800
                 val parts = text.split(":")
@@ -770,14 +824,29 @@ class BleManager(private val context: Context) {
                         _mpuRawString.value = text
                         _lastMpuTimestamp.value = System.currentTimeMillis()
                         
+                        Log.d("SOS_FALL_DEBUG", "Parsed motion A=$ax,$ay,$az G=$gx,$gy,$gz")
+                        FallDebugBridge.log("Parsed motion", "A=$ax,$ay,$az G=$gx,$gy,$gz")
+                        Log.d("SOS_FALL_DEBUG", "Calling MotionProcessor.triggerHardwareFallEvent()")
+                        FallDebugBridge.log("Calling triggerHardwareFallEvent", "Invoking triggerHardwareFallEvent()")
                         // Pass abnormal motion event to existing architecture
                         motionProcessor.triggerHardwareFallEvent(reading)
                         _mpuHardwareState.value = MpuHardwareState.Receiving(reading, motionProcessor.motionState.value)
+                    } else {
+                        Log.d("SOS_FALL_DEBUG", "MOTION_ALERT parts insufficient: accel=${accelParts.size}, gyro=${gyroParts.size}")
+                        FallDebugBridge.log("MOTION_ALERT error", "Parts insufficient: accel=${accelParts.size}, gyro=${gyroParts.size}")
                     }
+                } else {
+                    Log.d("SOS_FALL_DEBUG", "MOTION_ALERT header invalid: parts.size=${parts.size}, text='$text'")
+                    FallDebugBridge.log("MOTION_ALERT error", "Header invalid: parts.size=${parts.size}")
                 }
             } catch (e: Exception) {
                 Log.e("BleManager", "Failed to parse MOTION_ALERT: $text", e)
+                Log.d("SOS_FALL_DEBUG", "Exception parsing MOTION_ALERT: ${e.message}")
+                FallDebugBridge.log("MOTION_ALERT error", "Exception: ${e.message}")
             }
+        } else if (text.startsWith("MOTION_ALERT", ignoreCase = true)) {
+            Log.d("SOS_FALL_DEBUG", "MOTION_ALERT received (no colon suffix): '$text'")
+            FallDebugBridge.log("MOTION_ALERT", "Received (no colon suffix): '$text'")
         }
     }
 
@@ -999,6 +1068,7 @@ class BleManager(private val context: Context) {
     }
 
     private fun disconnectGattInternal() {
+        servicesDiscoveryStarted = false
         val currentGatt = gatt
         gatt = null // clear immediately to prevent incoming callbacks
         try {

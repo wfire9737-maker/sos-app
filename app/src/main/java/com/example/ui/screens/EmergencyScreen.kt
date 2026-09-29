@@ -62,8 +62,8 @@ fun EmergencyScreen(
         // Just trigger the permissions, the background service will pick up the GPS location
     }
 
-    LaunchedEffect(countdown) {
-        if (countdown == null && activeEmergency != null) {
+    LaunchedEffect(countdown, activeEmergency?.status) {
+        if (countdown == null && activeEmergency != null && activeEmergency?.status != "COUNTDOWN") {
             permissionHandler()
         }
     }
@@ -171,6 +171,25 @@ fun EmergencyScreen(
                             fontSize = 16.sp,
                             color = MaterialTheme.colorScheme.onError.copy(alpha=0.8f)
                         )
+                    } else if (activeEmergency?.status == "COUNTDOWN") {
+                        Icon(
+                            Icons.Default.Timer,
+                            contentDescription = "Delayed SOS",
+                            modifier = Modifier.size(64.dp),
+                            tint = if (flashWarning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onError
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "SOS DELAYED",
+                            fontSize = 24.sp,
+                            fontWeight = FontWeight.Black,
+                            color = if (flashWarning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onError
+                        )
+                        Text(
+                            text = "Trusted Place delay in progress. Tap CANCEL to abort.",
+                            fontSize = 16.sp,
+                            color = if (flashWarning) MaterialTheme.colorScheme.error.copy(alpha=0.8f) else MaterialTheme.colorScheme.onError.copy(alpha=0.8f)
+                        )
                     } else {
                         Icon(
                             Icons.Default.Warning,
@@ -196,7 +215,7 @@ fun EmergencyScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            if (countdown == null) {
+            if (countdown == null && activeEmergency?.status != "COUNTDOWN") {
                 val lat = activeEmergency?.latitude ?: emergencySession.activeAlert?.latitude ?: 0.0
                 val lng = activeEmergency?.longitude ?: emergencySession.activeAlert?.longitude ?: 0.0
                 val accuracy = activeEmergency?.accuracy ?: 8.0f
@@ -233,7 +252,7 @@ fun EmergencyScreen(
                 }
             }
 
-            if (countdown == null) {
+            if (countdown == null && activeEmergency?.status != "COUNTDOWN") {
                 // Action Cards
                 Column(
                     modifier = Modifier
@@ -295,7 +314,7 @@ fun EmergencyScreen(
             
             Button(
                 onClick = { 
-                    if (countdown != null) {
+                    if (countdown != null || activeEmergency?.status == "COUNTDOWN") {
                         viewModel.cancelEmergencyWithPin("") { success -> 
                             if (success) onNavigateBack()
                         }

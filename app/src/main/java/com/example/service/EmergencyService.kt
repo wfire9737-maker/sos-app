@@ -61,7 +61,9 @@ class EmergencyService(
         customAltitude: Double? = null,
         customSpeed: Float? = null,
         customBearing: Float? = null,
-        locationSource: String = "PHONE_GPS"
+        locationSource: String = "PHONE_GPS",
+        skipPhoneCall: Boolean = false,
+        delaySosSeconds: Int = 0
     ): EmergencyModel {
         // Prevent duplicate SOS sessions
         _activeEmergency.value?.let {
@@ -97,7 +99,7 @@ class EmergencyService(
             triggerType = triggerType,
             aiConfidenceScore = if (triggerType == "FALL_DETECTED") 96 else 90,
             contactsNotified = databaseService.contacts.value.map { "${it.name} (${it.phone})" },
-            responderStatus = "COUNTDOWN ACTIVE",
+            responderStatus = if (delaySosSeconds > 0) "DELAYED (${delaySosSeconds}s)" else "COUNTDOWN ACTIVE",
             deviceId = deviceId,
             locationSource = locationSource
         )
@@ -105,6 +107,13 @@ class EmergencyService(
         _activeEmergency.value = pendingModel
         
         countdownJob = serviceScope.launch {
+            if (delaySosSeconds > 0) {
+                Log.d("EmergencyService", "TRUSTED PLACE DELAY: Waiting ${delaySosSeconds}s before starting SOS countdown")
+                databaseService.addDeveloperLog("TRUSTED_PLACE_DELAY: Waiting ${delaySosSeconds}s before SOS dispatch", "INFO")
+                delay(delaySosSeconds * 1000L)
+                Log.d("EmergencyService", "TRUSTED PLACE DELAY: Delay finished, starting 5s countdown")
+            }
+
             Log.d("SOS_ESP32", "SOS COUNTDOWN STARTED")
             for (i in 5 downTo 1) {
                 Log.d("SOS_ESP32", "SOS COUNTDOWN: $i")
@@ -134,35 +143,40 @@ class EmergencyService(
             startHighFrequencyLocationUpdates(emergencyId)
 
             // Independent Action: Call (Do not wait for slow GPS location!)
-            launch(Dispatchers.Main) {
-                val primaryContact = databaseService.contacts.value.firstOrNull()
-                val phoneToCall = primaryContact?.phone ?: "911"
-                databaseService.addDeveloperLog("CALL_REQUESTED: $phoneToCall (ID: $emergencyId)", "INFO")
+            if (skipPhoneCall) {
+                Log.d("EmergencyService", "CALL_SKIPPED: Automatic emergency phone call skipped due to Trusted Place setting (skipAutomaticPhoneCall=true)")
+                databaseService.addDeveloperLog("CALL_SKIPPED: Automatic phone call skipped by Trusted Place setting", "INFO")
+            } else {
+                launch(Dispatchers.Main) {
+                    val primaryContact = databaseService.contacts.value.firstOrNull()
+                    val phoneToCall = primaryContact?.phone ?: "911"
+                    databaseService.addDeveloperLog("CALL_REQUESTED: $phoneToCall (ID: $emergencyId)", "INFO")
 
-                if (lastCalledEmergencyId == emergencyId) {
-                    Log.w("EmergencyService", "Call already placed for emergency: $emergencyId")
-                } else {
-                    lastCalledEmergencyId = emergencyId
-                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED) {
-                        Log.d("EmergencyService", "CALL_REQUESTED: Attempting background dial to $phoneToCall")
-                        try {
-                            val telecomManager = context.getSystemService(Context.TELECOM_SERVICE) as? TelecomManager
-                            val uri = Uri.fromParts("tel", phoneToCall, null)
-                            if (telecomManager != null) {
-                                telecomManager.placeCall(uri, null)
-                                databaseService.addDeveloperLog("CALL_STARTED: tel:$phoneToCall via TelecomManager", "SUCCESS")
-                                Log.d("EmergencyService", "CALL_STARTED: Successfully placed call via TelecomManager.")
-                            } else {
-                                databaseService.addDeveloperLog("CALL_FAILED: TelecomManager.placeCall: TelecomManager is null", "ERROR")
-                                Log.e("EmergencyService", "CALL_FAILED: TelecomManager is null")
-                            }
-                        } catch (e: Exception) {
-                            databaseService.addDeveloperLog("CALL_FAILED: TelecomManager.placeCall: ${e.message}", "ERROR")
-                            Log.e("EmergencyService", "CALL_FAILED: TelecomManager.placeCall failed: ${e.message}")
-                        }
+                    if (lastCalledEmergencyId == emergencyId) {
+                        Log.w("EmergencyService", "Call already placed for emergency: $emergencyId")
                     } else {
-                        databaseService.addDeveloperLog("CALL_PERMISSION_DENIED: CALL_PHONE permission not granted", "ERROR")
-                        Log.w("EmergencyService", "CALL_PERMISSION_DENIED: Cannot place call.")
+                        lastCalledEmergencyId = emergencyId
+                        if (ContextCompat.checkSelfPermission(context, Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED) {
+                            Log.d("EmergencyService", "CALL_REQUESTED: Attempting background dial to $phoneToCall")
+                            try {
+                                val telecomManager = context.getSystemService(Context.TELECOM_SERVICE) as? TelecomManager
+                                val uri = Uri.fromParts("tel", phoneToCall, null)
+                                if (telecomManager != null) {
+                                    telecomManager.placeCall(uri, null)
+                                    databaseService.addDeveloperLog("CALL_STARTED: tel:$phoneToCall via TelecomManager", "SUCCESS")
+                                    Log.d("EmergencyService", "CALL_STARTED: Successfully placed call via TelecomManager.")
+                                } else {
+                                    databaseService.addDeveloperLog("CALL_FAILED: TelecomManager.placeCall: TelecomManager is null", "ERROR")
+                                    Log.e("EmergencyService", "CALL_FAILED: TelecomManager is null")
+                                }
+                            } catch (e: Exception) {
+                                databaseService.addDeveloperLog("CALL_FAILED: TelecomManager.placeCall: ${e.message}", "ERROR")
+                                Log.e("EmergencyService", "CALL_FAILED: TelecomManager.placeCall failed: ${e.message}")
+                            }
+                        } else {
+                            databaseService.addDeveloperLog("CALL_PERMISSION_DENIED: CALL_PHONE permission not granted", "ERROR")
+                            Log.w("EmergencyService", "CALL_PERMISSION_DENIED: Cannot place call.")
+                        }
                     }
                 }
             }

@@ -29,11 +29,16 @@ class FallDetectionService(
     // Callback when SOS is fully triggered via fall expiry
     var onSosTriggeredCallback: (() -> Unit)? = null
 
+    // Callback when fall countdown is cancelled by wearer
+    var onFallCancelledCallback: (() -> Unit)? = null
+
     init {
         // Standby monitoring initialized
     }
 
     fun triggerFall() {
+        Log.d("SOS_FALL_DEBUG", "FallDetectionService.triggerFall() entered")
+        com.example.ble.FallDebugBridge.log("FallDetectionService entered", "triggerFall() entered")
         setGaitState(
             "SUDDEN_FALL_DETECTED",
             "High impact IMU spike detected."
@@ -71,6 +76,7 @@ class FallDetectionService(
         )
         // Reset to standing
         _currentState.value = "STANDING"
+        onFallCancelledCallback?.invoke()
     }
 
     fun setGaitState(state: String, details: String) {

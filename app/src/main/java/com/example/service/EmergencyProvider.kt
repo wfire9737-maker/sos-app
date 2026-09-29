@@ -6,6 +6,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.SupervisorJob
 import com.example.model.EmergencyModel
+import com.example.model.TrustedPlace
 import kotlinx.coroutines.flow.StateFlow
 
 class EmergencyProvider(
@@ -16,7 +17,8 @@ class EmergencyProvider(
     private val aiService: AIService,
     private val alarmVibratorService: AlarmVibratorService,
     private val deviceService: DeviceService,
-    private val voiceSosService: VoiceSosService
+    private val voiceSosService: VoiceSosService,
+    private val trustedPlacesService: TrustedPlacesService
 ) {
     val activeEmergencyState: StateFlow<EmergencyModel?> = emergencyService.activeEmergency
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -63,10 +65,6 @@ class EmergencyProvider(
         scope.launch {
             voiceSosService.lastRecognizedCommand.collect { command ->
                 when (command) {
-                    is VoiceCommand.Sos -> {
-                        triggerEmergency(triggerSource = "VOICE_SOS", deviceId = "MOBILE-VOICE-RECOGNIZE")
-                        voiceSosService.clearLastRecognizedCommand()
-                    }
                     is VoiceCommand.CancelSos -> {
                         cancelEmergency("", "", "Voice SOS Cancelled")
                         voiceSosService.clearLastRecognizedCommand()
@@ -79,6 +77,86 @@ class EmergencyProvider(
 
 
     
+    fun getMatchedTrustedPlace(lat: Double, lng: Double): TrustedPlace? {
+        val results = FloatArray(1)
+        for (place in trustedPlacesService.trustedPlaces.value) {
+            android.location.Location.distanceBetween(lat, lng, place.latitude, place.longitude, results)
+            if (results[0] <= place.radius) return place
+        }
+        return null
+    }
+
+    fun shouldPlaySosAlarm(lat: Double? = null, lng: Double? = null): Boolean {
+        val isSoundEnabled = context.getSharedPreferences(
+            "smart_sos_settings",
+            Context.MODE_PRIVATE
+        ).getBoolean("sos_sound_enabled", true)
+
+        if (!isSoundEnabled) return false
+
+        val currentLat = lat ?: locationService.currentLocation.value.latitude
+        val currentLng = lng ?: locationService.currentLocation.value.longitude
+
+        val matchedPlace = getMatchedTrustedPlace(currentLat, currentLng)
+        if (matchedPlace != null && matchedPlace.reduceNotificationSound) {
+            android.util.Log.d("EmergencyProvider", "SOS Siren suppressed by Trusted Place: ${matchedPlace.name} (reduceNotificationSound=true)")
+            return false
+        }
+
+        return true
+    }
+
+    fun shouldSkipPhoneCall(lat: Double? = null, lng: Double? = null): Boolean {
+        val currentLat = lat ?: locationService.currentLocation.value.latitude
+        val currentLng = lng ?: locationService.currentLocation.value.longitude
+
+        val matchedPlace = getMatchedTrustedPlace(currentLat, currentLng)
+        if (matchedPlace != null && matchedPlace.skipAutomaticPhoneCall) {
+            android.util.Log.d("EmergencyProvider", "Automatic phone call skipped by Trusted Place: ${matchedPlace.name} (skipAutomaticPhoneCall=true)")
+            return true
+        }
+
+        return false
+    }
+
+    fun shouldSendSos(lat: Double? = null, lng: Double? = null): Boolean {
+        val currentLat = lat ?: locationService.currentLocation.value.latitude
+        val currentLng = lng ?: locationService.currentLocation.value.longitude
+
+        val matchedPlace = getMatchedTrustedPlace(currentLat, currentLng)
+        if (matchedPlace != null && !matchedPlace.alwaysSendSos) {
+            android.util.Log.d("EmergencyProvider", "Automatic SOS dispatch prevented by Trusted Place: ${matchedPlace.name} (alwaysSendSos=false)")
+            return false
+        }
+
+        return true
+    }
+
+    fun getDelaySosSeconds(lat: Double? = null, lng: Double? = null): Int {
+        val currentLat = lat ?: locationService.currentLocation.value.latitude
+        val currentLng = lng ?: locationService.currentLocation.value.longitude
+
+        val matchedPlace = getMatchedTrustedPlace(currentLat, currentLng)
+        if (matchedPlace != null && matchedPlace.delaySosSeconds > 0) {
+            android.util.Log.d("EmergencyProvider", "Trusted Place delay configured: ${matchedPlace.name} (${matchedPlace.delaySosSeconds}s)")
+            return matchedPlace.delaySosSeconds
+        }
+
+        return 0
+    }
+
+    fun shouldShowConfirmationDialog(lat: Double? = null, lng: Double? = null): Boolean {
+        val currentLat = lat ?: locationService.currentLocation.value.latitude
+        val currentLng = lng ?: locationService.currentLocation.value.longitude
+
+        val matchedPlace = getMatchedTrustedPlace(currentLat, currentLng)
+        // If alwaysSendSos is false, the SOS will be suppressed anyway, so do not show confirmation dialog
+        if (matchedPlace != null && !matchedPlace.alwaysSendSos) {
+            return false
+        }
+        return matchedPlace != null && matchedPlace.showConfirmationDialog
+    }
+
     fun triggerEmergency(
         triggerSource: String,
         deviceId: String = "MOBILE-APP-SOS",
@@ -91,10 +169,18 @@ class EmergencyProvider(
         locationSource: String = "PHONE_GPS"
     ) {
         scope.launch {
-            val isSoundEnabled = context.getSharedPreferences(
-                "smart_sos_settings",
-                Context.MODE_PRIVATE
-            ).getBoolean("sos_sound_enabled", true)
+            val effectiveLat = lat ?: locationService.currentLocation.value.latitude
+            val effectiveLng = lng ?: locationService.currentLocation.value.longitude
+
+            if (!shouldSendSos(effectiveLat, effectiveLng)) {
+                val matchedPlace = getMatchedTrustedPlace(effectiveLat, effectiveLng)
+                android.util.Log.d("EmergencyProvider", "SOS dispatch cancelled: Trusted Place ${matchedPlace?.name} has alwaysSendSos=false")
+                return@launch
+            }
+
+            val isSoundAllowed = shouldPlaySosAlarm(effectiveLat, effectiveLng)
+            val skipCall = shouldSkipPhoneCall(effectiveLat, effectiveLng)
+            val delaySeconds = getDelaySosSeconds(effectiveLat, effectiveLng)
 
             val isVibrationEnabled = context.getSharedPreferences(
                 "smart_sos_settings",
@@ -102,10 +188,11 @@ class EmergencyProvider(
             ).getBoolean("sos_vibration_enabled", true)
 
             if (isEmergencyInProgress()) {
-                emergencyService.activeEmergency.value?.let { model ->
+                val model = emergencyService.activeEmergency.value
+                if (model != null && model.status != "COUNTDOWN") {
                     emergencyService.notifyEmergencyContacts(model, isUpdate = true)
                 }
-                if (isSoundEnabled) {
+                if (isSoundAllowed) {
                     alarmVibratorService.startAlarm()
                 }
                 if (isVibrationEnabled) {
@@ -119,8 +206,8 @@ class EmergencyProvider(
             val userName = user?.name ?: "Marcus Vance"
             val userPhone = user?.phone ?: "+1-555-0143"
 
-            // Trigger alarm conditionally based on sos_sound_enabled setting
-            if (isSoundEnabled) {
+            // Trigger alarm conditionally based on sos_sound_enabled and Trusted Place settings
+            if (isSoundAllowed) {
                 alarmVibratorService.startAlarm()
             }
             if (isVibrationEnabled) {
@@ -139,7 +226,9 @@ class EmergencyProvider(
                 customAltitude = altitude,
                 customSpeed = speed,
                 customBearing = bearing,
-                locationSource = locationSource
+                locationSource = locationSource,
+                skipPhoneCall = skipCall,
+                delaySosSeconds = delaySeconds
             )
 
             // Trigger AI Emergency Analysis
@@ -159,6 +248,31 @@ class EmergencyProvider(
         }
     }
 
+    fun triggerFallEmergency() {
+        val hwGps = deviceService.bleManager.latestHardwareGpsLocation.value
+        val isGpsValid = deviceService.bleManager.hardwareGpsState.value is com.example.ble.HardwareGpsState.ValidLocation && hwGps != null
+
+        if (isGpsValid && hwGps != null) {
+            triggerEmergency(
+                triggerSource = "FALL_DETECTED",
+                deviceId = "ESP32-SOS-BAND-81F4",
+                lat = hwGps.latitude,
+                lng = hwGps.longitude,
+                accuracy = 3.0f,
+                locationSource = "ESP32_NEO6M"
+            )
+        } else {
+            triggerEmergency(
+                triggerSource = "FALL_DETECTED",
+                deviceId = "ESP32-SOS-BAND-81F4",
+                lat = null,
+                lng = null,
+                accuracy = null,
+                locationSource = "PHONE_GPS"
+            )
+        }
+    }
+
     fun isEmergencyInProgress(): Boolean {
         return emergencyService.isEmergencyActive()
     }
@@ -175,7 +289,19 @@ class EmergencyProvider(
         altitude: Double? = null,
         speed: Float? = null,
         bearing: Float? = null
-    ): EmergencyModel {
+    ): EmergencyModel? {
+        val effectiveLat = lat ?: locationService.currentLocation.value.latitude
+        val effectiveLng = lng ?: locationService.currentLocation.value.longitude
+
+        if (!shouldSendSos(effectiveLat, effectiveLng)) {
+            val matchedPlace = getMatchedTrustedPlace(effectiveLat, effectiveLng)
+            android.util.Log.d("EmergencyProvider", "Automatic SOS dispatch prevented by Trusted Place: ${matchedPlace?.name} (alwaysSendSos=false)")
+            return null
+        }
+
+        val skipCall = shouldSkipPhoneCall(effectiveLat, effectiveLng)
+        val delaySeconds = getDelaySosSeconds(effectiveLat, effectiveLng)
+
         return emergencyService.startEmergency(
             userId = userId,
             userName = userName,
@@ -187,15 +313,24 @@ class EmergencyProvider(
             customAccuracy = accuracy,
             customAltitude = altitude,
             customSpeed = speed,
-            customBearing = bearing
+            customBearing = bearing,
+            skipPhoneCall = skipCall,
+            delaySosSeconds = delaySeconds
         )
     }
 
     suspend fun cancelEmergency(pin: String, expectedPin: String, reason: String): Boolean {
-        return emergencyService.cancelEmergencyWithPin(pin, expectedPin, reason)
+        val success = emergencyService.cancelEmergencyWithPin(pin, expectedPin, reason)
+        if (success) {
+            alarmVibratorService.stopAlarm()
+            alarmVibratorService.stopVibration()
+        }
+        return success
     }
 
     fun markEmergencySafe() {
         emergencyService.markSafeAndClose()
+        alarmVibratorService.stopAlarm()
+        alarmVibratorService.stopVibration()
     }
 }

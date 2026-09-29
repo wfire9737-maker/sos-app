@@ -26,6 +26,9 @@ class BleForegroundService : Service() {
     @Inject
     lateinit var emergencyProvider: EmergencyProvider
 
+    @Inject
+    lateinit var fallDetectionService: FallDetectionService
+
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var stateObserverJob: Job? = null
 
@@ -68,6 +71,7 @@ class BleForegroundService : Service() {
         super.onCreate()
         Log.d("BleForegroundService", "BLE_SERVICE: started")
         createNotificationChannel()
+        setupFallDetection()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -83,6 +87,7 @@ class BleForegroundService : Service() {
 
         startForegroundWithNotification("Initializing ESP32 SOS monitoring...")
         deviceService.startEsp32Polling()
+        setupFallDetection()
         observeBleConnectionState()
 
         return START_STICKY
@@ -92,6 +97,41 @@ class BleForegroundService : Service() {
         super.onTaskRemoved(rootIntent)
         Log.d("BleForegroundService", "App task removed from Recents; maintaining BLE foreground service.")
         deviceService.startEsp32Polling()
+        setupFallDetection()
+    }
+
+    private fun setupFallDetection() {
+        deviceService.bleManager.motionProcessor.onPossibleFallDetected = { reading, eventId ->
+            Log.d("BleForegroundService", "MOTION: possible fall detected from MPU6050 event $eventId (MAG=${reading.accelerationMagnitudeG}g)")
+            val isFallEnabled = getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE)
+                .getBoolean("fall_detection_enabled", true)
+            val emergencyActive = emergencyProvider.emergencyService.isEmergencyActive()
+            val fallState = fallDetectionService.currentState.value
+
+            Log.d("SOS_FALL_DEBUG", "fallDetectionEnabled=$isFallEnabled")
+            com.example.ble.FallDebugBridge.log("Fall enabled", "$isFallEnabled")
+            Log.d("SOS_FALL_DEBUG", "emergencyActive=$emergencyActive")
+            com.example.ble.FallDebugBridge.log("Emergency active", "$emergencyActive")
+            Log.d("SOS_FALL_DEBUG", "fallState=$fallState")
+            com.example.ble.FallDebugBridge.log("Fall state", "$fallState")
+
+            if (isFallEnabled && !emergencyActive && fallState != "FALL_COUNTDOWN") {
+                Log.d("SOS_FALL_DEBUG", "Calling FallDetectionService.triggerFall()")
+                com.example.ble.FallDebugBridge.log("Calling triggerFall", "Invoking triggerFall()")
+                fallDetectionService.triggerFall()
+            } else {
+                Log.d("SOS_FALL_DEBUG", "Fall trigger blocked: isFallEnabled=$isFallEnabled, emergencyActive=$emergencyActive, fallState=$fallState")
+                com.example.ble.FallDebugBridge.log("Calling triggerFall", "BLOCKED (enabled=$isFallEnabled, emergencyActive=$emergencyActive, state=$fallState)")
+            }
+        }
+
+        fallDetectionService.onFallCancelledCallback = {
+            deviceService.bleManager.motionProcessor.resetToNormal()
+        }
+
+        fallDetectionService.onSosTriggeredCallback = {
+            emergencyProvider.triggerFallEmergency()
+        }
     }
 
     private fun observeBleConnectionState() {

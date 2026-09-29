@@ -157,12 +157,16 @@ class MotionProcessor(
      * Bypasses the local state machine and directly enters POSSIBLE_FALL state.
      */
     fun triggerHardwareFallEvent(reading: Mpu6050Reading) {
+        Log.d("SOS_FALL_DEBUG", "MotionProcessor hardware fall event received")
+        FallDebugBridge.log("MotionProcessor", "Hardware fall event received")
         val now = System.currentTimeMillis()
         val eventId = "FALL_ESP32_${fallEventCounter.incrementAndGet()}_${now}"
         _motionState.value = MotionState.POSSIBLE_FALL
         Log.d(TAG, "MOTION: ESP32 hardware motion alert received (Event ID: $eventId)")
         inCooldown = true
         lastFallEventTimestamp = now
+        Log.d("SOS_FALL_DEBUG", "onPossibleFallDetected invoked for event $eventId (callback is ${if (onPossibleFallDetected != null) "SET" else "NULL"})")
+        FallDebugBridge.log("Possible fall callback", "Invoked event=$eventId (callback ${if (onPossibleFallDetected != null) "SET" else "NULL"})")
         onPossibleFallDetected?.invoke(reading, eventId)
     }
 
@@ -189,5 +193,31 @@ class MotionProcessor(
             ringBuffer.clear()
             _recentReadings.value = emptyList()
         }
+    }
+}
+
+data class FallDebugEvent(
+    val timestamp: String,
+    val stage: String,
+    val message: String
+)
+
+object FallDebugBridge {
+    private val _events = MutableStateFlow<List<FallDebugEvent>>(emptyList())
+    val events: StateFlow<List<FallDebugEvent>> = _events.asStateFlow()
+
+    private val _stageStatus = MutableStateFlow<Map<String, String>>(emptyMap())
+    val stageStatus: StateFlow<Map<String, String>> = _stageStatus.asStateFlow()
+
+    fun log(stage: String, message: String) {
+        val time = java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.getDefault()).format(java.util.Date())
+        val newEvent = FallDebugEvent(time, stage, message)
+        _events.value = (_events.value + newEvent).takeLast(100)
+        _stageStatus.value = _stageStatus.value + (stage to message)
+    }
+
+    fun clear() {
+        _events.value = emptyList()
+        _stageStatus.value = emptyMap()
     }
 }

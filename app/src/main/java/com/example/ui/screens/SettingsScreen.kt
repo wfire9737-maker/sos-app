@@ -5,6 +5,9 @@ import androidx.compose.foundation.layout.*
 import com.example.utils.hasBluetoothAdvertisePermission
 import com.example.utils.hasPostNotificationsPermission
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -72,10 +75,12 @@ fun SettingsScreen(
     var tempPhrase by remember { mutableStateOf("") }
     val sosSoundEnabled by viewModel.sosSoundEnabled.collectAsState()
     val sosVibrationEnabled by viewModel.sosVibrationEnabled.collectAsState()
+    val fallDetectionEnabled by viewModel.fallDetectionEnabled.collectAsState()
     
     var showLogoutDialog by remember { mutableStateOf(false) }
     var showLanguageDialog by remember { mutableStateOf(false) }
     var showDeveloperWarningDialog by remember { mutableStateOf(false) }
+    var showFallDebugDialog by remember { mutableStateOf(false) }
 
     val nearbyPermissions = mutableListOf<String>()
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -258,11 +263,24 @@ fun SettingsScreen(
 
             item {
                 SettingsSection(title = "Device Settings") {
-                    SettingsItem(
+                    SettingsSwitchItem(
                         icon = Icons.AutoMirrored.Filled.DirectionsRun,
+                        title = "Fall Detection",
+                        subtitle = if (fallDetectionEnabled) "Automatic fall detection enabled via MPU6050" else "Fall detection disabled",
+                        checked = fallDetectionEnabled,
+                        onCheckedChange = { enabled -> viewModel.setFallDetectionEnabled(enabled) }
+                    )
+                    SettingsItem(
+                        icon = Icons.Default.Tune,
                         title = "Fall Detection Calibration",
                         subtitle = "Configure sensitivity for MPU6050",
                         onClick = onNavigateToFallDetection
+                    )
+                    SettingsItem(
+                        icon = Icons.Default.Build,
+                        title = "Fall Detection Debug",
+                        subtitle = "Live ESP32 MOTION_ALERT & fall pipeline tracing",
+                        onClick = { showFallDebugDialog = true }
                     )
                     SettingsItem(
                         icon = Icons.Default.Lock,
@@ -500,6 +518,171 @@ fun SettingsScreen(
             dismissButton = {
                 TextButton(onClick = { showDeveloperWarningDialog = false }) {
                     Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (showFallDebugDialog) {
+        val debugEvents by viewModel.fallDebugEvents.collectAsState()
+        val stageStatus by viewModel.fallDebugStageStatus.collectAsState()
+        val listState = rememberLazyListState()
+
+        LaunchedEffect(debugEvents.size) {
+            if (debugEvents.isNotEmpty()) {
+                listState.animateScrollToItem(debugEvents.size - 1)
+            }
+        }
+
+        AlertDialog(
+            onDismissRequest = { showFallDebugDialog = false },
+            title = {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("FALL DETECTION DEBUG", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    IconButton(onClick = { showFallDebugDialog = false }) {
+                        Icon(Icons.Default.Close, contentDescription = "Close")
+                    }
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 480.dp)
+                ) {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(8.dp)) {
+                            val stages = listOf(
+                                "BLE MTU",
+                                "BLE notification",
+                                "MOTION_ALERT",
+                                "Parsed motion",
+                                "MotionProcessor",
+                                "Possible fall callback",
+                                "Fall enabled",
+                                "Emergency active",
+                                "Fall state",
+                                "Calling triggerFall",
+                                "FallDetectionService entered"
+                            )
+                            stages.forEach { stageName ->
+                                val status = stageStatus[stageName]
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "$stageName:",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = if (status != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Text(
+                                        text = status ?: "Waiting...",
+                                        fontSize = 11.sp,
+                                        fontWeight = if (status != null) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (status != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                                        maxLines = 1,
+                                        modifier = Modifier.weight(1.3f)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Live Events (${debugEvents.size})", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        TextButton(
+                            onClick = { viewModel.clearFallDebugEvents() },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Text("Clear", fontSize = 11.sp)
+                        }
+                    }
+
+                    if (debugEvents.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(120.dp)
+                                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(8.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                "No events yet.\nWaiting for ESP32 notifications...",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.outline,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
+                        }
+                    } else {
+                        LazyColumn(
+                            state = listState,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 200.dp)
+                                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(8.dp))
+                                .padding(6.dp)
+                        ) {
+                            items(debugEvents) { event ->
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 2.dp)
+                                ) {
+                                    Row {
+                                        Text(
+                                            text = "[${event.timestamp}]",
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = event.stage,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.secondary
+                                        )
+                                    }
+                                    Text(
+                                        text = event.message,
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.padding(start = 4.dp)
+                                    )
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(top = 2.dp),
+                                        thickness = 0.5.dp,
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showFallDebugDialog = false }) {
+                    Text("Close")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.clearFallDebugEvents() }) {
+                    Text("Clear")
                 }
             }
         )

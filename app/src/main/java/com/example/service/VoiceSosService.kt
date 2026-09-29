@@ -373,7 +373,6 @@ class VoiceSosService(
                     _speechStatusMessage.value = "Recognized Command: \"$matchedPhrase\" (Emergency SOS)"
                     addActivationLog(matchedPhrase, confidence, 85f, true)
                     onVoiceCommandRecognized?.invoke(command, confidence)
-                    onVoiceSosTriggered?.invoke(matchedPhrase, confidence)
                     return
                 }
             }

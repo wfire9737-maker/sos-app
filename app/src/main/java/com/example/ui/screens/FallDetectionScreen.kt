@@ -47,7 +47,7 @@ fun FallDetectionScreen(
     if (currentState == "FALL_COUNTDOWN") {
         FallCountdownDialog(
             secondsLeft = countdownSeconds,
-            onCancel = { viewModel.fallDetectionService.cancelFallCountdown() }
+            onCancel = { viewModel.cancelFallCountdown() }
         )
     }
 

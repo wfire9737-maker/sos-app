@@ -149,8 +149,19 @@ object AppModule {
         aiService: AIService,
         alarmVibratorService: AlarmVibratorService,
         deviceService: DeviceService,
-        voiceSosService: VoiceSosService
-    ): EmergencyProvider = EmergencyProvider(context, emergencyService, authService, locationService, aiService, alarmVibratorService, deviceService, voiceSosService)
+        voiceSosService: VoiceSosService,
+        trustedPlacesService: TrustedPlacesService
+    ): EmergencyProvider = EmergencyProvider(
+        context,
+        emergencyService,
+        authService,
+        locationService,
+        aiService,
+        alarmVibratorService,
+        deviceService,
+        voiceSosService,
+        trustedPlacesService
+    )
 
     @Provides
     @Singleton

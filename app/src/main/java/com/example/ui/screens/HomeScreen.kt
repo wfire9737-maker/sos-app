@@ -53,8 +53,9 @@ fun HomeScreen(
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val sosTriggerHandler = rememberLocationPermissionHandler {
-        viewModel.triggerManualSOS()
-        onNavigateToEmergency()
+        viewModel.triggerManualSOS {
+            onNavigateToEmergency()
+        }
     }
     
     val authState by viewModel.authState.collectAsState()

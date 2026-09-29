@@ -2,16 +2,16 @@ package com.example.service
 
 import android.content.Context
 import android.media.AudioAttributes
-import android.media.Ringtone
-import android.media.RingtoneManager
+import android.media.MediaPlayer
 import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.util.Log
+import com.example.R
 
 class AlarmVibratorService(private val context: Context) {
-    private var ringtone: Ringtone? = null
+    private var mediaPlayer: MediaPlayer? = null
     private var vibrator: Vibrator? = null
     private var isVibrating = false
 
@@ -35,32 +35,24 @@ class AlarmVibratorService(private val context: Context) {
 
     fun startAlarm() {
         try {
-            if (ringtone == null) {
-                var alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-                if (alarmUri == null) {
-                    alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
-                }
-                if (alarmUri == null) {
-                    alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-                }
-                
-                ringtone = RingtoneManager.getRingtone(context, alarmUri)
-                
-                // Set audio attributes to use the Alarm stream
-                ringtone?.let {
+            if (mediaPlayer == null) {
+                mediaPlayer = MediaPlayer.create(context, R.raw.sos_emergency_siren)?.apply {
                     val attributes = AudioAttributes.Builder()
                         .setUsage(AudioAttributes.USAGE_ALARM)
                         .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                         .build()
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                        it.audioAttributes = attributes
-                    }
+                    setAudioAttributes(attributes)
+                    isLooping = true
                 }
             }
 
-            if (ringtone?.isPlaying == false) {
-                ringtone?.play()
-                Log.d("AlarmVibratorService", "Emergency Alarm Started")
+            mediaPlayer?.let { player ->
+                if (!player.isPlaying) {
+                    player.start()
+                    Log.d("AlarmVibratorService", "Custom SOS emergency siren started (looping)")
+                }
+            } ?: run {
+                Log.e("AlarmVibratorService", "Failed to initialize MediaPlayer for sos_emergency_siren")
             }
         } catch (e: Exception) {
             Log.e("AlarmVibratorService", "Failed to play emergency alarm: ${e.message}")
@@ -69,14 +61,20 @@ class AlarmVibratorService(private val context: Context) {
 
     fun stopAlarm() {
         try {
-            ringtone?.let {
-                if (it.isPlaying) {
-                    it.stop()
-                    Log.d("AlarmVibratorService", "Emergency Alarm Stopped")
+            mediaPlayer?.let { player ->
+                if (player.isPlaying) {
+                    player.stop()
                 }
+                player.release()
+                Log.d("AlarmVibratorService", "Emergency Alarm Stopped and MediaPlayer released")
             }
+            mediaPlayer = null
         } catch (e: Exception) {
             Log.e("AlarmVibratorService", "Failed to stop alarm: ${e.message}")
+            try {
+                mediaPlayer?.release()
+            } catch (_: Exception) {}
+            mediaPlayer = null
         }
     }
 
