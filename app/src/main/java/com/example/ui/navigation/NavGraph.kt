@@ -54,9 +54,6 @@ import androidx.compose.ui.Modifier
 import com.example.ui.screens.SafeCheckInScreen
 import com.example.ui.screens.PermissionsScreen
 import com.example.ui.screens.AboutScreen
-import com.example.ui.screens.DeveloperDashboardScreen
-import com.example.ui.screens.AIScreen
-import com.example.ui.screens.FallDetectionScreen
 import com.example.ui.screens.VoiceSosScreen
 import com.example.ui.screens.SafetyTimerScreen
 
@@ -340,18 +337,12 @@ fun NavGraph(
                 viewModel = viewModel,
                 onNavigateBack = { navController.navigateUp() },
                 onNavigateToSecurity = { navController.navigate(Screen.Security.route) },
-                onNavigateToFallDetection = { navController.navigate(Screen.FallDetection.route) },
-                onNavigateToAnalytics = { navController.navigate(Screen.Analytics.route) },
                 onNavigateToVoiceSos = { navController.navigate(Screen.VoiceSos.route) },
                 onNavigateToSafetyTimer = { navController.navigate(Screen.SafetyTimer.route) },
-                onNavigateToMap = { navController.navigate(Screen.Map.route) },
-                onNavigateToQRCode = { navController.navigate(Screen.QRCode.route) },
                 onNavigateToHelpFaq = { navController.navigate(Screen.HelpFaq.route) },
-                onNavigateToAiScreen = { navController.navigate(Screen.AiScreen.route) },
                 onNavigateToTrustedPlaces = { navController.navigate(Screen.TrustedPlaces.route) },
                 onNavigateToPermissions = { navController.navigate(Screen.Permissions.route) },
-                onNavigateToAbout = { navController.navigate(Screen.About.route) },
-                onNavigateToDeveloperDashboard = { navController.navigate(Screen.DeveloperDashboard.route) }
+                onNavigateToAbout = { navController.navigate(Screen.About.route) }
             )
         }
         composable(Screen.Security.route) {
@@ -372,18 +363,6 @@ fun NavGraph(
                 onNavigateBack = { navController.navigateUp() }
             )
         }
-        composable(Screen.AiScreen.route) {
-            AIScreen(
-                viewModel = viewModel,
-                onNavigateBack = { navController.navigateUp() }
-            )
-        }
-        composable(Screen.FallDetection.route) {
-            FallDetectionScreen(
-                viewModel = viewModel,
-                onNavigateBack = { navController.navigateUp() }
-            )
-        }
         composable(Screen.VoiceSos.route) {
             VoiceSosScreen(
                 viewModel = viewModel,
@@ -392,12 +371,6 @@ fun NavGraph(
         }
         composable(Screen.SafetyTimer.route) {
             SafetyTimerScreen(
-                viewModel = viewModel,
-                onNavigateBack = { navController.navigateUp() }
-            )
-        }
-        composable(Screen.QRCode.route) {
-            com.example.ui.screens.QRCodeScreen(
                 viewModel = viewModel,
                 onNavigateBack = { navController.navigateUp() }
             )
@@ -422,13 +395,6 @@ fun NavGraph(
         }
         composable(Screen.About.route) {
             AboutScreen(
-                viewModel = viewModel,
-                onNavigateBack = { navController.navigateUp() }
-            )
-
-        }
-        composable(Screen.DeveloperDashboard.route) {
-            DeveloperDashboardScreen(
                 viewModel = viewModel,
                 onNavigateBack = { navController.navigateUp() }
             )

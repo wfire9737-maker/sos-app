@@ -39,23 +39,15 @@ fun SettingsScreen(
     viewModel: GuardianViewModel,
     onNavigateBack: () -> Unit,
     onNavigateToSecurity: () -> Unit,
-    onNavigateToFallDetection: () -> Unit = {},
-    onNavigateToAnalytics: () -> Unit = {},
     onNavigateToVoiceSos: () -> Unit = {},
     onNavigateToSafetyTimer: () -> Unit = {},
-    onNavigateToMap: () -> Unit = {},
-    onNavigateToQRCode: () -> Unit = {},
     onNavigateToHelpFaq: () -> Unit = {},
-    onNavigateToAiScreen: () -> Unit = {},
     onNavigateToTrustedPlaces: () -> Unit = {},
     onNavigateToPermissions: () -> Unit = {},
-    onNavigateToAbout: () -> Unit = {},
-    onNavigateToDeveloperDashboard: () -> Unit = {}
+    onNavigateToAbout: () -> Unit = {}
 ) {
     val themeMode by viewModel.themeMode.collectAsState()
     val highContrast by viewModel.highContrast.collectAsState()
-    val developerModeEnabled by viewModel.developerModeEnabled.collectAsState()
-    val language by viewModel.language.collectAsState()
     val notificationsEnabled by viewModel.criticalAlarmsEnabled.collectAsState()
     val voiceSosEnabled by viewModel.voiceSosEnabled.collectAsState()
     val voiceState by viewModel.voiceSosService.voiceState.collectAsState()
@@ -78,8 +70,6 @@ fun SettingsScreen(
     val fallDetectionEnabled by viewModel.fallDetectionEnabled.collectAsState()
     
     var showLogoutDialog by remember { mutableStateOf(false) }
-    var showLanguageDialog by remember { mutableStateOf(false) }
-    var showDeveloperWarningDialog by remember { mutableStateOf(false) }
     var showFallDebugDialog by remember { mutableStateOf(false) }
 
     val nearbyPermissions = mutableListOf<String>()
@@ -145,12 +135,6 @@ fun SettingsScreen(
                         title = "Trusted Places",
                         subtitle = "Manage your safe zones",
                         onClick = onNavigateToTrustedPlaces
-                    )
-                    SettingsItem(
-                        icon = Icons.Default.QrCode,
-                        title = "Medical QR Code",
-                        subtitle = "View and share your medical information",
-                        onClick = onNavigateToQRCode
                     )
                 }
             }
@@ -246,18 +230,6 @@ fun SettingsScreen(
                         subtitle = "Set up countdown safety timers",
                         onClick = onNavigateToSafetyTimer
                     )
-                    SettingsItem(
-                        icon = Icons.Default.Map,
-                        title = "Live Tracking Map",
-                        subtitle = "View current location and responders",
-                        onClick = onNavigateToMap
-                    )
-                    SettingsItem(
-                        icon = Icons.Default.SmartToy,
-                        title = "AI Assistant",
-                        subtitle = "Interact with AI Emergency Dashboard",
-                        onClick = onNavigateToAiScreen
-                    )
                 }
             }
 
@@ -271,12 +243,6 @@ fun SettingsScreen(
                         onCheckedChange = { enabled -> viewModel.setFallDetectionEnabled(enabled) }
                     )
                     SettingsItem(
-                        icon = Icons.Default.Tune,
-                        title = "Fall Detection Calibration",
-                        subtitle = "Configure sensitivity for MPU6050",
-                        onClick = onNavigateToFallDetection
-                    )
-                    SettingsItem(
                         icon = Icons.Default.Build,
                         title = "Fall Detection Debug",
                         subtitle = "Live ESP32 MOTION_ALERT & fall pipeline tracing",
@@ -287,12 +253,6 @@ fun SettingsScreen(
                         title = "Permissions",
                         subtitle = "Manage app permissions",
                         onClick = onNavigateToPermissions
-                    )
-                    SettingsItem(
-                        icon = Icons.Default.Analytics,
-                        title = "System Analytics",
-                        subtitle = "View battery health and connectivity stats",
-                        onClick = onNavigateToAnalytics
                     )
                 }
             }
@@ -333,26 +293,6 @@ fun SettingsScreen(
                         subtitle = "Alert sounds and haptics",
                         checked = notificationsEnabled,
                         onCheckedChange = { enabled -> viewModel.setCriticalAlarmsEnabled(enabled) }
-                    )
-                    SettingsItem(
-                        icon = Icons.Default.Language,
-                        title = "Language",
-                        subtitle = when(language) { "en" -> "English (US)"; "es" -> "Español"; "fr" -> "Français"; else -> language },
-                        onClick = { showLanguageDialog = true }
-                    )
-                    
-                    SettingsSwitchItem(
-                        icon = Icons.Default.Build,
-                        title = "Developer Mode",
-                        subtitle = "Enable advanced testing tools",
-                        checked = developerModeEnabled,
-                        onCheckedChange = { enabled -> 
-                            if (enabled) {
-                                showDeveloperWarningDialog = true
-                            } else {
-                                viewModel.setDeveloperModeEnabled(false)
-                            }
-                        }
                     )
                     SettingsItem(
                         icon = Icons.Default.Info,
@@ -443,41 +383,6 @@ fun SettingsScreen(
             }
         )
     }
-    if (showLanguageDialog) {
-        AlertDialog(
-            onDismissRequest = { showLanguageDialog = false },
-            title = { Text("Select Language") },
-            text = {
-                Column {
-                    listOf("en" to "English (US)", "es" to "Español", "fr" to "Français").forEach { (code, name) ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    viewModel.setLanguage(code)
-                                    showLanguageDialog = false
-                                }
-                                .padding(vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            RadioButton(
-                                selected = language == code,
-                                onClick = {
-                                    viewModel.setLanguage(code)
-                                    showLanguageDialog = false
-                                }
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(name)
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { showLanguageDialog = false }) { Text("Close") }
-            }
-        )
-    }
 
     if (showLogoutDialog) {
         AlertDialog(
@@ -497,28 +402,6 @@ fun SettingsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showLogoutDialog = false }) { Text("Cancel") }
-            }
-        )
-    }
-    if (showDeveloperWarningDialog) {
-        AlertDialog(
-            onDismissRequest = { showDeveloperWarningDialog = false },
-            title = { Text("Developer Mode") },
-            text = { Text("Warning: Developer mode is intended for testing purposes only and may affect app stability.") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        viewModel.setDeveloperModeEnabled(true)
-                        showDeveloperWarningDialog = false
-                    }
-                ) {
-                    Text("Enable")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeveloperWarningDialog = false }) {
-                    Text("Cancel")
-                }
             }
         )
     }
