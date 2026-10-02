@@ -65,6 +65,7 @@ class DatabaseService(private val context: Context, private val authService: Aut
 
     private val sharedPrefs: SharedPreferences = context.getSharedPreferences("guardian_sos_database", Context.MODE_PRIVATE)
     private var firestoreListener: ListenerRegistration? = null
+    private var devicesFirestoreListener: ListenerRegistration? = null
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     val isDemoMode: Boolean
@@ -95,53 +96,27 @@ class DatabaseService(private val context: Context, private val authService: Aut
     private fun loadData() {
         val fs = firestore
         if (fs != null) {
-            // Setup real-time Firestore synchronization for Alerts
-            firestoreListener?.remove()
-            firestoreListener = fs.collection("alerts")
-                .orderBy("timestamp", Query.Direction.DESCENDING)
-                .limit(100)
-                .addSnapshotListener { snapshot, e ->
-                    if (e != null) {
-                        Log.e("DatabaseService", "Listen failed.", e)
-                        loadLocalAlerts() // Fallback
-                        return@addSnapshotListener
-                    }
-                    if (snapshot != null) {
-                        val alertList = mutableListOf<Alert>()
-                        for (doc in snapshot) {
-                            alertList.add(Alert.fromMap(doc.data))
-                        }
-                        _alerts.value = alertList
-                    }
-                }
-
-            // Load devices
-            fs.collection("devices")
-                .addSnapshotListener { snapshot, e ->
-                    if (snapshot != null) {
-                        val deviceList = mutableListOf<Device>()
-                        for (doc in snapshot) {
-                            deviceList.add(Device.fromMap(doc.data))
-                        }
-                        _devices.value = deviceList
-                    }
-                }
-
-            // Sync Contacts and Settings with current User
+            // Sync Contacts, Settings, Alerts, and Devices with current User
             if (authService != null) {
                 serviceScope.launch {
                     authService.authState.collect { state ->
+                        stopUserAlertsAndDevicesListeners()
                         if (state is com.example.service.AuthState.Success) {
                             val uid = state.user.uid
                             loadUserSettingsFromCloud(uid)
                             syncContactsFromCloud(uid)
+                            startUserAlertsAndDevicesListeners(uid)
                         } else {
                             loadLocalContacts()
+                            loadLocalAlerts()
+                            loadLocalDevices()
                         }
                     }
                 }
             } else {
                 loadLocalContacts()
+                loadLocalAlerts()
+                loadLocalDevices()
             }
         } else {
             // Load from persistent local JSON
@@ -149,6 +124,74 @@ class DatabaseService(private val context: Context, private val authService: Aut
             loadLocalDevices()
             loadLocalContacts()
         }
+    }
+
+    private fun startUserAlertsAndDevicesListeners(uid: String) {
+        val fs = firestore ?: return
+        if (!isValidAuthenticatedUid(uid)) return
+
+        // 1. Alerts listener filtered strictly by authenticated userId
+        try {
+            firestoreListener?.remove()
+            firestoreListener = fs.collection("alerts")
+                .whereEqualTo("userId", uid)
+                .orderBy("timestamp", Query.Direction.DESCENDING)
+                .limit(100)
+                .addSnapshotListener { snapshot, e ->
+                    if (e != null) {
+                        Log.e("DatabaseService", "User alerts listen failed.", e)
+                        loadLocalAlerts() // Fallback
+                        return@addSnapshotListener
+                    }
+                    if (snapshot != null) {
+                        val alertList = mutableListOf<Alert>()
+                        for (doc in snapshot) {
+                            try {
+                                alertList.add(Alert.fromMap(doc.data))
+                            } catch (ex: Exception) {
+                                Log.e("DatabaseService", "Error parsing alert document ${doc.id}", ex)
+                            }
+                        }
+                        _alerts.value = alertList
+                    }
+                }
+        } catch (e: Exception) {
+            Log.e("DatabaseService", "Failed to attach alerts listener for uid: $uid", e)
+        }
+
+        // 2. Devices listener filtered strictly by authenticated userId
+        try {
+            devicesFirestoreListener?.remove()
+            devicesFirestoreListener = fs.collection("devices")
+                .whereEqualTo("userId", uid)
+                .addSnapshotListener { snapshot, e ->
+                    if (e != null) {
+                        Log.e("DatabaseService", "User devices listen failed.", e)
+                        loadLocalDevices() // Fallback
+                        return@addSnapshotListener
+                    }
+                    if (snapshot != null) {
+                        val deviceList = mutableListOf<Device>()
+                        for (doc in snapshot) {
+                            try {
+                                deviceList.add(Device.fromMap(doc.data))
+                            } catch (ex: Exception) {
+                                Log.e("DatabaseService", "Error parsing device document ${doc.id}", ex)
+                            }
+                        }
+                        _devices.value = deviceList
+                    }
+                }
+        } catch (e: Exception) {
+            Log.e("DatabaseService", "Failed to attach devices listener for uid: $uid", e)
+        }
+    }
+
+    private fun stopUserAlertsAndDevicesListeners() {
+        firestoreListener?.remove()
+        firestoreListener = null
+        devicesFirestoreListener?.remove()
+        devicesFirestoreListener = null
     }
 
     private suspend fun <T> runWithRetry(times: Int = 3, block: suspend () -> T): T {
@@ -174,10 +217,12 @@ class DatabaseService(private val context: Context, private val authService: Aut
     // --- ALERTS OPERATIONS ---
 
     suspend fun triggerSOS(userId: String, userName: String, userPhone: String, lat: Double, lng: Double, triggerType: String): Alert {
+        val authUid = getAuthenticatedUid()
+        val finalUserId = if (authUid != null) authUid else userId
         val alertId = "alert-" + java.util.UUID.randomUUID().toString().take(8)
         val newAlert = Alert(
             id = alertId,
-            userId = userId,
+            userId = finalUserId,
             userName = userName,
             userPhone = userPhone,
             latitude = lat,
@@ -228,9 +273,11 @@ class DatabaseService(private val context: Context, private val authService: Aut
 
 
     suspend fun uploadTestSOS(): Alert {
+        val authUid = getAuthenticatedUid()
+        val targetUser = authUid ?: "test_user"
         val testAlert = Alert(
             id = "TEST-" + java.util.UUID.randomUUID().toString(),
-            userId = "test_user",
+            userId = targetUser,
             userName = "Test User",
             userPhone = "555-0000",
             latitude = 40.7128,
@@ -250,8 +297,10 @@ class DatabaseService(private val context: Context, private val authService: Aut
     }
 
     suspend fun downloadTestData() {
+        val authUid = getAuthenticatedUid()
+        val targetUser = authUid ?: "test_user"
         runWithRetry {
-            val result = firestore?.collection("alerts")?.whereEqualTo("userId", "test_user")?.get()?.await()
+            val result = firestore?.collection("alerts")?.whereEqualTo("userId", targetUser)?.get()?.await()
             result?.let {
                 val list = _alerts.value.toMutableList()
                 for (doc in it.documents) {
@@ -267,13 +316,15 @@ class DatabaseService(private val context: Context, private val authService: Aut
     }
 
     suspend fun deleteTestRecords() {
+        val authUid = getAuthenticatedUid()
+        val targetUser = authUid ?: "test_user"
         runWithRetry {
-            val result = firestore?.collection("alerts")?.whereEqualTo("userId", "test_user")?.get()?.await()
+            val result = firestore?.collection("alerts")?.whereEqualTo("userId", targetUser)?.get()?.await()
             result?.let {
                 for (doc in it.documents) {
                     firestore?.collection("alerts")?.document(doc.id)?.delete()?.await()
                 }
-                val list = _alerts.value.filter { a -> a.userId != "test_user" }
+                val list = _alerts.value.filter { a -> a.userId != targetUser }
                 _alerts.value = list
                 saveAlertsListLocally(list)
             }
@@ -375,10 +426,12 @@ class DatabaseService(private val context: Context, private val authService: Aut
     // --- DEVICES OPERATIONS (ESP32) ---
 
     suspend fun registerDevice(userId: String, name: String, mac: String): Device {
+        val authUid = getAuthenticatedUid()
+        val finalUserId = if (authUid != null) authUid else userId
         val deviceId = "esp32-" + java.util.UUID.randomUUID().toString().take(8)
         val newDevice = Device(
             deviceId = deviceId,
-            userId = userId,
+            userId = finalUserId,
             deviceName = name,
             status = "CONNECTED",
             batteryLevel = 98,
@@ -582,20 +635,26 @@ class DatabaseService(private val context: Context, private val authService: Aut
     }
 
     suspend fun updateDevice(device: Device): Device {
+        val authUid = getAuthenticatedUid()
+        val finalDevice = if (authUid != null && device.userId != authUid) {
+            device.copy(userId = authUid)
+        } else {
+            device
+        }
         val fs = firestore
         if (fs != null) {
             try {
                 runWithRetry {
-                    fs.collection("devices").document(device.deviceId).set(device.toMap()).await()
+                    fs.collection("devices").document(finalDevice.deviceId).set(finalDevice.toMap()).await()
                 }
             } catch (e: Exception) {
                 Log.e("DatabaseService", "Failed to update device on Firestore after multiple attempts, updating locally: ${e.message}")
-                saveDeviceLocally(device)
+                saveDeviceLocally(finalDevice)
             }
         } else {
-            saveDeviceLocally(device)
+            saveDeviceLocally(finalDevice)
         }
-        return device
+        return finalDevice
     }
 
     suspend fun renameDevice(deviceId: String, newName: String) {
@@ -845,6 +904,7 @@ class DatabaseService(private val context: Context, private val authService: Aut
     }
 
     suspend fun clearUserSessionData(uid: String) {
+        stopUserAlertsAndDevicesListeners()
         if (uid.isNotBlank()) {
             try {
                 contactDao?.deleteContactsForUser(uid)
@@ -860,6 +920,8 @@ class DatabaseService(private val context: Context, private val authService: Aut
             Log.e("DatabaseService", "Failed to clear contacts cache: ${e.message}")
         }
         _contacts.value = emptyList()
+        _alerts.value = emptyList()
+        _devices.value = emptyList()
     }
 
     companion object {
