@@ -65,7 +65,6 @@ class DatabaseService(private val context: Context, private val authService: Aut
 
     private val sharedPrefs: SharedPreferences = context.getSharedPreferences("guardian_sos_database", Context.MODE_PRIVATE)
     private var firestoreListener: ListenerRegistration? = null
-    private var contactsListener: ListenerRegistration? = null
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     val isDemoMode: Boolean
@@ -132,52 +131,17 @@ class DatabaseService(private val context: Context, private val authService: Aut
             if (authService != null) {
                 serviceScope.launch {
                     authService.authState.collect { state ->
-                        contactsListener?.remove()
                         if (state is com.example.service.AuthState.Success) {
                             val uid = state.user.uid
-                            contactsListener = fs.collection("users").document(uid).collection("contacts")
-                                .addSnapshotListener { snapshot, e ->
-                                    if (e != null) {
-                                        Log.e("DatabaseService", "Contacts listen failed.", e)
-                                        loadLocalContacts()
-                                        return@addSnapshotListener
-                                    }
-                                    if (snapshot != null) {
-                                        val list = mutableListOf<EmergencyContact>()
-                                        for (doc in snapshot) {
-                                            val contact = EmergencyContact.fromMap(doc.data)
-                                            if (!isSeededContact(contact)) {
-                                                list.add(contact)
-                                            }
-                                        }
-                                        _contacts.value = list.sortedWith(compareBy({ it.priority }, { it.name }))
-                                    }
-                                }
+                            loadUserSettingsFromCloud(uid)
+                            syncContactsFromCloud(uid)
                         } else {
                             loadLocalContacts()
                         }
                     }
                 }
             } else {
-                contactsListener?.remove()
-                contactsListener = fs.collection("contacts")
-                    .addSnapshotListener { snapshot, e ->
-                        if (e != null) {
-                            Log.e("DatabaseService", "Contacts listen failed.", e)
-                            loadLocalContacts()
-                            return@addSnapshotListener
-                        }
-                        if (snapshot != null) {
-                            val list = mutableListOf<EmergencyContact>()
-                            for (doc in snapshot) {
-                                val contact = EmergencyContact.fromMap(doc.data)
-                                if (!isSeededContact(contact)) {
-                                    list.add(contact)
-                                }
-                            }
-                            _contacts.value = list.sortedWith(compareBy({ it.priority }, { it.name }))
-                        }
-                    }
+                loadLocalContacts()
             }
         } else {
             // Load from persistent local JSON
@@ -651,26 +615,27 @@ class DatabaseService(private val context: Context, private val authService: Aut
             contact
         }
 
+        // 1. Always save locally first (Room + SharedPreferences + _contacts StateFlow)
+        saveContactLocally(finalContact)
+
+        // 2. If authenticated, synchronize ONLY to users/{uid}/contacts/{contactId}
+        val authUid = getAuthenticatedUid()
         val fs = firestore
-        if (fs != null) {
-            try {
-                runWithRetry {
-                    var documentRef = fs.collection("contacts").document(finalContact.id)
-                    if (authService != null) {
-                        val state = authService.authState.value
-                        if (state is com.example.service.AuthState.Success) {
-                            documentRef = fs.collection("users").document(state.user.uid)
-                                .collection("contacts").document(finalContact.id)
-                        }
-                    }
-                    documentRef.set(finalContact.toMap()).await()
-                }
-            } catch (e: Exception) {
-                Log.e("DatabaseService", "Failed to save contact on Firestore after multiple attempts, saving locally: ${e.message}")
-                saveContactLocally(finalContact)
+        if (authUid != null && fs != null) {
+            val contactToSave = if (finalContact.userId.isBlank() || finalContact.userId != authUid) {
+                finalContact.copy(userId = authUid)
+            } else {
+                finalContact
             }
-        } else {
-            saveContactLocally(finalContact)
+            try {
+                fs.collection("users").document(authUid)
+                    .collection("contacts").document(contactToSave.id)
+                    .set(contactToSave.toMap(), com.google.firebase.firestore.SetOptions.merge())
+                    .await()
+                Log.d("DatabaseService", "Synchronized contact to users/$authUid/contacts/${contactToSave.id}")
+            } catch (e: Exception) {
+                Log.e("DatabaseService", "Failed to sync contact to Firestore for uid: $authUid (local contact preserved): ${e.message}")
+            }
         }
 
         return finalContact
@@ -712,28 +677,189 @@ class DatabaseService(private val context: Context, private val authService: Aut
         }
     }
 
-    suspend fun deleteContact(contactId: String) {
+    suspend fun loadUserSettingsFromCloud(uid: String) {
         val fs = firestore
-        if (fs != null) {
-            try {
-                runWithRetry {
-                    var documentRef = fs.collection("contacts").document(contactId)
-                    if (authService != null) {
-                        val state = authService.authState.value
-                        if (state is com.example.service.AuthState.Success) {
-                            documentRef = fs.collection("users").document(state.user.uid)
-                                .collection("contacts").document(contactId)
+        if (fs == null) {
+            Log.d("DatabaseService", "Firestore unavailable, skipping cloud settings load.")
+            return
+        }
+        if (uid.isBlank()) return
+
+        try {
+            val snapshot = fs.collection("users").document(uid)
+                .collection("settings").document("preferences")
+                .get()
+                .await()
+
+            if (!snapshot.exists()) {
+                Log.d("DatabaseService", "No remote preferences document found for uid: $uid. Retaining local settings.")
+                return
+            }
+
+            val data = snapshot.data
+            if (data.isNullOrEmpty()) {
+                Log.d("DatabaseService", "Remote preferences document is empty for uid: $uid. Retaining local settings.")
+                return
+            }
+
+            val prefs = context.getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE)
+            val editor = prefs.edit()
+
+            for ((key, value) in data) {
+                // Safeguard: never hydrate sensitive or hardware-specific secrets
+                if (key.equals("EMERGENCY_PIN", ignoreCase = true) ||
+                    key.contains("pin", ignoreCase = true) ||
+                    key.contains("key", ignoreCase = true) ||
+                    key.contains("token", ignoreCase = true) ||
+                    key == "bonded_esp32_mac"
+                ) {
+                    continue
+                }
+
+                when (value) {
+                    is Boolean -> editor.putBoolean(key, value)
+                    is String -> editor.putString(key, value)
+                    is Number -> {
+                        val existing = try { prefs.all[key] } catch (e: Exception) { null }
+                        if (existing is Long) {
+                            editor.putLong(key, value.toLong())
+                        } else if (existing is Float) {
+                            editor.putFloat(key, value.toFloat())
+                        } else {
+                            editor.putInt(key, value.toInt())
                         }
                     }
-                    documentRef.delete().await()
+                    else -> {
+                        Log.w("DatabaseService", "Skipping unsupported preference type for '$key': ${value?.javaClass?.simpleName}")
+                    }
                 }
-            } catch (e: Exception) {
-                Log.e("DatabaseService", "Failed to delete contact from Firestore after multiple attempts, updating locally: ${e.message}")
-                removeContactLocally(contactId)
             }
-        } else {
-            removeContactLocally(contactId)
+            editor.apply()
+            Log.d("DatabaseService", "Successfully hydrated ${data.size} preferences from cloud for uid: $uid")
+        } catch (e: Exception) {
+            Log.e("DatabaseService", "Failed to hydrate settings from Firestore for uid: $uid (retaining local settings): ${e.message}")
         }
+    }
+
+    suspend fun deleteContact(contactId: String) {
+        // 1. Always remove locally first (Room + SharedPreferences + _contacts StateFlow)
+        removeContactLocally(contactId)
+
+        // 2. If authenticated, delete ONLY from users/{uid}/contacts/{contactId}
+        val authUid = getAuthenticatedUid()
+        val fs = firestore
+        if (authUid != null && fs != null) {
+            try {
+                fs.collection("users").document(authUid)
+                    .collection("contacts").document(contactId)
+                    .delete()
+                    .await()
+                Log.d("DatabaseService", "Deleted contact from users/$authUid/contacts/$contactId")
+            } catch (e: Exception) {
+                Log.e("DatabaseService", "Failed to delete contact from Firestore for uid: $authUid: ${e.message}")
+            }
+        }
+    }
+
+    suspend fun syncContactsFromCloud(uid: String) {
+        val authUid = getAuthenticatedUid() ?: uid.takeIf { isValidAuthenticatedUid(it) } ?: return
+        val fs = firestore ?: return
+
+        try {
+            val snapshot = fs.collection("users").document(authUid)
+                .collection("contacts").get().await()
+
+            if (snapshot.isEmpty) {
+                Log.d("DatabaseService", "No remote contacts found for uid: $authUid")
+                return
+            }
+
+            val currentContacts = _contacts.value.toMutableList()
+            val existingIds = currentContacts.map { it.id }.toSet()
+            val missingContacts = mutableListOf<EmergencyContact>()
+
+            for (doc in snapshot.documents) {
+                try {
+                    val contact = EmergencyContact.fromMap(doc.data ?: emptyMap())
+                    if (contact.id.isNotBlank() && !existingIds.contains(contact.id) && !isSeededContact(contact)) {
+                        missingContacts.add(contact)
+                    }
+                } catch (e: Exception) {
+                    Log.e("DatabaseService", "Failed to parse contact doc ${doc.id}: ${e.message}")
+                }
+            }
+
+            if (missingContacts.isNotEmpty()) {
+                currentContacts.addAll(missingContacts)
+                val sorted = currentContacts.sortedWith(compareBy({ it.priority }, { it.name }))
+                _contacts.value = sorted
+                saveContactsListLocally(sorted)
+
+                // Save restored missing contacts to Room
+                serviceScope.launch {
+                    try {
+                        for (c in missingContacts) {
+                            val entity = EmergencyContactEntity(
+                                contactId = c.id,
+                                uid = authUid,
+                                name = c.name,
+                                phone = c.phone,
+                                relationship = c.relationship,
+                                priority = c.priority,
+                                customSmsTemplate = c.customSmsTemplate
+                            )
+                            contactDao?.insertContact(entity)
+                        }
+                    } catch (e: Exception) {
+                        Log.e("DatabaseService", "Error saving restored contacts to Room: ${e.message}")
+                    }
+                }
+                Log.d("DatabaseService", "Restored ${missingContacts.size} missing contacts from cloud for uid: $authUid")
+            }
+        } catch (e: Exception) {
+            Log.e("DatabaseService", "Failed to sync contacts from cloud for uid: $authUid (keeping local contacts): ${e.message}")
+        }
+    }
+
+    private fun getAuthenticatedUid(): String? {
+        return try {
+            val uid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
+            if (isValidAuthenticatedUid(uid)) {
+                uid
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun isValidAuthenticatedUid(uid: String?): Boolean {
+        if (uid.isNullOrBlank()) return false
+        val trimmed = uid.trim()
+        if (trimmed.startsWith("demo-", ignoreCase = true)) return false
+        if (trimmed.equals("demo-uid-123", ignoreCase = true)) return false
+        if (trimmed.equals("anonymous", ignoreCase = true)) return false
+        if (trimmed.equals("user-101", ignoreCase = true)) return false
+        return true
+    }
+
+    suspend fun clearUserSessionData(uid: String) {
+        if (uid.isNotBlank()) {
+            try {
+                contactDao?.deleteContactsForUser(uid)
+                Log.d("DatabaseService", "Deleted local Room contacts for uid: $uid")
+            } catch (e: Exception) {
+                Log.e("DatabaseService", "Failed to clear contacts for user $uid from Room: ${e.message}")
+            }
+        }
+        try {
+            sharedPrefs.edit().remove("contacts_list").apply()
+            Log.d("DatabaseService", "Cleared contacts_list cache from SharedPreferences")
+        } catch (e: Exception) {
+            Log.e("DatabaseService", "Failed to clear contacts cache: ${e.message}")
+        }
+        _contacts.value = emptyList()
     }
 
     companion object {

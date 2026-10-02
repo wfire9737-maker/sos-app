@@ -108,4 +108,22 @@ class TrustedPlacesService(
             Log.e("TrustedPlacesService", "Failed to delete trusted place", e)
         }
     }
+
+    suspend fun clearSession(userId: String) {
+        val targetUid = userId.ifBlank { currentUserId }
+        if (targetUid.isNotBlank()) {
+            try {
+                trustedPlaceDao.deleteTrustedPlacesForUser(targetUid)
+            } catch (e: Exception) {
+                Log.e("TrustedPlacesService", "Failed to clear local trusted places for $targetUid: ${e.message}")
+            }
+        }
+        currentUserId = ""
+        _trustedPlaces.value = emptyList()
+        try {
+            geofenceManager.updateGeofences(emptyList())
+        } catch (e: Exception) {
+            // Ignore geofence reset exceptions
+        }
+    }
 }

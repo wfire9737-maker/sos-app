@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -30,7 +31,19 @@ class HistoryService(
 
     init {
         observeRoomHistory()
-        listenToFirestoreHistory()
+    }
+
+    private fun getAuthenticatedUid(): String? {
+        return try {
+            val uid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
+            if (uid.isNullOrBlank() || uid.startsWith("demo-", ignoreCase = true) || uid == "user-101" || uid == "anonymous") {
+                null
+            } else {
+                uid
+            }
+        } catch (e: Exception) {
+            null
+        }
     }
 
     private fun observeRoomHistory() {
@@ -70,57 +83,75 @@ class HistoryService(
         )
     }
 
-    private fun listenToFirestoreHistory() {
+    suspend fun syncHistoryFromCloud(uid: String) {
+        val authUid = getAuthenticatedUid() ?: uid.takeIf { !it.startsWith("demo-", ignoreCase = true) && it != "user-101" && it != "anonymous" } ?: return
         val db = firestore ?: return
-        db.collection("emergency_history_records")
-            .addSnapshotListener { snapshot, e ->
-                if (e != null) {
-                    Log.w("HistoryService", "Firestore history sync failed", e)
-                    return@addSnapshotListener
-                }
-                if (snapshot != null) {
-                    val list = mutableListOf<HistoryModel>()
-                    for (doc in snapshot.documents) {
-                        try {
-                            list.add(parseDocToHistoryItem(doc.id, doc.data ?: emptyMap()))
-                        } catch (ex: Exception) {
-                            Log.e("HistoryService", "Failed to parse history doc: ${ex.message}")
-                        }
-                    }
-                    if (list.isNotEmpty()) {
-                        serviceScope.launch {
-                            for (item in list) {
-                                val entity = SosHistoryEntity(
-                                    historyId = item.id,
-                                    uid = "user-101",
-                                    latitude = item.latitude,
-                                    longitude = item.longitude,
-                                    googleMapsLink = "https://maps.google.com/?q=${item.latitude},${item.longitude}",
-                                    triggerSource = item.triggerType,
-                                    date = System.currentTimeMillis(),
-                                    status = "RESOLVED",
-                                    durationSeconds = item.durationSeconds,
-                                    address = item.address,
-                                    severity = item.severity,
-                                    contactsNotified = item.contactsNotified.joinToString("; "),
-                                    deviceUsed = item.deviceUsed,
-                                    resolutionNotes = item.resolutionNotes,
-                                    resolvedBy = item.resolvedBy,
-                                    aiConfidence = item.aiConfidence
-                                )
-                                sosHistoryDao?.insertHistory(entity)
-                            }
-                        }
-                    }
+
+        try {
+            val snapshot = db.collection("users").document(authUid)
+                .collection("emergency_history").get().await()
+
+            if (snapshot.isEmpty) {
+                Log.d("HistoryService", "No remote emergency history found for uid: $authUid")
+                return
+            }
+
+            val localIds = _history.value.map { it.id }.toSet()
+            val missingEntities = snapshot.documents.mapNotNull { doc ->
+                if (!localIds.contains(doc.id)) {
+                    parseDocToEntity(doc.id, doc.data ?: emptyMap(), authUid)
+                } else {
+                    null
                 }
             }
+
+            if (missingEntities.isNotEmpty()) {
+                sosHistoryDao?.insertHistories(missingEntities)
+                Log.d("HistoryService", "Merged ${missingEntities.size} missing history records from cloud for uid: $authUid")
+            }
+        } catch (e: Exception) {
+            Log.e("HistoryService", "Failed to sync history from cloud for uid: $authUid (retaining local records): ${e.message}")
+        }
+    }
+
+    private fun parseDocToEntity(id: String, map: Map<String, Any>, fallbackUid: String): SosHistoryEntity {
+        val lat = (map["latitude"] as? Number)?.toDouble() ?: 0.0
+        val lng = (map["longitude"] as? Number)?.toDouble() ?: 0.0
+        val contactsRaw = map["contactsNotified"]
+        val contactsStr = when (contactsRaw) {
+            is List<*> -> contactsRaw.mapNotNull { it?.toString() }.joinToString("; ")
+            is String -> contactsRaw
+            else -> ""
+        }
+
+        return SosHistoryEntity(
+            historyId = id,
+            uid = map["uid"]?.toString() ?: fallbackUid,
+            latitude = lat,
+            longitude = lng,
+            googleMapsLink = map["googleMapsLink"]?.toString() ?: "https://maps.google.com/?q=$lat,$lng",
+            triggerSource = map["triggerSource"]?.toString() ?: map["triggerType"]?.toString() ?: "MANUAL_BUTTON",
+            date = (map["date"] as? Number)?.toLong() ?: System.currentTimeMillis(),
+            status = map["status"]?.toString() ?: "RESOLVED",
+            durationSeconds = (map["durationSeconds"] as? Number)?.toLong() ?: 0L,
+            address = map["address"]?.toString() ?: map["locationName"]?.toString() ?: "GPS Coordinate Plot",
+            severity = map["severity"]?.toString() ?: "HIGH",
+            contactsNotified = contactsStr,
+            deviceUsed = map["deviceUsed"]?.toString() ?: "MOBILE-APP-SOS",
+            resolutionNotes = map["resolutionNotes"]?.toString() ?: "",
+            resolvedBy = map["resolvedBy"]?.toString() ?: "",
+            aiConfidence = (map["aiConfidence"] as? Number)?.toInt() ?: 90
+        )
     }
 
     fun addHistoryItem(item: HistoryModel) {
+        val authUid = getAuthenticatedUid()
+        val effectiveUid = authUid ?: "local-user"
+
         serviceScope.launch {
             val entity = SosHistoryEntity(
                 historyId = item.id,
-                uid = "user-101",
+                uid = effectiveUid,
                 latitude = item.latitude,
                 longitude = item.longitude,
                 googleMapsLink = "https://maps.google.com/?q=${item.latitude},${item.longitude}",
@@ -136,24 +167,47 @@ class HistoryService(
                 resolvedBy = item.resolvedBy,
                 aiConfidence = item.aiConfidence
             )
-            sosHistoryDao?.insertHistory(entity)
-        }
+            try {
+                sosHistoryDao?.insertHistory(entity)
+            } catch (e: Exception) {
+                Log.e("HistoryService", "Failed to save history item to Room: ${e.message}")
+            }
 
-        val db = firestore
-        if (db != null) {
-            val map = serializeHistoryItemToMap(item)
-            db.collection("emergency_history_records").document(item.id).set(map)
+            if (authUid != null && firestore != null) {
+                try {
+                    val map = serializeHistoryItemToMap(item, authUid)
+                    firestore.collection("users").document(authUid)
+                        .collection("emergency_history").document(item.id)
+                        .set(map, com.google.firebase.firestore.SetOptions.merge())
+                        .await()
+                    Log.d("HistoryService", "Synced history item to users/$authUid/emergency_history/${item.id}")
+                } catch (e: Exception) {
+                    Log.e("HistoryService", "Failed to sync history item to cloud (retaining local record): ${e.message}")
+                }
+            }
         }
     }
 
     fun deleteHistoryItem(id: String) {
+        val authUid = getAuthenticatedUid()
         serviceScope.launch {
-            sosHistoryDao?.deleteHistory(id)
-        }
+            try {
+                sosHistoryDao?.deleteHistory(id)
+            } catch (e: Exception) {
+                Log.e("HistoryService", "Failed to delete history item from Room: ${e.message}")
+            }
 
-        val db = firestore
-        if (db != null) {
-            db.collection("emergency_history_records").document(id).delete()
+            if (authUid != null && firestore != null) {
+                try {
+                    firestore.collection("users").document(authUid)
+                        .collection("emergency_history").document(id)
+                        .delete()
+                        .await()
+                    Log.d("HistoryService", "Deleted history item from users/$authUid/emergency_history/$id")
+                } catch (e: Exception) {
+                    Log.e("HistoryService", "Failed to delete history item from cloud: ${e.message}")
+                }
+            }
         }
     }
 
@@ -206,41 +260,36 @@ class HistoryService(
         return sb.toString()
     }
 
-    private fun serializeHistoryItemToMap(item: HistoryModel): Map<String, Any> {
+    private fun serializeHistoryItemToMap(item: HistoryModel, uid: String): Map<String, Any> {
         return mapOf(
-            "date" to item.date,
-            "time" to item.time,
+            "historyId" to item.id,
+            "uid" to uid,
+            "date" to System.currentTimeMillis(),
             "durationSeconds" to item.durationSeconds,
             "responseTimeSeconds" to item.responseTimeSeconds,
             "address" to item.address,
             "latitude" to item.latitude,
             "longitude" to item.longitude,
+            "googleMapsLink" to "https://maps.google.com/?q=${item.latitude},${item.longitude}",
             "severity" to item.severity,
-            "contactsNotified" to item.contactsNotified,
+            "contactsNotified" to item.contactsNotified.joinToString("; "),
             "aiConfidence" to item.aiConfidence,
-            "triggerType" to item.triggerType,
+            "triggerSource" to item.triggerType,
+            "status" to "RESOLVED",
+            "deviceUsed" to item.deviceUsed,
             "resolutionNotes" to item.resolutionNotes,
             "resolvedBy" to item.resolvedBy
         )
     }
 
-    private fun parseDocToHistoryItem(id: String, map: Map<String, Any>): HistoryModel {
-        val contacts = (map["contactsNotified"] as? List<*>)?.map { it.toString() } ?: emptyList()
-        return HistoryModel(
-            id = id,
-            date = map["date"]?.toString() ?: "",
-            time = map["time"]?.toString() ?: "",
-            durationSeconds = (map["durationSeconds"] as? Number)?.toLong() ?: 0L,
-            responseTimeSeconds = (map["responseTimeSeconds"] as? Number)?.toLong() ?: 0L,
-            address = map["address"]?.toString() ?: map["locationName"]?.toString() ?: "",
-            latitude = (map["latitude"] as? Number)?.toDouble() ?: 0.0,
-            longitude = (map["longitude"] as? Number)?.toDouble() ?: 0.0,
-            severity = map["severity"]?.toString() ?: "WARNING",
-            contactsNotified = contacts,
-            aiConfidence = (map["aiConfidence"] as? Number)?.toInt() ?: (map["aiScore"] as? Number)?.toInt() ?: 0,
-            triggerType = map["triggerType"]?.toString() ?: "MANUAL_BUTTON",
-            resolutionNotes = map["resolutionNotes"]?.toString() ?: "",
-            resolvedBy = map["resolvedBy"]?.toString() ?: ""
-        )
+    suspend fun clearSession(uid: String) {
+        try {
+            if (uid.isNotBlank()) {
+                sosHistoryDao?.deleteHistoryForUser(uid)
+            }
+        } catch (e: Exception) {
+            Log.e("HistoryService", "Failed to clear history for user $uid: ${e.message}")
+        }
+        _history.value = emptyList()
     }
 }

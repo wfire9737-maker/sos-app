@@ -368,6 +368,23 @@ class GuardianViewModel @Inject constructor(
 
     fun setCriticalAlarmsEnabled(enabled: Boolean) { _criticalAlarmsEnabled.value = enabled; databaseService.saveUserSetting("critical_alarms_enabled", enabled) }
 
+    fun reloadLocalSettings() {
+        try {
+            val prefs = getApplication<Application>().getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE)
+            _themeMode.value = prefs.getString("theme_mode", "SYSTEM") ?: "SYSTEM"
+            _highContrast.value = prefs.getBoolean("high_contrast", false)
+            _language.value = prefs.getString("language", "en") ?: "en"
+            _fallDetectionEnabled.value = prefs.getBoolean("fall_detection_enabled", true)
+            _sosSoundEnabled.value = prefs.getBoolean("sos_sound_enabled", true)
+            _sosVibrationEnabled.value = prefs.getBoolean("sos_vibration_enabled", true)
+            _voiceSosEnabled.value = prefs.getBoolean("voice_sos_enabled", false)
+            _voiceSosPhrase.value = prefs.getString("voice_sos_phrase", "Emergency SOS") ?: "Emergency SOS"
+            _criticalAlarmsEnabled.value = prefs.getBoolean("critical_alarms_enabled", true)
+        } catch (e: Exception) {
+            android.util.Log.e("GuardianViewModel", "Error reloading local settings: ${e.message}")
+        }
+    }
+
     private val _arrivalAlertsEnabled = MutableStateFlow(true)
     val arrivalAlertsEnabled = _arrivalAlertsEnabled.asStateFlow()
     fun setArrivalAlertsEnabled(enabled: Boolean) { _arrivalAlertsEnabled.value = enabled }
@@ -432,7 +449,22 @@ class GuardianViewModel @Inject constructor(
     }
 
     fun deleteAccount() {
+        val currentUid = authService.currentUserUid 
+            ?: (authService.authState.value as? AuthState.Success)?.user?.uid 
+            ?: try { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid } catch (e: Exception) { null }
+            ?: ""
+
         viewModelScope.launch {
+            if (currentUid.isNotBlank()) {
+                databaseService.clearUserSessionData(currentUid)
+                trustedPlacesService.clearSession(currentUid)
+                historyService.clearSession(currentUid)
+            } else {
+                databaseService.clearUserSessionData("")
+                trustedPlacesService.clearSession("")
+                historyService.clearSession("")
+            }
+
             authService.logout()
             _uiEvents.emit(UiEvent.ShowToast("Account permanently deleted."))
             _uiEvents.emit(UiEvent.NavigateToLogin)
@@ -535,8 +567,23 @@ class GuardianViewModel @Inject constructor(
     }
 
     fun logout() {
-        authService.logout()
+        val currentUid = authService.currentUserUid 
+            ?: (authService.authState.value as? AuthState.Success)?.user?.uid 
+            ?: try { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid } catch (e: Exception) { null }
+            ?: ""
+
         viewModelScope.launch {
+            if (currentUid.isNotBlank()) {
+                databaseService.clearUserSessionData(currentUid)
+                trustedPlacesService.clearSession(currentUid)
+                historyService.clearSession(currentUid)
+            } else {
+                databaseService.clearUserSessionData("")
+                trustedPlacesService.clearSession("")
+                historyService.clearSession("")
+            }
+
+            authService.logout()
             _uiEvents.emit(UiEvent.ShowToast("Logged out successfully."))
             _uiEvents.emit(UiEvent.NavigateToLogin)
         }
@@ -1359,7 +1406,17 @@ fun startVoiceRecognition(context: Context) {
         }
 
         // Register callbacks for Fall, Voice SOS, and Safety Timer automation
-        viewModelScope.launch { authService.authState.collect { state -> if (state is AuthState.Success) { trustedPlacesService.initialize(state.user.uid) } } }
+        viewModelScope.launch {
+            authService.authState.collect { state ->
+                if (state is AuthState.Success) {
+                    trustedPlacesService.initialize(state.user.uid)
+                    databaseService.loadUserSettingsFromCloud(state.user.uid)
+                    databaseService.syncContactsFromCloud(state.user.uid)
+                    historyService.syncHistoryFromCloud(state.user.uid)
+                    reloadLocalSettings()
+                }
+            }
+        }
         safetyTimerService.onTimerExpiredCallback = {
             triggerTimerSOS()
         }

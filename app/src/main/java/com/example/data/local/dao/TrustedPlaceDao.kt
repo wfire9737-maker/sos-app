@@ -23,4 +23,7 @@ interface TrustedPlaceDao {
     
     @Query("DELETE FROM trusted_places WHERE placeId = :placeId")
     suspend fun deleteTrustedPlaceById(placeId: String)
+
+    @Query("DELETE FROM trusted_places WHERE userId = :userId")
+    suspend fun deleteTrustedPlacesForUser(userId: String)
 }

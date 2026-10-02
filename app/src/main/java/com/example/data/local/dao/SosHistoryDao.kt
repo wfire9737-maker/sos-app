@@ -23,6 +23,9 @@ interface SosHistoryDao {
 
     @Query("DELETE FROM sos_history WHERE historyId = :historyId")
     suspend fun deleteHistory(historyId: String)
+
+    @Query("DELETE FROM sos_history WHERE uid = :uid")
+    suspend fun deleteHistoryForUser(uid: String)
     
     @Query("DELETE FROM sos_history")
     suspend fun clearAll()

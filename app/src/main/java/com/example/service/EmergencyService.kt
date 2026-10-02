@@ -371,15 +371,47 @@ class EmergencyService(
                     aiConfidence = model.aiConfidenceScore
                 )
                 sosHistoryDao?.insertHistory(entity)
+
+                val fs = firestore
+                if (fs != null) {
+                    val authUid = getAuthenticatedUid()
+                    if (authUid != null) {
+                        try {
+                            val historyMap = mapOf(
+                                "historyId" to entity.historyId,
+                                "uid" to authUid,
+                                "triggerSource" to entity.triggerSource,
+                                "status" to entity.status,
+                                "date" to entity.date,
+                                "latitude" to entity.latitude,
+                                "longitude" to entity.longitude,
+                                "googleMapsLink" to entity.googleMapsLink,
+                                "durationSeconds" to entity.durationSeconds,
+                                "address" to entity.address,
+                                "severity" to entity.severity,
+                                "contactsNotified" to entity.contactsNotified,
+                                "deviceUsed" to entity.deviceUsed,
+                                "resolutionNotes" to entity.resolutionNotes,
+                                "resolvedBy" to entity.resolvedBy,
+                                "aiConfidence" to entity.aiConfidence
+                            )
+                            fs.collection("users").document(authUid)
+                                .collection("emergency_history").document(entity.historyId)
+                                .set(historyMap, com.google.firebase.firestore.SetOptions.merge())
+                                .await()
+                        } catch (e: Exception) {
+                            Log.e("EmergencyService", "Failed to sync emergency history to user subcollection: ${e.message}")
+                        }
+                    }
+
+                    try {
+                        fs.collection("emergencies").document(model.emergencyId).set(model.toMap()).await()
+                    } catch (e: Exception) {
+                        Log.e("EmergencyService", "Failed to sync emergency to Firestore: ${e.message}")
+                    }
+                }
             } catch (e: Exception) {
-                Log.e("EmergencyService", "Failed to save emergency to Room: ${e.message}")
-            }
-            
-            val fs = firestore ?: return@launch
-            try {
-                fs.collection("emergencies").document(model.emergencyId).set(model.toMap()).await()
-            } catch (e: Exception) {
-                Log.e("EmergencyService", "Failed to sync emergency to Firestore: ${e.message}")
+                Log.e("EmergencyService", "Failed to save emergency to Room / sync: ${e.message}")
             }
         }
     }
@@ -443,6 +475,37 @@ class EmergencyService(
             sosHistoryDao?.updateResolution(emergencyId, notes, resolvedBy)
         } catch (e: Exception) {
             Log.e("EmergencyService", "Failed to update emergency resolution in Room: ${e.message}")
+        }
+
+        val authUid = getAuthenticatedUid()
+        if (authUid != null) {
+            val fs = firestore ?: return
+            try {
+                val updateMap = mapOf(
+                    "status" to "RESOLVED",
+                    "resolutionNotes" to notes,
+                    "resolvedBy" to resolvedBy
+                )
+                fs.collection("users").document(authUid)
+                    .collection("emergency_history").document(emergencyId)
+                    .set(updateMap, com.google.firebase.firestore.SetOptions.merge())
+                    .await()
+            } catch (e: Exception) {
+                Log.e("EmergencyService", "Failed to sync emergency resolution to user subcollection: ${e.message}")
+            }
+        }
+    }
+
+    private fun getAuthenticatedUid(): String? {
+        return try {
+            val uid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
+            if (uid.isNullOrBlank() || uid.startsWith("demo-", ignoreCase = true) || uid == "user-101" || uid == "anonymous") {
+                null
+            } else {
+                uid
+            }
+        } catch (e: Exception) {
+            null
         }
     }
 

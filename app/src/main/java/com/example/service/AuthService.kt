@@ -287,6 +287,13 @@ class AuthService(private val context: Context) {
         }
     }
 
+    val currentUserUid: String?
+        get() = (authState.value as? AuthState.Success)?.user?.uid 
+            ?: firebaseAuth?.currentUser?.uid 
+            ?: sharedPrefs.getString("current_user", null)?.let {
+                try { JSONObject(it).optString("uid") } catch (e: Exception) { null }
+            }
+
     fun logout() {
         firebaseAuth?.signOut()
         sharedPrefs.edit().remove("current_user").apply()
