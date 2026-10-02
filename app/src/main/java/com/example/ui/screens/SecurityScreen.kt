@@ -40,9 +40,6 @@ fun SecurityScreen(
     val context = LocalContext.current
 
     // Observe State flows from ViewModel
-    val biometricEnabled by viewModel.biometricEnabled.collectAsState()
-    val appLockPinEnabled by viewModel.appLockPinEnabled.collectAsState()
-    val appLockPin by viewModel.appLockPin.collectAsState()
     val emergencyPin by viewModel.emergencyPin.collectAsState()
 
     // Password State
@@ -55,14 +52,11 @@ fun SecurityScreen(
     var isChangingPassword by remember { mutableStateOf(false) }
 
     // Dialog control
-    var showPinSetupDialog by remember { mutableStateOf(false) }
     var showEmergencyPinDialog by remember { mutableStateOf(false) }
     var showDeleteAccountDialog by remember { mutableStateOf(false) }
     var deleteConfirmText by remember { mutableStateOf("") }
 
     // Temporary values for dialogs
-    var inputPin by remember { mutableStateOf("") }
-    var confirmInputPin by remember { mutableStateOf("") }
     var inputEmergencyPin by remember { mutableStateOf("") }
 
     Scaffold(
@@ -240,90 +234,6 @@ fun SecurityScreen(
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text("Update Passphrase", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                             }
-                        }
-                    }
-                }
-            }
-
-            // Section: Biometric & App Lock
-            item {
-                SecurityCategoryHeader(title = "App Lock & Biometrics")
-            }
-
-            item {
-                Card(
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.08f), RoundedCornerShape(16.dp))
-                ) {
-                    Column {
-                        // Biometric Lock toggle
-                        SettingsToggleRow(
-                            title = "Biometric Authentication",
-                            subtitle = "Verify fingerprint or facial vectors when opening Guardian",
-                            icon = Icons.Default.Fingerprint,
-                            iconTint = Color(0xFF00bcd4),
-                            checked = biometricEnabled,
-                            onCheckedChange = { checked -> viewModel.setBiometricEnabled(checked) },
-                            testTag = "security_biometric_switch"
-                        )
-
-                        HorizontalDivider(
-                            modifier = Modifier.padding(horizontal = 16.dp),
-                            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.08f)
-                        )
-
-                        // App Lock PIN setup / toggle row
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    inputPin = ""
-                                    confirmInputPin = ""
-                                    showPinSetupDialog = true
-                                }
-                                .padding(16.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .background(Color(0xFF3F51B5).copy(alpha = 0.12f), CircleShape),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Lock,
-                                    contentDescription = null,
-                                    tint = Color(0xFF3F51B5),
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.width(16.dp))
-
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "App Lock PIN Setup",
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = if (appLockPinEnabled) "PIN Secured (Active)" else "PIN Disabled • Tap to configure",
-                                    fontSize = 11.sp,
-                                    color = if (appLockPinEnabled) SafetyGreen else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    fontWeight = if (appLockPinEnabled) FontWeight.Bold else FontWeight.Normal
-                                )
-                            }
-
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                                modifier = Modifier.size(20.dp)
-                            )
                         }
                     }
                 }
@@ -511,72 +421,6 @@ fun SecurityScreen(
 
             item { Spacer(modifier = Modifier.height(24.dp)) }
         }
-    }
-
-    // PIN Setup Dialog
-    if (showPinSetupDialog) {
-        AlertDialog(
-            onDismissRequest = { showPinSetupDialog = false },
-            title = { Text(if (appLockPinEnabled) "Update Lock PIN" else "Configure App Lock PIN") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        text = "Specify a 4-digit PIN code to secure access to the Guardian app.",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    OutlinedTextField(
-                        value = inputPin,
-                        onValueChange = { if (it.length <= 4 && it.all { char -> char.isDigit() }) inputPin = it },
-                        label = { Text("Enter 4-Digit PIN") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("security_pin_setup_input_field")
-                    )
-
-                    OutlinedTextField(
-                        value = confirmInputPin,
-                        onValueChange = { if (it.length <= 4 && it.all { char -> char.isDigit() }) confirmInputPin = it },
-                        label = { Text("Confirm PIN Code") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("security_pin_setup_confirm_field")
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        if (inputPin.length == 4 && inputPin == confirmInputPin) {
-                            viewModel.setAppLockPin(inputPin, true)
-                            showPinSetupDialog = false
-                        }
-                    },
-                    enabled = inputPin.length == 4 && inputPin == confirmInputPin,
-                    modifier = Modifier.testTag("security_pin_setup_save")
-                ) {
-                    Text("Enable PIN")
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = {
-                        if (appLockPinEnabled) {
-                            viewModel.setAppLockPin("", false)
-                        }
-                        showPinSetupDialog = false
-                    },
-                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
-                ) {
-                    Text(if (appLockPinEnabled) "Disable PIN" else "Cancel")
-                }
-            }
-        )
     }
 
     // Emergency Silent PIN Dialog

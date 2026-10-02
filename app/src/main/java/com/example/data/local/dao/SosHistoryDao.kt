@@ -9,6 +9,9 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface SosHistoryDao {
+    @Query("SELECT * FROM sos_history ORDER BY date DESC")
+    fun getAllHistory(): Flow<List<SosHistoryEntity>>
+
     @Query("SELECT * FROM sos_history WHERE uid = :uid ORDER BY date DESC")
     fun getHistoryForUser(uid: String): Flow<List<SosHistoryEntity>>
 
@@ -23,4 +26,7 @@ interface SosHistoryDao {
     
     @Query("DELETE FROM sos_history")
     suspend fun clearAll()
+
+    @Query("UPDATE sos_history SET status = 'RESOLVED', resolutionNotes = :notes, resolvedBy = :resolvedBy WHERE historyId = :historyId")
+    suspend fun updateResolution(historyId: String, notes: String, resolvedBy: String)
 }

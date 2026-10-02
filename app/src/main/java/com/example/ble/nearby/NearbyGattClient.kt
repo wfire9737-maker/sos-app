@@ -171,9 +171,13 @@ class NearbyGattClient(private val context: Context) {
         try {
             val device = bluetoothAdapter?.getRemoteDevice(macAddress)
             if (device != null) {
-                bluetoothGatt = device.connectGatt(context, false, gattCallback)
+                bluetoothGatt = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                    device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
+                } else {
+                    device.connectGatt(context, false, gattCallback)
+                }
                 onConnectionStateChanged?.invoke(macAddress, NearbyConnectionState.REQUESTING)
-                Log.d("NearbyGattClient", "Initiated GATT connection to $macAddress")
+                Log.d("NearbyGattClient", "Initiated GATT connection to $macAddress (TRANSPORT_LE)")
             }
         } catch (e: SecurityException) {
             Log.e("NearbyGattClient", "Missing BLUETOOTH_CONNECT permission", e)

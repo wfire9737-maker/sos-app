@@ -80,6 +80,7 @@ class EmergencyProvider(
     fun getMatchedTrustedPlace(lat: Double, lng: Double): TrustedPlace? {
         val results = FloatArray(1)
         for (place in trustedPlacesService.trustedPlaces.value) {
+            if (!place.isEnabled) continue
             android.location.Location.distanceBetween(lat, lng, place.latitude, place.longitude, results)
             if (results[0] <= place.radius) return place
         }
@@ -113,6 +114,19 @@ class EmergencyProvider(
         val matchedPlace = getMatchedTrustedPlace(currentLat, currentLng)
         if (matchedPlace != null && matchedPlace.skipAutomaticPhoneCall) {
             android.util.Log.d("EmergencyProvider", "Automatic phone call skipped by Trusted Place: ${matchedPlace.name} (skipAutomaticPhoneCall=true)")
+            return true
+        }
+
+        return false
+    }
+
+    fun shouldSkipSms(lat: Double? = null, lng: Double? = null): Boolean {
+        val currentLat = lat ?: locationService.currentLocation.value.latitude
+        val currentLng = lng ?: locationService.currentLocation.value.longitude
+
+        val matchedPlace = getMatchedTrustedPlace(currentLat, currentLng)
+        if (matchedPlace != null && matchedPlace.skipAutomaticSms) {
+            android.util.Log.d("EmergencyProvider", "Automatic SMS skipped by Trusted Place: ${matchedPlace.name} (skipAutomaticSms=true)")
             return true
         }
 
@@ -180,6 +194,7 @@ class EmergencyProvider(
 
             val isSoundAllowed = shouldPlaySosAlarm(effectiveLat, effectiveLng)
             val skipCall = shouldSkipPhoneCall(effectiveLat, effectiveLng)
+            val skipSms = shouldSkipSms(effectiveLat, effectiveLng)
             val delaySeconds = getDelaySosSeconds(effectiveLat, effectiveLng)
 
             val isVibrationEnabled = context.getSharedPreferences(
@@ -214,6 +229,8 @@ class EmergencyProvider(
                 alarmVibratorService.startVibration()
             }
 
+            val matchedPlace = getMatchedTrustedPlace(effectiveLat, effectiveLng)
+
             val model = emergencyService.startEmergency(
                 userId = userId,
                 userName = userName,
@@ -228,7 +245,9 @@ class EmergencyProvider(
                 customBearing = bearing,
                 locationSource = locationSource,
                 skipPhoneCall = skipCall,
-                delaySosSeconds = delaySeconds
+                skipSms = skipSms,
+                delaySosSeconds = delaySeconds,
+                trustedPlaceName = matchedPlace?.name
             )
 
             // Trigger AI Emergency Analysis
@@ -300,7 +319,10 @@ class EmergencyProvider(
         }
 
         val skipCall = shouldSkipPhoneCall(effectiveLat, effectiveLng)
+        val skipSms = shouldSkipSms(effectiveLat, effectiveLng)
         val delaySeconds = getDelaySosSeconds(effectiveLat, effectiveLng)
+
+        val matchedPlace = getMatchedTrustedPlace(effectiveLat, effectiveLng)
 
         return emergencyService.startEmergency(
             userId = userId,
@@ -315,7 +337,9 @@ class EmergencyProvider(
             customSpeed = speed,
             customBearing = bearing,
             skipPhoneCall = skipCall,
-            delaySosSeconds = delaySeconds
+            skipSms = skipSms,
+            delaySosSeconds = delaySeconds,
+            trustedPlaceName = matchedPlace?.name
         )
     }
 

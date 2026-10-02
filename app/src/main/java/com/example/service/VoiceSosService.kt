@@ -152,36 +152,53 @@ class VoiceSosService(
      * Start native Android SpeechRecognizer
      */
     private var audioManager: AudioManager? = null
-    private var isMuted = false
+    private val mutedStreams = mutableSetOf<Int>()
 
     private fun muteBeep(context: Context) {
         if (audioManager == null) {
-            audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
         }
         audioManager?.let { am ->
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
-                if (!am.isStreamMute(AudioManager.STREAM_MUSIC)) {
-                    am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_MUTE, 0)
-                    isMuted = true
+            val targetStreams = intArrayOf(
+                AudioManager.STREAM_SYSTEM,
+                AudioManager.STREAM_NOTIFICATION,
+                AudioManager.STREAM_MUSIC
+            )
+            for (stream in targetStreams) {
+                try {
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                        if (!am.isStreamMute(stream)) {
+                            am.adjustStreamVolume(stream, AudioManager.ADJUST_MUTE, 0)
+                            mutedStreams.add(stream)
+                        }
+                    } else {
+                        @Suppress("DEPRECATION")
+                        am.setStreamMute(stream, true)
+                        mutedStreams.add(stream)
+                    }
+                } catch (e: Exception) {
+                    // Ignore security or stream restrictions
                 }
-            } else {
-                @Suppress("DEPRECATION")
-                am.setStreamMute(AudioManager.STREAM_MUSIC, true)
-                isMuted = true
             }
         }
     }
 
     private fun unmuteBeep() {
-        if (!isMuted) return
+        if (mutedStreams.isEmpty()) return
         audioManager?.let { am ->
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
-                am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_UNMUTE, 0)
-            } else {
-                @Suppress("DEPRECATION")
-                am.setStreamMute(AudioManager.STREAM_MUSIC, false)
+            for (stream in mutedStreams.toList()) {
+                try {
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                        am.adjustStreamVolume(stream, AudioManager.ADJUST_UNMUTE, 0)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        am.setStreamMute(stream, false)
+                    }
+                } catch (e: Exception) {
+                    // Ignore security or stream restrictions
+                }
             }
-            isMuted = false
+            mutedStreams.clear()
         }
     }
 
@@ -200,7 +217,6 @@ class VoiceSosService(
                     speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context)
                     speechRecognizer?.setRecognitionListener(object : RecognitionListener {
                         override fun onReadyForSpeech(params: Bundle?) {
-                            unmuteBeep()
                             _isSpeechRecognizerActive.value = true
                             _voiceState.value = "LISTENING"
                             _speechStatusMessage.value = "Listening for voice command... (Speak now)"
@@ -218,7 +234,6 @@ class VoiceSosService(
                             _speechStatusMessage.value = "Processing command..."
                         }
                         override fun onError(error: Int) {
-                            unmuteBeep()
                             val message = when (error) {
                                 SpeechRecognizer.ERROR_AUDIO -> "Audio recording error"
                                 SpeechRecognizer.ERROR_CLIENT -> "Client error"
@@ -235,12 +250,13 @@ class VoiceSosService(
                             _voiceState.value = "LISTENING"
 
                             if (isContinuousMode) {
-                                // Do not recreate the whole service, just start listening again without a huge delay.
+                                // Keep streams muted so restart remains silent
                                 restartListening(context)
+                            } else {
+                                mainHandler.postDelayed({ unmuteBeep() }, 300)
                             }
                         }
                         override fun onResults(results: Bundle?) {
-                            unmuteBeep()
                             val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                             val text = matches?.firstOrNull() ?: ""
                             
@@ -256,6 +272,8 @@ class VoiceSosService(
 
                             if (isContinuousMode) {
                                 restartListening(context)
+                            } else {
+                                mainHandler.postDelayed({ unmuteBeep() }, 300)
                             }
                         }
                         override fun onPartialResults(partialResults: Bundle?) {
@@ -284,12 +302,13 @@ class VoiceSosService(
                 speechRecognizer?.startListening(intent)
 
             } catch (e: Exception) {
-                unmuteBeep()
+                mainHandler.postDelayed({ unmuteBeep() }, 300)
                 Log.e("VoiceSosService", "Failed to start speech recognizer: ${e.message}")
                 _speechStatusMessage.value = "Speech recognizer unavailable. Standard voice mode active."
                 _isSpeechRecognizerActive.value = false
                 
                 // If it fails to start, destroy and try to recreate on next attempt
+                speechRecognizer?.cancel()
                 speechRecognizer?.destroy()
                 speechRecognizer = null
                 
@@ -315,7 +334,7 @@ class VoiceSosService(
                 muteBeep(context)
                 speechRecognizer?.startListening(intent)
             } catch(e: Exception) {
-                unmuteBeep()
+                speechRecognizer?.cancel()
                 speechRecognizer?.destroy()
                 speechRecognizer = null
                 startSpeechRecognition(context)
@@ -328,14 +347,18 @@ class VoiceSosService(
      */
     fun stopSpeechRecognition() {
         mainHandler.post {
-            unmuteBeep()
+            muteBeep(context)
             try {
+                speechRecognizer?.cancel()
                 speechRecognizer?.stopListening()
                 speechRecognizer?.destroy()
                 speechRecognizer = null
             } catch (e: Exception) {
                 Log.e("VoiceSosService", "Error stopping speech recognizer", e)
             }
+            mainHandler.postDelayed({
+                unmuteBeep()
+            }, 300)
             _isSpeechRecognizerActive.value = false
             _speechStatusMessage.value = "Speech listening stopped."
         }
@@ -368,6 +391,7 @@ class VoiceSosService(
                     onVoiceCommandRecognized?.invoke(command, confidence)
                     return
                 } else {
+                    unmuteBeep()
                     val command = VoiceCommand.Sos(matchedPhrase)
                     _lastRecognizedCommand.value = command
                     _speechStatusMessage.value = "Recognized Command: \"$matchedPhrase\" (Emergency SOS)"

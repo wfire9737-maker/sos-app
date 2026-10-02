@@ -6,7 +6,6 @@ import com.example.utils.hasBluetoothAdvertisePermission
 import com.example.utils.hasPostNotificationsPermission
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -14,6 +13,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import android.Manifest
@@ -28,6 +28,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.GuardianViewModel
+import com.example.repository.SettingsRepository
 import com.example.ui.components.SettingsItem
 import com.example.ui.components.SettingsSwitchItem
 import com.example.ui.components.SettingsSection
@@ -57,20 +58,30 @@ fun SettingsScreen(
     val voiceSosPhrase by viewModel.voiceSosPhrase.collectAsState()
     
     val context = androidx.compose.ui.platform.LocalContext.current
+    val settingsRepository = remember { SettingsRepository(context) }
+    var fallResponseTime by remember { mutableStateOf(settingsRepository.getFallResponseDelaySeconds()) }
+    var showFallResponseTimeDialog by remember { mutableStateOf(false) }
+
     val prefs = context.getSharedPreferences("smart_sos_settings", android.content.Context.MODE_PRIVATE)
-    var nearbyPresenceInterval by remember { mutableStateOf(prefs.getInt("nearby_presence_interval", 0)) }
+    var nearbyPresenceInterval by remember { mutableStateOf(settingsRepository.getNearbyPresenceInterval()) }
+    var showNearbyPresenceDialog by remember { mutableStateOf(false) }
     var nearbyDeviceName by remember {
         mutableStateOf(prefs.getString("nearby_device_name", com.example.ble.nearby.NearbyBleProtocol.DEFAULT_DEVICE_NAME) ?: com.example.ble.nearby.NearbyBleProtocol.DEFAULT_DEVICE_NAME)
     }
+    var showDeviceNameDialog by remember { mutableStateOf(false) }
+    var tempDeviceName by remember { mutableStateOf("") }
+    var showNearbyDiscoveryScreen by remember { mutableStateOf(false) }
 
     var showVoicePhraseDialog by remember { mutableStateOf(false) }
     var tempPhrase by remember { mutableStateOf("") }
     val sosSoundEnabled by viewModel.sosSoundEnabled.collectAsState()
     val sosVibrationEnabled by viewModel.sosVibrationEnabled.collectAsState()
     val fallDetectionEnabled by viewModel.fallDetectionEnabled.collectAsState()
+    val devices by viewModel.devices.collectAsState()
+    val isBleConnected = devices.any { it.status == "CONNECTED" || it.status == "ALERTing" }
+    val maxBattery = devices.filter { it.status == "CONNECTED" || it.status == "ALERTing" }.maxOfOrNull { it.batteryLevel } ?: 0
     
     var showLogoutDialog by remember { mutableStateOf(false) }
-    var showFallDebugDialog by remember { mutableStateOf(false) }
 
     val nearbyPermissions = mutableListOf<String>()
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -88,7 +99,7 @@ fun SettingsScreen(
         val allGranted = permissions.entries.all { it.value }
         if (allGranted && pendingNearbyInterval != null) {
             nearbyPresenceInterval = pendingNearbyInterval!!
-            prefs.edit().putInt("nearby_presence_interval", nearbyPresenceInterval).apply()
+            settingsRepository.setNearbyPresenceInterval(nearbyPresenceInterval)
             com.example.service.NearbyBleService.startOrStop(context)
         } else {
             // Permission denied, fail gracefully (do not apply interval, it remains at current)
@@ -96,8 +107,87 @@ fun SettingsScreen(
         }
     }
 
+    val applyNearbyInterval: (Int) -> Unit = { nextVal ->
+        if (nextVal == 0) {
+            nearbyPresenceInterval = nextVal
+            settingsRepository.setNearbyPresenceInterval(nextVal)
+            com.example.service.NearbyBleService.startOrStop(context)
+        } else {
+            val hasAdvertise = context.hasBluetoothAdvertisePermission()
+            val hasNotification = context.hasPostNotificationsPermission()
 
-    Scaffold(
+            if (hasAdvertise && hasNotification) {
+                nearbyPresenceInterval = nextVal
+                settingsRepository.setNearbyPresenceInterval(nextVal)
+                com.example.service.NearbyBleService.startOrStop(context)
+            } else {
+                pendingNearbyInterval = nextVal
+                nearbyPermissionLauncher.launch(nearbyPermissions.toTypedArray())
+            }
+        }
+    }
+
+
+    if (showNearbyDiscoveryScreen) {
+        BackHandler { showNearbyDiscoveryScreen = false }
+        Scaffold(
+            topBar = {
+                CenterAlignedTopAppBar(
+                    title = { Text("Nearby Discovery", fontWeight = FontWeight.Bold) },
+                    navigationIcon = {
+                        IconButton(onClick = { showNearbyDiscoveryScreen = false }) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
+                    },
+                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.background
+                    )
+                )
+            },
+            containerColor = MaterialTheme.colorScheme.background
+        ) { paddingValues ->
+            val presenceLabels = mapOf(
+                0 to "Off",
+                5 to "5 seconds",
+                10 to "10 seconds",
+                30 to "30 seconds",
+                60 to "60 seconds"
+            )
+            val currentPresenceText = presenceLabels[nearbyPresenceInterval] ?: "Off"
+
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                item {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    SettingsSection(title = "Nearby Discovery") {
+                        SettingsItem(
+                            icon = Icons.Default.PhoneAndroid,
+                            title = "Device Name",
+                            subtitle = nearbyDeviceName,
+                            onClick = {
+                                tempDeviceName = nearbyDeviceName
+                                showDeviceNameDialog = true
+                            }
+                        )
+                        SettingsItem(
+                            icon = Icons.Default.Timer,
+                            title = "Frequency",
+                            subtitle = currentPresenceText,
+                            onClick = {
+                                showNearbyPresenceDialog = true
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    } else {
+        Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
                 title = { Text("Settings", fontWeight = FontWeight.Bold) },
@@ -127,7 +217,7 @@ fun SettingsScreen(
                     SettingsItem(
                         icon = Icons.Default.Security,
                         title = "Security & PIN",
-                        subtitle = "Manage emergency PIN and biometric login",
+                        subtitle = "Manage emergency duress PIN and account credentials",
                         onClick = onNavigateToSecurity
                     )
                     SettingsItem(
@@ -141,60 +231,22 @@ fun SettingsScreen(
 
 
             item {
-                SettingsSection(title = "Nearby Emergency Presence") {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 8.dp)
-                    ) {
-                        androidx.compose.material3.OutlinedTextField(
-                            value = nearbyDeviceName,
-                            onValueChange = { newName ->
-                                nearbyDeviceName = newName
-                                prefs.edit().putString("nearby_device_name", newName).apply()
-                            },
-                            label = { Text("Nearby Device Name") },
-                            placeholder = { Text(com.example.ble.nearby.NearbyBleProtocol.DEFAULT_DEVICE_NAME) },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "This name is visible to nearby Smart SOS users.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                SettingsSection(title = "Nearby Discovery") {
+                    val presenceLabels = mapOf(
+                        0 to "Off",
+                        5 to "5 seconds",
+                        10 to "10 seconds",
+                        30 to "30 seconds",
+                        60 to "60 seconds"
+                    )
+                    val currentPresenceText = presenceLabels[nearbyPresenceInterval] ?: "Off"
 
-                    val presenceOptions = listOf(0, 5, 10, 30, 60)
-                    val presenceLabels = mapOf(0 to "Off", 5 to "5 seconds", 10 to "10 seconds", 30 to "30 seconds", 60 to "60 seconds")
-                    
                     SettingsItem(
                         icon = Icons.Default.WifiTethering,
-                        title = "Nearby Presence (BLE)",
-                        subtitle = "Frequency: " + (presenceLabels[nearbyPresenceInterval] ?: "Off"),
+                        title = "Nearby Discovery",
+                        subtitle = "$nearbyDeviceName • $currentPresenceText",
                         onClick = {
-                            val currentIndex = presenceOptions.indexOf(nearbyPresenceInterval)
-                            val nextIndex = (currentIndex + 1) % presenceOptions.size
-                            val nextVal = presenceOptions[nextIndex]
-                            
-                            if (nextVal == 0) {
-                                nearbyPresenceInterval = nextVal
-                                prefs.edit().putInt("nearby_presence_interval", nextVal).apply()
-                                com.example.service.NearbyBleService.startOrStop(context)
-                            } else {
-                                val hasAdvertise = context.hasBluetoothAdvertisePermission()
-                                val hasNotification = context.hasPostNotificationsPermission()
-
-                                if (hasAdvertise && hasNotification) {
-                                    nearbyPresenceInterval = nextVal
-                                    prefs.edit().putInt("nearby_presence_interval", nextVal).apply()
-                                    com.example.service.NearbyBleService.startOrStop(context)
-                                } else {
-                                    pendingNearbyInterval = nextVal
-                                    nearbyPermissionLauncher.launch(nearbyPermissions.toTypedArray())
-                                }
-                            }
+                            showNearbyDiscoveryScreen = true
                         }
                     )
                 }
@@ -243,10 +295,10 @@ fun SettingsScreen(
                         onCheckedChange = { enabled -> viewModel.setFallDetectionEnabled(enabled) }
                     )
                     SettingsItem(
-                        icon = Icons.Default.Build,
-                        title = "Fall Detection Debug",
-                        subtitle = "Live ESP32 MOTION_ALERT & fall pipeline tracing",
-                        onClick = { showFallDebugDialog = true }
+                        icon = Icons.Default.Timer,
+                        title = "Fall Response Time",
+                        subtitle = "Time before a detected fall starts the emergency workflow\n$fallResponseTime seconds",
+                        onClick = { showFallResponseTimeDialog = true }
                     )
                     SettingsItem(
                         icon = Icons.Default.Lock,
@@ -326,6 +378,7 @@ fun SettingsScreen(
             }
         }
     }
+}
 
     if (showVoicePhraseDialog) {
         AlertDialog(
@@ -384,6 +437,154 @@ fun SettingsScreen(
         )
     }
 
+    if (showFallResponseTimeDialog) {
+        AlertDialog(
+            onDismissRequest = { showFallResponseTimeDialog = false },
+            title = { Text("Fall Response Time") },
+            text = {
+                Column {
+                    listOf(5, 10, 12, 15, 20, 30).forEach { seconds ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    fallResponseTime = seconds
+                                    settingsRepository.setFallResponseDelaySeconds(seconds)
+                                    showFallResponseTimeDialog = false
+                                }
+                                .padding(vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = fallResponseTime == seconds,
+                                onClick = {
+                                    fallResponseTime = seconds
+                                    settingsRepository.setFallResponseDelaySeconds(seconds)
+                                    showFallResponseTimeDialog = false
+                                }
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("$seconds seconds")
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showFallResponseTimeDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (showDeviceNameDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeviceNameDialog = false },
+            title = {
+                Text(
+                    text = "Device Name",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            },
+            text = {
+                Column {
+                    Text(
+                        text = "This name represents this phone during nearby discovery.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    androidx.compose.material3.OutlinedTextField(
+                        value = tempDeviceName,
+                        onValueChange = { tempDeviceName = it },
+                        label = { Text("Device Name") },
+                        placeholder = { Text(com.example.ble.nearby.NearbyBleProtocol.DEFAULT_DEVICE_NAME) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val trimmed = tempDeviceName.trim()
+                        val finalName = if (trimmed.isNotEmpty()) trimmed else com.example.ble.nearby.NearbyBleProtocol.DEFAULT_DEVICE_NAME
+                        nearbyDeviceName = finalName
+                        prefs.edit().putString("nearby_device_name", finalName).apply()
+                        showDeviceNameDialog = false
+                    }
+                ) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeviceNameDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (showNearbyPresenceDialog) {
+        val presenceOptions = listOf(0, 5, 10, 30, 60)
+        val presenceLabels = mapOf(0 to "Off", 5 to "5 seconds", 10 to "10 seconds", 30 to "30 seconds", 60 to "60 seconds")
+
+        AlertDialog(
+            onDismissRequest = { showNearbyPresenceDialog = false },
+            title = {
+                Text(
+                    text = "Nearby Presence",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            },
+            text = {
+                Column {
+                    Text(
+                        text = "Controls how often nearby-device presence activity occurs.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    presenceOptions.forEach { interval ->
+                        val label = presenceLabels[interval] ?: "$interval seconds"
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    applyNearbyInterval(interval)
+                                    showNearbyPresenceDialog = false
+                                }
+                                .padding(vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = nearbyPresenceInterval == interval,
+                                onClick = {
+                                    applyNearbyInterval(interval)
+                                    showNearbyPresenceDialog = false
+                                }
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = label,
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = { },
+            dismissButton = {
+                TextButton(onClick = { showNearbyPresenceDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
     if (showLogoutDialog) {
         AlertDialog(
             onDismissRequest = { showLogoutDialog = false },
@@ -402,171 +603,6 @@ fun SettingsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showLogoutDialog = false }) { Text("Cancel") }
-            }
-        )
-    }
-
-    if (showFallDebugDialog) {
-        val debugEvents by viewModel.fallDebugEvents.collectAsState()
-        val stageStatus by viewModel.fallDebugStageStatus.collectAsState()
-        val listState = rememberLazyListState()
-
-        LaunchedEffect(debugEvents.size) {
-            if (debugEvents.isNotEmpty()) {
-                listState.animateScrollToItem(debugEvents.size - 1)
-            }
-        }
-
-        AlertDialog(
-            onDismissRequest = { showFallDebugDialog = false },
-            title = {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("FALL DETECTION DEBUG", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                    IconButton(onClick = { showFallDebugDialog = false }) {
-                        Icon(Icons.Default.Close, contentDescription = "Close")
-                    }
-                }
-            },
-            text = {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 480.dp)
-                ) {
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
-                        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
-                    ) {
-                        Column(modifier = Modifier.padding(8.dp)) {
-                            val stages = listOf(
-                                "BLE MTU",
-                                "BLE notification",
-                                "MOTION_ALERT",
-                                "Parsed motion",
-                                "MotionProcessor",
-                                "Possible fall callback",
-                                "Fall enabled",
-                                "Emergency active",
-                                "Fall state",
-                                "Calling triggerFall",
-                                "FallDetectionService entered"
-                            )
-                            stages.forEach { stageName ->
-                                val status = stageStatus[stageName]
-                                Row(
-                                    modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = "$stageName:",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = if (status != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    Text(
-                                        text = status ?: "Waiting...",
-                                        fontSize = 11.sp,
-                                        fontWeight = if (status != null) FontWeight.Bold else FontWeight.Normal,
-                                        color = if (status != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-                                        maxLines = 1,
-                                        modifier = Modifier.weight(1.3f)
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("Live Events (${debugEvents.size})", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                        TextButton(
-                            onClick = { viewModel.clearFallDebugEvents() },
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                        ) {
-                            Text("Clear", fontSize = 11.sp)
-                        }
-                    }
-
-                    if (debugEvents.isEmpty()) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(120.dp)
-                                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(8.dp)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                "No events yet.\nWaiting for ESP32 notifications...",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.outline,
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                            )
-                        }
-                    } else {
-                        LazyColumn(
-                            state = listState,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(max = 200.dp)
-                                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(8.dp))
-                                .padding(6.dp)
-                        ) {
-                            items(debugEvents) { event ->
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 2.dp)
-                                ) {
-                                    Row {
-                                        Text(
-                                            text = "[${event.timestamp}]",
-                                            fontSize = 10.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.primary
-                                        )
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text(
-                                            text = event.stage,
-                                            fontSize = 10.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = MaterialTheme.colorScheme.secondary
-                                        )
-                                    }
-                                    Text(
-                                        text = event.message,
-                                        fontSize = 11.sp,
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        modifier = Modifier.padding(start = 4.dp)
-                                    )
-                                    HorizontalDivider(
-                                        modifier = Modifier.padding(top = 2.dp),
-                                        thickness = 0.5.dp,
-                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { showFallDebugDialog = false }) {
-                    Text("Close")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { viewModel.clearFallDebugEvents() }) {
-                    Text("Clear")
-                }
             }
         )
     }

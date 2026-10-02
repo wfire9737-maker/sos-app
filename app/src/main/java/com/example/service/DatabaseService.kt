@@ -145,7 +145,10 @@ class DatabaseService(private val context: Context, private val authService: Aut
                                     if (snapshot != null) {
                                         val list = mutableListOf<EmergencyContact>()
                                         for (doc in snapshot) {
-                                            list.add(EmergencyContact.fromMap(doc.data))
+                                            val contact = EmergencyContact.fromMap(doc.data)
+                                            if (!isSeededContact(contact)) {
+                                                list.add(contact)
+                                            }
                                         }
                                         _contacts.value = list.sortedWith(compareBy({ it.priority }, { it.name }))
                                     }
@@ -167,7 +170,10 @@ class DatabaseService(private val context: Context, private val authService: Aut
                         if (snapshot != null) {
                             val list = mutableListOf<EmergencyContact>()
                             for (doc in snapshot) {
-                                list.add(EmergencyContact.fromMap(doc.data))
+                                val contact = EmergencyContact.fromMap(doc.data)
+                                if (!isSeededContact(contact)) {
+                                    list.add(contact)
+                                }
                             }
                             _contacts.value = list.sortedWith(compareBy({ it.priority }, { it.name }))
                         }
@@ -730,72 +736,66 @@ class DatabaseService(private val context: Context, private val authService: Aut
         }
     }
 
+    companion object {
+        private val SEEDED_CONTACT_IDS = setOf(
+            "demo-contact-1",
+            "demo-contact-2",
+            "demo-contact-3",
+            "demo-contact-4"
+        )
+    }
+
+    private fun isSeededContact(contact: EmergencyContact): Boolean {
+        return contact.id in SEEDED_CONTACT_IDS || contact.id.startsWith("demo-contact-")
+    }
+
     private fun loadLocalContacts() {
         val contactsJson = sharedPrefs.getString("contacts_list", null)
         if (contactsJson != null) {
             try {
                 val array = JSONArray(contactsJson)
                 val list = mutableListOf<EmergencyContact>()
+                var hadSeededContacts = false
                 for (i in 0 until array.length()) {
                     val obj = array.getJSONObject(i)
-                    list.add(EmergencyContact.fromJsonObject(obj))
+                    val contact = EmergencyContact.fromJsonObject(obj)
+                    if (!isSeededContact(contact)) {
+                        list.add(contact)
+                    } else {
+                        hadSeededContacts = true
+                    }
                 }
-                _contacts.value = list.sortedWith(compareBy({ it.priority }, { it.name }))
+                val sorted = list.sortedWith(compareBy({ it.priority }, { it.name }))
+                _contacts.value = sorted
+                if (hadSeededContacts) {
+                    saveContactsListLocally(sorted)
+                }
             } catch (e: Exception) {
-                preloadDemoContacts()
+                _contacts.value = emptyList()
+                saveContactsListLocally(emptyList())
             }
         } else {
-            preloadDemoContacts()
+            _contacts.value = emptyList()
+            saveContactsListLocally(emptyList())
+        }
+
+        // Clean up any seeded contacts from Room persistence while preserving user-created contacts
+        serviceScope.launch {
+            try {
+                SEEDED_CONTACT_IDS.forEach { seededId ->
+                    contactDao?.deleteContact(seededId)
+                }
+            } catch (e: Exception) {
+                Log.e("DatabaseService", "Error cleaning seeded contacts from Room", e)
+            }
         }
     }
 
     private fun preloadDemoContacts() {
-        val demoContacts = listOf(
-            EmergencyContact(
-                id = "demo-contact-1",
-                userId = "demo-uid-123",
-                name = "Dispatch Center HQ",
-                phone = "911",
-                relationship = "First Responders",
-                priority = 1,
-                notes = "24/7 emergency services routing dispatch.",
-                avatarEmoji = "🚨"
-            ),
-            EmergencyContact(
-                id = "demo-contact-2",
-                userId = "demo-uid-123",
-                name = "Dr. Elizabeth Vance",
-                phone = "+1-555-0144",
-                relationship = "Primary Physician",
-                priority = 2,
-                notes = "Cardiologist. Medical records access code: #CARD-8491.",
-                avatarEmoji = "🩺"
-            ),
-            EmergencyContact(
-                id = "demo-contact-3",
-                userId = "demo-uid-123",
-                name = "Marcus Vance",
-                phone = "+1-555-0143",
-                relationship = "Brother",
-                priority = 2,
-                notes = "Primary family contact. Holds backup keys to home.",
-                avatarEmoji = "🏡"
-            ),
-            EmergencyContact(
-                id = "demo-contact-4",
-                userId = "demo-uid-123",
-                name = "County Search & Rescue",
-                phone = "+1-555-0199",
-                relationship = "Support Unit",
-                priority = 3,
-                notes = "Secondary contact for wilderness dispatch coordinates.",
-                avatarEmoji = "🌲"
-            )
-        )
-        saveContactsListLocally(demoContacts)
+        // No-op: Newly logged-in users start with an empty Emergency Contacts list.
+        _contacts.value = emptyList()
+        saveContactsListLocally(emptyList())
     }
-
-    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     private fun saveContactLocally(contact: EmergencyContact) {
         val currentList = _contacts.value.toMutableList()
@@ -808,7 +808,7 @@ class DatabaseService(private val context: Context, private val authService: Aut
         saveContactsListLocally(currentList)
         
         // Save to Room
-        scope.launch {
+        serviceScope.launch {
             try {
                 val entity = EmergencyContactEntity(
                     contactId = contact.id,
@@ -816,7 +816,8 @@ class DatabaseService(private val context: Context, private val authService: Aut
                     name = contact.name,
                     phone = contact.phone,
                     relationship = contact.relationship,
-                    priority = contact.priority
+                    priority = contact.priority,
+                    customSmsTemplate = contact.customSmsTemplate
                 )
                 contactDao?.insertContact(entity)
             } catch (e: Exception) {
@@ -829,7 +830,7 @@ class DatabaseService(private val context: Context, private val authService: Aut
         val currentList = _contacts.value.filter { it.id != contactId }
         saveContactsListLocally(currentList)
         
-        scope.launch {
+        serviceScope.launch {
             try {
                 contactDao?.deleteContact(contactId)
             } catch (e: Exception) {

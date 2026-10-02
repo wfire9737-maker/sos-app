@@ -1,8 +1,10 @@
 package com.example.ui.screens
 
 import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -16,6 +18,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import com.example.ui.rememberLocationPermissionHandler
 import com.example.utils.hasMicrophonePermission
 import androidx.compose.ui.draw.clip
@@ -26,6 +29,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
+import android.content.Context
+import android.content.SharedPreferences
+import com.example.repository.SettingsRepository
 import com.example.ui.GuardianViewModel
 import com.example.service.AuthState
 import com.example.model.*
@@ -52,6 +58,31 @@ fun HomeScreen(
     onNavigateToSafeCheckIn: () -> Unit = {}
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val settingsRepository = remember { SettingsRepository(context) }
+    val vmVoiceSosEnabled by viewModel.voiceSosEnabled.collectAsState()
+    var voiceSosEnabled by remember { mutableStateOf(settingsRepository.isVoiceSosEnabled()) }
+
+    LaunchedEffect(vmVoiceSosEnabled) {
+        voiceSosEnabled = vmVoiceSosEnabled
+    }
+
+    val prefListener = remember {
+        SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == SettingsRepository.KEY_VOICE_SOS_ENABLED) {
+                voiceSosEnabled = settingsRepository.isVoiceSosEnabled()
+            }
+        }
+    }
+
+    DisposableEffect(context) {
+        val prefs = context.getSharedPreferences(SettingsRepository.PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.registerOnSharedPreferenceChangeListener(prefListener)
+        voiceSosEnabled = settingsRepository.isVoiceSosEnabled()
+        onDispose {
+            prefs.unregisterOnSharedPreferenceChangeListener(prefListener)
+        }
+    }
+
     val sosTriggerHandler = rememberLocationPermissionHandler {
         viewModel.triggerManualSOS {
             onNavigateToEmergency()
@@ -66,6 +97,12 @@ fun HomeScreen(
     val notifications by viewModel.notifications.collectAsState()
     val currentUser = (authState as? AuthState.Success)?.user ?: User(name = "User")
     val sosWorkflowState by viewModel.sosWorkflowState.collectAsState()
+    val matchedTrustedPlace by viewModel.currentMatchedTrustedPlace.collectAsState()
+    val currentLocation by viewModel.currentLocation.collectAsState()
+
+    LaunchedEffect(Unit) {
+        viewModel.startLocationTracking()
+    }
 
     var showBondDialog by remember { mutableStateOf(false) }
     var showResolveDialog by remember { mutableStateOf<Alert?>(null) }
@@ -111,43 +148,74 @@ fun HomeScreen(
         },
         containerColor = MaterialTheme.colorScheme.background
     ) { paddingValues ->
-        LazyColumn(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+                .padding(horizontal = 16.dp)
         ) {
-            item {
-                Spacer(modifier = Modifier.height(24.dp))
+            // Upper Content (Header, Voice Command if enabled, Active Emergencies)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .animateContentSize(),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Spacer(modifier = Modifier.height(16.dp))
                 HomeHeader(
                     userName = currentUser.name,
                     onProfileClick = onNavigateToProfile,
                     onNotificationsClick = onNavigateToNotifications,
                     unreadCount = notifications.count { !it.isRead }
                 )
+
+                // Trusted Place presence indicator
+                TrustedPlacePresenceCard(
+                    matchedPlace = matchedTrustedPlace,
+                    isLocationReady = currentLocation.latitude != 0.0 || currentLocation.longitude != 0.0
+                )
+
+                // Voice Command & Speech Recognition Section (Visible only when Voice SOS is enabled)
+                if (voiceSosEnabled) {
+                    VoiceCommandSection(viewModel = viewModel)
+                }
+
+                // Active Alerts
+                if (alerts.any { it.status == "ACTIVE" }) {
+                    Text("Active Emergencies", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    alerts.filter { it.status == "ACTIVE" }.forEach { alert ->
+                        AlertCard(alert = alert, onResolveClick = { showResolveDialog = alert })
+                    }
+                }
             }
 
-            // Big SOS Button
-            item {
-                Spacer(modifier = Modifier.height(16.dp))
+            // Centered Flexible Middle Space for On-Screen SOS Button
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                contentAlignment = Alignment.Center
+            ) {
                 SosButtonSection(onSosClick = {
                     sosTriggerHandler()
                 })
             }
 
-            // Voice Command & Speech Recognition Section
-            item {
-                VoiceCommandSection(viewModel = viewModel)
-            }
+            // Bottom Anchored Section: Physical SOS ESP32 & Nearby People
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // Physical SOS ESP32 / Bluetooth Device Status Card
+                StatusGrid(
+                    devices = devices,
+                    isEsp32Connected = isEsp32Connected,
+                    onBluetoothClick = onNavigateToBleTest
+                )
 
-            // Quick Status Grid
-            item {
-                StatusGrid(devices = devices, onBluetoothClick = onNavigateToBleTest)
-            }
-            
-            // Nearby Discovery Section
-            item {
+                // Nearby People Discovery Section
                 Card(
                     modifier = Modifier.fillMaxWidth().clickable { onNavigateToNearbyDiscovery() },
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
@@ -173,45 +241,6 @@ fun HomeScreen(
                     }
                 }
             }
-
-            // Active Alerts
-            if (alerts.any { it.status == "ACTIVE" }) {
-                item {
-                    Text("Active Emergencies", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                }
-                items(alerts.filter { it.status == "ACTIVE" }, key = { it.id }) { alert ->
-                    AlertCard(alert = alert, onResolveClick = { showResolveDialog = alert })
-                }
-            }
-
-            // Paired Devices
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Connected Devices", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    TextButton(onClick = { showBondDialog = true }) {
-                        Text("+ ADD", color = MaterialTheme.colorScheme.primary)
-                    }
-                }
-            }
-            if (devices.isEmpty()) {
-                item {
-                    Text("No devices bonded.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 14.sp)
-                }
-            } else {
-                items(devices, key = { it.deviceId }) { device ->
-                    DeviceCard(
-                        device = device,
-                        isEsp32Connected = isEsp32Connected,
-                        onMonitorClick = onNavigateToDeviceMonitoring
-                    )
-                }
-            }
-
-            item { Spacer(modifier = Modifier.height(24.dp)) }
         }
     }
 
@@ -272,20 +301,92 @@ fun HomeHeader(userName: String, onProfileClick: () -> Unit, onNotificationsClic
 
 @Composable
 fun SosButtonSection(onSosClick: () -> Unit) {
-    var isPressed by remember { mutableStateOf(false) }
+    val infiniteTransition = rememberInfiniteTransition(label = "sos_pulse")
+    
+    val outerScale by infiniteTransition.animateFloat(
+        initialValue = 0.96f,
+        targetValue = 1.04f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 2000, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "outer_scale"
+    )
+    
+    val middleScale by infiniteTransition.animateFloat(
+        initialValue = 0.98f,
+        targetValue = 1.03f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 2000, delayMillis = 150, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "middle_scale"
+    )
+
+    val buttonScale by infiniteTransition.animateFloat(
+        initialValue = 1.0f,
+        targetValue = 1.025f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 2000, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "button_scale"
+    )
+
+    val outerAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.08f,
+        targetValue = 0.16f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 2000, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "outer_alpha"
+    )
+
+    val middleAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.15f,
+        targetValue = 0.24f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 2000, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "middle_alpha"
+    )
     
     Box(
         modifier = Modifier.fillMaxWidth().height(260.dp),
         contentAlignment = Alignment.Center
     ) {
-        // Outer rings
-        Box(modifier = Modifier.size(240.dp).background(MaterialTheme.colorScheme.error.copy(alpha = 0.1f), CircleShape))
-        Box(modifier = Modifier.size(190.dp).background(MaterialTheme.colorScheme.error.copy(alpha = 0.2f), CircleShape))
+        // Outer pulsing ring
+        Box(
+            modifier = Modifier
+                .size(240.dp)
+                .graphicsLayer {
+                    scaleX = outerScale
+                    scaleY = outerScale
+                }
+                .background(MaterialTheme.colorScheme.error.copy(alpha = outerAlpha), CircleShape)
+        )
         
-        // Inner button
+        // Middle pulsing ring
+        Box(
+            modifier = Modifier
+                .size(190.dp)
+                .graphicsLayer {
+                    scaleX = middleScale
+                    scaleY = middleScale
+                }
+                .background(MaterialTheme.colorScheme.error.copy(alpha = middleAlpha), CircleShape)
+        )
+        
+        // Inner button with subtle heartbeat pulse
         Box(
             modifier = Modifier
                 .size(140.dp)
+                .graphicsLayer {
+                    scaleX = buttonScale
+                    scaleY = buttonScale
+                }
                 .background(MaterialTheme.colorScheme.error, CircleShape)
                 .clip(CircleShape)
                 .clickable { onSosClick() },
@@ -300,26 +401,24 @@ fun SosButtonSection(onSosClick: () -> Unit) {
 }
 
 @Composable
-fun StatusGrid(devices: List<Device>, onBluetoothClick: () -> Unit = {}) {
-    val isBleConnected = devices.any { it.status == "CONNECTED" || it.status == "ALERTing" }
-    val maxBattery = devices.filter { it.status == "CONNECTED" || it.status == "ALERTing" }.maxOfOrNull { it.batteryLevel } ?: 0
+fun StatusGrid(
+    devices: List<Device>,
+    isEsp32Connected: Boolean = false,
+    onBluetoothClick: () -> Unit = {}
+) {
+    val connectedDevice = devices.firstOrNull { it.status == "CONNECTED" || it.status == "ALERTing" }
+        ?: if (isEsp32Connected) devices.firstOrNull() else null
+    val isConnected = connectedDevice != null
+    val bluetoothValue = if (isConnected) connectedDevice!!.deviceName else "Not Connected"
+    val bluetoothColor = if (isConnected) SafetyGreen else MaterialTheme.colorScheme.onSurfaceVariant
     
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        StatusCard(
-            modifier = Modifier.weight(1f).clickable { onBluetoothClick() },
-            icon = Icons.Default.Bluetooth,
-            label = "Bluetooth",
-            value = if (isBleConnected) "Connected" else "Disconnected",
-            statusColor = if (isBleConnected) SafetyGreen else MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        StatusCard(
-            modifier = Modifier.weight(1f),
-            icon = Icons.Default.BatteryFull,
-            label = "Battery",
-            value = if (isBleConnected) "$maxBattery%" else "--",
-            statusColor = if (maxBattery > 20) SafetyGreen else if (maxBattery > 0) AlertOrange else MaterialTheme.colorScheme.onSurfaceVariant
-        )
-    }
+    StatusCard(
+        modifier = Modifier.fillMaxWidth().clickable { onBluetoothClick() },
+        icon = Icons.Default.Bluetooth,
+        label = "Bluetooth",
+        value = bluetoothValue,
+        statusColor = bluetoothColor
+    )
 }
 
 @Composable
@@ -344,7 +443,7 @@ fun StatusCard(modifier: Modifier = Modifier, icon: androidx.compose.ui.graphics
 
 @Composable
 fun DeviceCard(device: Device, isEsp32Connected: Boolean, onMonitorClick: () -> Unit) {
-    val isConnected = isEsp32Connected || device.status == "CONNECTED"
+    val isConnected = isEsp32Connected || device.status == "CONNECTED" || device.status == "ALERTing"
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -366,15 +465,36 @@ fun DeviceCard(device: Device, isEsp32Connected: Boolean, onMonitorClick: () -> 
                 }
                 Badge(containerColor = if (isConnected) SafetyGreen else MaterialTheme.colorScheme.error) {
                     Text(
-                        if (isConnected) "Connected to SOS Device" else "SOS Device Disconnected",
+                        if (isConnected) "Connected" else "Disconnected",
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                         fontWeight = FontWeight.Bold
                     )
                 }
             }
-            Spacer(modifier = Modifier.height(16.dp))
-            Button(onClick = onMonitorClick, modifier = Modifier.fillMaxWidth()) {
-                Text("Diagnostics", fontSize = 11.sp)
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.BatteryFull,
+                        contentDescription = "Battery",
+                        tint = if (device.batteryLevel > 20) SafetyGreen else AlertOrange,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "${device.batteryLevel}%",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+                TextButton(onClick = onMonitorClick) {
+                    Text("Diagnostics", fontSize = 12.sp)
+                }
             }
         }
     }
@@ -653,6 +773,106 @@ fun VoiceCommandSection(
                             )
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun TrustedPlacePresenceCard(
+    matchedPlace: com.example.model.TrustedPlace?,
+    isLocationReady: Boolean,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (matchedPlace != null) {
+                SafetyGreen.copy(alpha = 0.12f)
+            } else {
+                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+            }
+        ),
+        border = BorderStroke(
+            width = 1.dp,
+            color = if (matchedPlace != null) {
+                SafetyGreen.copy(alpha = 0.4f)
+            } else {
+                MaterialTheme.colorScheme.outline.copy(alpha = 0.12f)
+            }
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .background(
+                        color = if (matchedPlace != null) {
+                            SafetyGreen.copy(alpha = 0.2f)
+                        } else {
+                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+                        },
+                        shape = CircleShape
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = if (matchedPlace != null) Icons.Default.Shield else Icons.Default.Place,
+                    contentDescription = null,
+                    tint = if (matchedPlace != null) SafetyGreen else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                if (!isLocationReady) {
+                    Text(
+                        text = "Locating...",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Acquiring GPS fix",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else if (matchedPlace != null) {
+                    Text(
+                        text = "You're at ${matchedPlace.name}",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Within trusted location" + if (matchedPlace.address.isNotBlank() && matchedPlace.address != "Current location detected") " • ${matchedPlace.address}" else "",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = SafetyGreen,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                    )
+                } else {
+                    Text(
+                        text = "Not in a Trusted Place",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Outside registered safe zones",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         }

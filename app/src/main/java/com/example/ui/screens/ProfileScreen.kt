@@ -23,6 +23,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -45,13 +46,11 @@ fun ProfileScreen(
     var name by remember { mutableStateOf(currentUser.name) }
     var email by remember { mutableStateOf(currentUser.email) }
     var phone by remember { mutableStateOf(currentUser.phone) }
-    var bloodGroup by remember { mutableStateOf(currentUser.bloodType) }
-    var medicalConditions by remember { mutableStateOf(currentUser.conditions) }
-    var emergencyNotes by remember { mutableStateOf(currentUser.medicalInfo) }
     var profilePhotoUri by remember { mutableStateOf<Uri?>(if (!currentUser.photoUri.isNullOrBlank()) Uri.parse(currentUser.photoUri ?: "") else null) }
     
     var isEditing by remember { mutableStateOf(false) }
     var showSaveDialog by remember { mutableStateOf(false) }
+    var showLogoutDialog by remember { mutableStateOf(false) }
 
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia(),
@@ -61,7 +60,7 @@ fun ProfileScreen(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("Medical Profile", fontWeight = FontWeight.Bold) },
+                title = { Text("Profile", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -165,47 +164,49 @@ fun ProfileScreen(
             }
 
             item {
-                Spacer(modifier = Modifier.height(8.dp))
-                Text("Emergency & Medical", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
-                Spacer(modifier = Modifier.height(8.dp))
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)),
-                    shape = RoundedCornerShape(16.dp),
-                    border = borderStrokeIf(isEditing, MaterialTheme.colorScheme.error.copy(alpha = 0.5f))
+                Spacer(modifier = Modifier.height(16.dp))
+                Button(
+                    onClick = { showLogoutDialog = true },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp)
+                        .testTag("profile_logout_button"),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer
+                    ),
+                    shape = RoundedCornerShape(16.dp)
                 ) {
-                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        ProfileTextField(
-                            value = bloodGroup,
-                            onValueChange = { bloodGroup = it },
-                            label = "Blood Group",
-                            icon = Icons.Default.WaterDrop,
-                            readOnly = !isEditing,
-                            isErrorColors = true
-                        )
-                        ProfileTextField(
-                            value = medicalConditions,
-                            onValueChange = { medicalConditions = it },
-                            label = "Medical Conditions",
-                            icon = Icons.Default.LocalHospital,
-                            readOnly = !isEditing,
-                            isErrorColors = true,
-                            singleLine = false
-                        )
-                        ProfileTextField(
-                            value = emergencyNotes,
-                            onValueChange = { emergencyNotes = it },
-                            label = "Emergency Notes",
-                            icon = Icons.Default.Warning,
-                            readOnly = !isEditing,
-                            isErrorColors = true,
-                            singleLine = false
-                        )
-                    }
+                    Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Log Out", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 }
             }
-            
+
             item { Spacer(modifier = Modifier.height(32.dp)) }
         }
+    }
+
+    if (showLogoutDialog) {
+        AlertDialog(
+            onDismissRequest = { showLogoutDialog = false },
+            title = { Text("Log Out") },
+            text = { Text("Are you sure you want to log out?") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.logout()
+                        showLogoutDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Log Out")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showLogoutDialog = false }) { Text("Cancel") }
+            }
+        )
     }
 
     if (showSaveDialog) {
@@ -221,9 +222,6 @@ fun ProfileScreen(
                                 name = name,
                                 email = email,
                                 phone = phone,
-                                bloodType = bloodGroup,
-                                conditions = medicalConditions,
-                                medicalInfo = emergencyNotes,
                                 photoUri = profilePhotoUri?.toString()
                             )
                         )
@@ -287,8 +285,4 @@ fun ProfileTextField(
         }
     )
 }
-
-@Composable
-fun borderStrokeIf(condition: Boolean, color: Color) = 
-    if (condition) androidx.compose.foundation.BorderStroke(1.dp, color) else null
 

@@ -42,7 +42,7 @@ class TrustedPlacesService(
         try {
             trustedPlaceDao.getTrustedPlacesFlow(currentUserId).collect { entities ->
                 _trustedPlaces.value = entities.map { it.toDomainModel() }
-                geofenceManager.updateGeofences(_trustedPlaces.value)
+                geofenceManager.updateGeofences(_trustedPlaces.value.filter { it.isEnabled })
             }
         } catch (e: Exception) {
             Log.e("TrustedPlacesService", "Failed to load local trusted places", e)
@@ -70,7 +70,12 @@ class TrustedPlacesService(
     }
 
     suspend fun addTrustedPlace(place: TrustedPlace) {
-        val newPlace = place.copy(placeId = UUID.randomUUID().toString(), userId = currentUserId)
+        val newPlace = place.copy(
+            placeId = if (place.placeId.isNotBlank()) place.placeId else UUID.randomUUID().toString(),
+            userId = if (place.userId.isNotBlank()) place.userId else currentUserId,
+            createdDate = if (place.createdDate != 0L) place.createdDate else System.currentTimeMillis(),
+            lastUpdated = System.currentTimeMillis()
+        )
         try {
             trustedPlaceDao.insertTrustedPlace(newPlace.toEntity())
             firestore?.collection("users")?.document(currentUserId)
@@ -81,7 +86,10 @@ class TrustedPlacesService(
     }
     
     suspend fun updateTrustedPlace(place: TrustedPlace) {
-        val updatedPlace = place.copy(lastUpdated = System.currentTimeMillis())
+        val updatedPlace = place.copy(
+            userId = if (place.userId.isNotBlank()) place.userId else currentUserId,
+            lastUpdated = System.currentTimeMillis()
+        )
         try {
             trustedPlaceDao.insertTrustedPlace(updatedPlace.toEntity())
             firestore?.collection("users")?.document(currentUserId)

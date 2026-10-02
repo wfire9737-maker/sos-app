@@ -8,6 +8,8 @@ import android.print.PrintManager
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
@@ -41,6 +43,7 @@ import com.example.ui.theme.EmergencyRed
 import com.example.ui.theme.SafetyBlue
 import com.example.ui.theme.SafetyGreen
 import java.io.File
+import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -65,6 +68,7 @@ fun ReportsScreen(
     var pdfProgress by remember { mutableStateOf(0f) }
     var showShareOptions by remember { mutableStateOf(false) }
     var selectedAlertForDetail by remember { mutableStateOf<Alert?>(null) }
+    var pendingCsvContent by remember { mutableStateOf<String?>(null) }
 
     // Formulate clean dataset: combine real alerts and synthetic demo events for visual fullness
     val processedAlerts = remember(realAlerts, selectedFilter, customStartDate, customEndDate) {
@@ -133,6 +137,345 @@ fun ReportsScreen(
     val fallCount = processedAlerts.count { it.triggerType == "FALL_DETECTED" }
     val manualCount = processedAlerts.count { it.triggerType == "MANUAL" }
     val bleCount = processedAlerts.count { it.triggerType == "ESP32_BUTTON" }
+
+    // Helper for RFC 4180 CSV field escaping
+    fun escapeCsvField(value: Any?): String {
+        if (value == null) return ""
+        val str = value.toString()
+        return if (str.contains('"') || str.contains(',') || str.contains('\n') || str.contains('\r')) {
+            "\"" + str.replace("\"", "\"\"") + "\""
+        } else {
+            str
+        }
+    }
+
+    // Generate CSV string from existing report dataset
+    fun generateReportCsv(): String {
+        val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
+        val csvBuilder = java.lang.StringBuilder()
+        
+        // CSV Header
+        csvBuilder.append("Incident_ID,User_Name,Phone_Number,Trigger_Type,Latitude,Longitude,Timestamp,Status,Resolved_Timestamp,Notes\r\n")
+        
+        // Data Rows
+        for (alert in processedAlerts) {
+            val id = escapeCsvField(alert.id)
+            val name = escapeCsvField(alert.userName)
+            val phone = escapeCsvField(alert.userPhone)
+            val type = escapeCsvField(alert.triggerType)
+            val lat = escapeCsvField(alert.latitude)
+            val lng = escapeCsvField(alert.longitude)
+            val timeStr = escapeCsvField(sdf.format(Date(alert.timestamp)))
+            val status = escapeCsvField(alert.status)
+            val resTimeStr = escapeCsvField(if (alert.resolvedAt > 0) sdf.format(Date(alert.resolvedAt)) else "N/A")
+            val notes = escapeCsvField(alert.notes)
+            
+            csvBuilder.append("$id,$name,$phone,$type,$lat,$lng,$timeStr,$status,$resTimeStr,$notes\r\n")
+        }
+        return csvBuilder.toString()
+    }
+
+    // Storage Access Framework CreateDocument Launcher
+    val createCsvDocumentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("text/csv")
+    ) { uri: Uri? ->
+        if (uri == null) {
+            // User cancelled the save dialog
+            isGeneratingCsv = false
+            pendingCsvContent = null
+            Toast.makeText(context, "Export cancelled", Toast.LENGTH_SHORT).show()
+            return@rememberLauncherForActivityResult
+        }
+
+        val content = pendingCsvContent ?: generateReportCsv()
+        if (content.isBlank()) {
+            isGeneratingCsv = false
+            pendingCsvContent = null
+            Toast.makeText(context, "No report data available to export", Toast.LENGTH_SHORT).show()
+            return@rememberLauncherForActivityResult
+        }
+
+        try {
+            val outputStream = context.contentResolver.openOutputStream(uri)
+            if (outputStream == null) {
+                Toast.makeText(context, "Failed to open destination file for writing", Toast.LENGTH_LONG).show()
+                return@rememberLauncherForActivityResult
+            }
+            outputStream.use { stream ->
+                stream.write(content.toByteArray(Charsets.UTF_8))
+                stream.flush()
+            }
+            Toast.makeText(context, "CSV report exported successfully!", Toast.LENGTH_LONG).show()
+        } catch (e: IOException) {
+            Toast.makeText(context, "Failed to write CSV file: ${e.message}", Toast.LENGTH_LONG).show()
+        } catch (e: Exception) {
+            Toast.makeText(context, "CSV export failed: ${e.message}", Toast.LENGTH_LONG).show()
+        } finally {
+            isGeneratingCsv = false
+            pendingCsvContent = null
+        }
+    }
+
+    // Export CSV using Storage Access Framework
+    fun executeCsvExport() {
+        if (processedAlerts.isEmpty()) {
+            Toast.makeText(context, "No report data available to export", Toast.LENGTH_SHORT).show()
+            return
+        }
+        
+        isGeneratingCsv = true
+        try {
+            val csvContent = generateReportCsv()
+            pendingCsvContent = csvContent
+            val fileTimestamp = SimpleDateFormat("yyyy-MM-dd_HH-mm", Locale.US).format(Date())
+            val suggestedFilename = "smart_sos_report_$fileTimestamp.csv"
+            createCsvDocumentLauncher.launch(suggestedFilename)
+        } catch (e: Exception) {
+            isGeneratingCsv = false
+            pendingCsvContent = null
+            Toast.makeText(context, "Failed to initialize CSV export: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    // Helper for multi-page PDF generation using android.graphics.pdf.PdfDocument
+    fun generatePdfDocument(alerts: List<Alert>): android.graphics.pdf.PdfDocument {
+        val pdfDocument = android.graphics.pdf.PdfDocument()
+        val pageWidth = 595
+        val pageHeight = 842
+        val marginLeft = 40f
+        val marginRight = 40f
+        val marginTop = 40f
+        val marginBottom = 40f
+        val contentWidth = pageWidth - marginLeft - marginRight // 515f
+
+        val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
+        val generationDate = sdf.format(Date())
+
+        // Paints
+        val titlePaint = android.graphics.Paint().apply {
+            color = android.graphics.Color.rgb(0, 97, 164)
+            textSize = 18f
+            typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+            isAntiAlias = true
+        }
+
+        val subtitlePaint = android.graphics.Paint().apply {
+            color = android.graphics.Color.rgb(85, 85, 85)
+            textSize = 10f
+            typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.NORMAL)
+            isAntiAlias = true
+        }
+
+        val pageNumberPaint = android.graphics.Paint().apply {
+            color = android.graphics.Color.rgb(120, 120, 120)
+            textSize = 9f
+            textAlign = android.graphics.Paint.Align.RIGHT
+            isAntiAlias = true
+        }
+
+        val headerLinePaint = android.graphics.Paint().apply {
+            color = android.graphics.Color.rgb(0, 97, 164)
+            strokeWidth = 1.5f
+            style = android.graphics.Paint.Style.STROKE
+            isAntiAlias = true
+        }
+
+        val itemHeaderBgPaint = android.graphics.Paint().apply {
+            color = android.graphics.Color.rgb(240, 244, 249)
+            style = android.graphics.Paint.Style.FILL
+        }
+
+        val itemBorderPaint = android.graphics.Paint().apply {
+            color = android.graphics.Color.rgb(215, 225, 235)
+            strokeWidth = 1f
+            style = android.graphics.Paint.Style.STROKE
+        }
+
+        val labelPaint = android.graphics.Paint().apply {
+            color = android.graphics.Color.rgb(40, 40, 40)
+            textSize = 9.5f
+            typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+            isAntiAlias = true
+        }
+
+        val valuePaint = android.graphics.Paint().apply {
+            color = android.graphics.Color.rgb(30, 30, 30)
+            textSize = 9.5f
+            typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.NORMAL)
+            isAntiAlias = true
+        }
+
+        val statusResolvedPaint = android.graphics.Paint().apply {
+            color = android.graphics.Color.rgb(46, 125, 50)
+            textSize = 9.5f
+            typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+            isAntiAlias = true
+        }
+
+        val statusActivePaint = android.graphics.Paint().apply {
+            color = android.graphics.Color.rgb(198, 40, 40)
+            textSize = 9.5f
+            typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+            isAntiAlias = true
+        }
+
+        fun wrapText(text: String, paint: android.graphics.Paint, maxWidth: Float): List<String> {
+            if (text.isEmpty()) return listOf("N/A")
+            val result = mutableListOf<String>()
+            val paragraphs = text.split("\n")
+            for (p in paragraphs) {
+                if (paint.measureText(p) <= maxWidth) {
+                    result.add(p)
+                } else {
+                    val words = p.split(" ")
+                    var currentLine = ""
+                    for (word in words) {
+                        val candidate = if (currentLine.isEmpty()) word else "$currentLine $word"
+                        if (paint.measureText(candidate) <= maxWidth) {
+                            currentLine = candidate
+                        } else {
+                            if (currentLine.isNotEmpty()) result.add(currentLine)
+                            currentLine = word
+                        }
+                    }
+                    if (currentLine.isNotEmpty()) result.add(currentLine)
+                }
+            }
+            return if (result.isEmpty()) listOf("N/A") else result
+        }
+
+        var pageNumber = 1
+        var pageInfo = android.graphics.pdf.PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageNumber).create()
+        var page = pdfDocument.startPage(pageInfo)
+        var canvas = page.canvas
+
+        fun drawHeader(canvas: android.graphics.Canvas, pageNum: Int) {
+            canvas.drawText("Smart SOS Emergency Report", marginLeft, marginTop + 14f, titlePaint)
+            canvas.drawText("Generated: $generationDate", marginLeft, marginTop + 28f, subtitlePaint)
+            canvas.drawText("Page $pageNum", pageWidth - marginRight, marginTop + 14f, pageNumberPaint)
+            canvas.drawLine(marginLeft, marginTop + 36f, pageWidth - marginRight, marginTop + 36f, headerLinePaint)
+        }
+
+        drawHeader(canvas, pageNumber)
+        var currentY = marginTop + 50f
+
+        for (alert in alerts) {
+            val notesWrapped = wrapText(alert.notes.ifBlank { "N/A" }, valuePaint, contentWidth - 120f)
+            val lineHeight = 14f
+            val itemHeight = 24f + (8 * 16f) + (notesWrapped.size * lineHeight) + 12f
+
+            // Check if item exceeds available page space
+            if (currentY + itemHeight > pageHeight - marginBottom) {
+                pdfDocument.finishPage(page)
+                pageNumber++
+                pageInfo = android.graphics.pdf.PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageNumber).create()
+                page = pdfDocument.startPage(pageInfo)
+                canvas = page.canvas
+                drawHeader(canvas, pageNumber)
+                currentY = marginTop + 50f
+            }
+
+            val itemTop = currentY
+            val itemBottom = itemTop + itemHeight
+
+            // Draw item border and title bar
+            canvas.drawRoundRect(marginLeft, itemTop, pageWidth - marginRight, itemBottom, 6f, 6f, itemBorderPaint)
+            canvas.drawRoundRect(marginLeft, itemTop, pageWidth - marginRight, itemTop + 22f, 6f, 6f, itemHeaderBgPaint)
+            canvas.drawText("Incident ID: ${alert.id}", marginLeft + 10f, itemTop + 15f, labelPaint)
+
+            val statusText = if (alert.status == "RESOLVED") "● RESOLVED" else "● ACTIVE"
+            val stPaint = if (alert.status == "RESOLVED") statusResolvedPaint else statusActivePaint
+            val statusTextWidth = stPaint.measureText(statusText)
+            canvas.drawText(statusText, pageWidth - marginRight - 10f - statusTextWidth, itemTop + 15f, stPaint)
+
+            var rowY = itemTop + 38f
+            val col1LabelX = marginLeft + 10f
+            val col1ValX = marginLeft + 115f
+
+            fun drawField(label: String, value: String) {
+                canvas.drawText(label, col1LabelX, rowY, labelPaint)
+                canvas.drawText(value, col1ValX, rowY, valuePaint)
+                rowY += 16f
+            }
+
+            drawField("User Name:", alert.userName.ifBlank { "User" })
+            drawField("Phone Number:", alert.userPhone.ifBlank { "N/A" })
+            drawField("Trigger Type:", alert.triggerType)
+            drawField("Latitude:", alert.latitude.toString())
+            drawField("Longitude:", alert.longitude.toString())
+            drawField("Timestamp:", sdf.format(Date(alert.timestamp)))
+            drawField("Status:", alert.status)
+            drawField("Resolved Timestamp:", if (alert.resolvedAt > 0) sdf.format(Date(alert.resolvedAt)) else "N/A")
+
+            // Draw Notes
+            canvas.drawText("Notes:", col1LabelX, rowY, labelPaint)
+            for ((idx, noteLine) in notesWrapped.withIndex()) {
+                canvas.drawText(noteLine, col1ValX, rowY + (idx * lineHeight), valuePaint)
+            }
+
+            currentY = itemBottom + 12f
+        }
+
+        pdfDocument.finishPage(page)
+        return pdfDocument
+    }
+
+    // Storage Access Framework CreateDocument Launcher for PDF
+    val createPdfDocumentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/pdf")
+    ) { uri: Uri? ->
+        if (uri == null) {
+            // User cancelled the save dialog
+            isGeneratingPdf = false
+            return@rememberLauncherForActivityResult
+        }
+
+        if (processedAlerts.isEmpty()) {
+            isGeneratingPdf = false
+            Toast.makeText(context, "No report data available to export", Toast.LENGTH_SHORT).show()
+            return@rememberLauncherForActivityResult
+        }
+
+        try {
+            val pdfDoc = generatePdfDocument(processedAlerts)
+            val outputStream = context.contentResolver.openOutputStream(uri)
+            if (outputStream == null) {
+                pdfDoc.close()
+                Toast.makeText(context, "Failed to open destination file for writing", Toast.LENGTH_LONG).show()
+                return@rememberLauncherForActivityResult
+            }
+            outputStream.use { stream ->
+                pdfDoc.writeTo(stream)
+                stream.flush()
+            }
+            pdfDoc.close()
+            Toast.makeText(context, "PDF report exported successfully!", Toast.LENGTH_LONG).show()
+        } catch (e: IOException) {
+            Toast.makeText(context, "Failed to write PDF file: ${e.message}", Toast.LENGTH_LONG).show()
+        } catch (e: Exception) {
+            Toast.makeText(context, "PDF export failed: ${e.message}", Toast.LENGTH_LONG).show()
+        } finally {
+            isGeneratingPdf = false
+        }
+    }
+
+    // Export PDF using Storage Access Framework
+    fun executePdfExport() {
+        if (processedAlerts.isEmpty()) {
+            Toast.makeText(context, "No report data available to export", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        isGeneratingPdf = true
+        try {
+            val fileTimestamp = SimpleDateFormat("yyyy-MM-dd_HH-mm", Locale.US).format(Date())
+            val suggestedFilename = "smart_sos_report_$fileTimestamp.pdf"
+            createPdfDocumentLauncher.launch(suggestedFilename)
+        } catch (e: Exception) {
+            isGeneratingPdf = false
+            Toast.makeText(context, "Failed to initialize PDF export: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
 
     // Helper to generate the text/HTML layout for printing and sharing
     fun generateReportHtml(): String {
@@ -248,91 +591,48 @@ fun ReportsScreen(
         webView.loadDataWithBaseURL(null, generateReportHtml(), "text/html", "UTF-8", null)
     }
 
-    // Real CSV File Generation and Share via FileProvider
-    fun executeCsvShare() {
-        isGeneratingCsv = true
-        
+    // Share generated PDF report using Android Sharesheet and FileProvider
+    fun executePdfShare() {
+        if (processedAlerts.isEmpty()) {
+            Toast.makeText(context, "No report data available to share", Toast.LENGTH_SHORT).show()
+            return
+        }
+
         try {
-            val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
-            val csvBuilder = java.lang.StringBuilder()
-            
-            // Header
-            csvBuilder.append("Incident_ID,User_Name,Phone_Number,Trigger_Type,Latitude,Longitude,Timestamp,Status,Resolved_Timestamp,Notes\n")
-            
-            // Rows
-            processedAlerts.forEach { alert ->
-                val id = alert.id
-                val name = alert.userName.replace(",", " ")
-                val phone = alert.userPhone.replace(",", " ")
-                val type = alert.triggerType
-                val lat = alert.latitude
-                val lng = alert.longitude
-                val timeStr = sdf.format(Date(alert.timestamp))
-                val status = alert.status
-                val resTimeStr = if (alert.resolvedAt > 0) sdf.format(Date(alert.resolvedAt)) else "N/A"
-                val notes = alert.notes.replace(",", " ").replace("\n", " ")
-                
-                csvBuilder.append("$id,$name,$phone,$type,$lat,$lng,$timeStr,$status,$resTimeStr,$notes\n")
+            val fileTimestamp = SimpleDateFormat("yyyy-MM-dd_HH-mm", Locale.US).format(Date())
+            val tempFile = File(context.cacheDir, "smart_sos_report_$fileTimestamp.pdf")
+
+            val pdfDoc = generatePdfDocument(processedAlerts)
+            tempFile.outputStream().use { stream ->
+                pdfDoc.writeTo(stream)
+                stream.flush()
+            }
+            pdfDoc.close()
+
+            val authority = try {
+                val pm = context.packageManager
+                pm.resolveContentProvider("${context.packageName}.fileprovider", 0)?.authority
+                    ?: pm.resolveContentProvider("com.example.fileprovider", 0)?.authority
+                    ?: "com.example.fileprovider"
+            } catch (e: Exception) {
+                "com.example.fileprovider"
             }
 
-            val csvContent = csvBuilder.toString()
-            val filename = "Guardian_Safety_Audit_${System.currentTimeMillis()}.csv"
-            
-            // Write to local cache directory
-            val cacheFile = File(context.cacheDir, filename)
-            cacheFile.writeText(csvContent)
-            
-            // Obtain URI via FileProvider
-            val fileUri: Uri = FileProvider.getUriForFile(
-                context,
-                "com.example.fileprovider",
-                cacheFile
-            )
+            val pdfUri: Uri = try {
+                FileProvider.getUriForFile(context, authority, tempFile)
+            } catch (e: IllegalArgumentException) {
+                FileProvider.getUriForFile(context, "com.example.fileprovider", tempFile)
+            }
 
-            // Trigger Share Intent
-            val intent = Intent(Intent.ACTION_SEND).apply {
-                type = "text/csv"
-                putExtra(Intent.EXTRA_SUBJECT, "Guardian Emergency Logs CSV Export")
-                putExtra(Intent.EXTRA_STREAM, fileUri)
+            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                type = "application/pdf"
+                putExtra(Intent.EXTRA_STREAM, pdfUri)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-            
-            context.startActivity(Intent.createChooser(intent, "Share Guardian CSV Report"))
-            
+            context.startActivity(Intent.createChooser(shareIntent, "Share PDF"))
         } catch (e: Exception) {
-            Toast.makeText(context, "CSV Generation failed: ${e.message}", Toast.LENGTH_LONG).show()
-        } finally {
-            isGeneratingCsv = false
+            Toast.makeText(context, "Failed to share PDF: ${e.message}", Toast.LENGTH_LONG).show()
         }
-    }
-
-    // Text Quick Share summarizing report
-    fun executeTextShare() {
-        val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US)
-        val brief = StringBuilder()
-        brief.append("🛡️ GUARDIAN SAFETY TELEMETRY REPORT SUMMARY\n")
-        brief.append("Generated on: ${sdf.format(Date())}\n")
-        brief.append("Period: $selectedFilter\n")
-        brief.append("---------------------------------------\n")
-        brief.append("📊 Audit Stats:\n")
-        brief.append("- Total Incidents Logged: $totalCount\n")
-        brief.append("- Active Urgent Alerts: $activeCount\n")
-        brief.append("- Resolved & Audited: $resolvedCount\n")
-        brief.append("- Falls Detected: $fallCount | Manual triggers: $manualCount | BLE clicks: $bleCount\n\n")
-        
-        brief.append("📌 Latest Logs Preview:\n")
-        processedAlerts.take(3).forEach { alert ->
-            val rStatus = if (alert.status == "RESOLVED") "RESOLVED" else "ACTIVE"
-            brief.append("- [${sdf.format(Date(alert.timestamp))}] ${alert.userName} ($rStatus) Trigger: ${alert.triggerType}\n")
-            brief.append("  Location coordinates: https://maps.google.com/?q=${alert.latitude},${alert.longitude}\n")
-        }
-        
-        val intent = Intent(Intent.ACTION_SEND).apply {
-            type = "text/plain"
-            putExtra(Intent.EXTRA_SUBJECT, "Guardian Brief Safety Report")
-            putExtra(Intent.EXTRA_TEXT, brief.toString())
-        }
-        context.startActivity(Intent.createChooser(intent, "Share Safety Brief Summary"))
     }
 
     Scaffold(
@@ -504,9 +804,9 @@ fun ReportsScreen(
                         modifier = Modifier.padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        // PDF Document Print Spooler Button
+                        // PDF Document Export & SAF Save
                         Button(
-                            onClick = { executeNativePrint() },
+                            onClick = { executePdfExport() },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(50.dp)
@@ -524,17 +824,17 @@ fun ReportsScreen(
                                         modifier = Modifier.size(20.dp),
                                         strokeWidth = 2.dp
                                     )
-                                    Text("Compiling PDF Layout...", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                    Text("Compiling PDF Document...", fontSize = 14.sp, fontWeight = FontWeight.Bold)
                                 } else {
                                     Icon(imageVector = Icons.Default.PictureAsPdf, contentDescription = null)
-                                    Text("Generate NATIVE PDF / Print Report", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                    Text("Export PDF Report", fontSize = 14.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
 
-                        // CSV Exporter & Intent Share
+                        // CSV Exporter & SAF Save
                         Button(
-                            onClick = { executeCsvShare() },
+                            onClick = { executeCsvExport() },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(50.dp)
@@ -552,7 +852,7 @@ fun ReportsScreen(
                                         modifier = Modifier.size(20.dp),
                                         strokeWidth = 2.dp
                                     )
-                                    Text("Formulating CSV Spreadsheet...", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                    Text("Saving CSV Spreadsheet...", fontSize = 14.sp, fontWeight = FontWeight.Bold)
                                 } else {
                                     Icon(imageVector = Icons.Default.FileDownload, contentDescription = null)
                                     Text("Export CSV Audit SpreadSheet", fontSize = 14.sp, fontWeight = FontWeight.Bold)
@@ -564,9 +864,9 @@ fun ReportsScreen(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            // Quick Share Text Summary
+                            // Share PDF Report
                             OutlinedButton(
-                                onClick = { executeTextShare() },
+                                onClick = { executePdfShare() },
                                 modifier = Modifier
                                     .weight(1f)
                                     .height(48.dp)
@@ -579,7 +879,7 @@ fun ReportsScreen(
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
                                     Icon(imageVector = Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
-                                    Text("Share Brief", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                    Text("Share PDF", fontSize = 13.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
 

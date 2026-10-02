@@ -11,5 +11,6 @@ data class EmergencyContactEntity(
     val name: String,
     val phone: String,
     val relationship: String,
-    val priority: Int
+    val priority: Int,
+    val customSmsTemplate: String? = null
 )

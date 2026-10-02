@@ -73,6 +73,8 @@ class VoiceSosForegroundService : Service() {
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
                 description = "Listening for Voice SOS wake phrase"
+                setSound(null, null)
+                enableVibration(false)
             }
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             manager.createNotificationChannel(channel)
@@ -86,6 +88,8 @@ class VoiceSosForegroundService : Service() {
             .setSmallIcon(com.example.R.mipmap.ic_launcher) // We can use this or any existing app icon
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setSilent(true)
+            .setSound(null)
             .build()
     }
 }

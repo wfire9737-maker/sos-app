@@ -27,14 +27,94 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import android.content.Intent
 import android.net.Uri
+import android.provider.ContactsContract
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import com.example.model.EmergencyContact
 import com.example.ui.GuardianViewModel
+
+private fun extractContactDetails(context: android.content.Context, contactUri: Uri): Pair<String?, List<String>> {
+    var displayName: String? = null
+    val phoneNumbers = mutableListOf<String>()
+    var contactId: String? = null
+
+    try {
+        // Query contact details (Display name & contact ID)
+        context.contentResolver.query(
+            contactUri,
+            arrayOf(
+                ContactsContract.Contacts._ID,
+                ContactsContract.Contacts.DISPLAY_NAME
+            ),
+            null,
+            null,
+            null
+        )?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val idIndex = cursor.getColumnIndex(ContactsContract.Contacts._ID)
+                val nameIndex = cursor.getColumnIndex(ContactsContract.Contacts.DISPLAY_NAME)
+                if (idIndex != -1) {
+                    contactId = cursor.getString(idIndex)
+                }
+                if (nameIndex != -1) {
+                    displayName = cursor.getString(nameIndex)
+                }
+            }
+        }
+
+        // If contact ID is found, query phone numbers associated with this contact
+        if (contactId != null) {
+            context.contentResolver.query(
+                ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                arrayOf(ContactsContract.CommonDataKinds.Phone.NUMBER),
+                "${ContactsContract.CommonDataKinds.Phone.CONTACT_ID} = ?",
+                arrayOf(contactId),
+                null
+            )?.use { phoneCursor ->
+                val numberIndex = phoneCursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
+                while (phoneCursor.moveToNext()) {
+                    if (numberIndex != -1) {
+                        val num = phoneCursor.getString(numberIndex)
+                        if (!num.isNullOrBlank()) {
+                            phoneNumbers.add(num.trim())
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fallback: Query directly from URI in case it is already a Phone data URI
+        if (phoneNumbers.isEmpty()) {
+            context.contentResolver.query(
+                contactUri,
+                arrayOf(ContactsContract.CommonDataKinds.Phone.NUMBER),
+                null,
+                null,
+                null
+            )?.use { directCursor ->
+                val numIdx = directCursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
+                while (directCursor.moveToNext()) {
+                    if (numIdx != -1) {
+                        val num = directCursor.getString(numIdx)
+                        if (!num.isNullOrBlank()) {
+                            phoneNumbers.add(num.trim())
+                        }
+                    }
+                }
+            }
+        }
+    } catch (e: Exception) {
+        android.util.Log.e("ContactsScreen", "Error extracting contact details", e)
+    }
+
+    return Pair(displayName, phoneNumbers.distinct())
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -246,6 +326,15 @@ fun ContactCard(
                         fontWeight = FontWeight.Medium
                     )
                 }
+                if (!contact.customSmsTemplate.isNullOrBlank()) {
+                    Text(
+                        text = "💬 \"${contact.customSmsTemplate}\"",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
             
             // Actions
@@ -289,10 +378,41 @@ fun AddEditContactDialog(
     onDismiss: () -> Unit,
     onSave: (EmergencyContact) -> Unit
 ) {
+    val context = LocalContext.current
     var name by remember { mutableStateOf(contact?.name ?: "") }
     var phone by remember { mutableStateOf(contact?.phone ?: "") }
     var relationship by remember { mutableStateOf(contact?.relationship ?: "") }
     var isPrimary by remember { mutableStateOf(contact?.priority == 1) }
+    var customSmsTemplate by remember { mutableStateOf(contact?.customSmsTemplate) }
+    var showTemplateEditorDialog by remember { mutableStateOf(false) }
+    var tempTemplateText by remember { mutableStateOf("") }
+
+    var showPhoneSelectionDialog by remember { mutableStateOf(false) }
+    var pendingContactName by remember { mutableStateOf("") }
+    var pendingPhoneNumbers by remember { mutableStateOf<List<String>>(emptyList()) }
+
+    val contactPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickContact()
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+
+        val (pickedName, pickedNumbers) = extractContactDetails(context, uri)
+        if (pickedNumbers.isEmpty()) {
+            if (!pickedName.isNullOrBlank()) {
+                name = pickedName
+            }
+            Toast.makeText(context, "This contact does not have a phone number.", Toast.LENGTH_LONG).show()
+        } else if (pickedNumbers.size == 1) {
+            if (!pickedName.isNullOrBlank()) {
+                name = pickedName
+            }
+            phone = pickedNumbers[0]
+        } else {
+            pendingContactName = pickedName ?: name
+            pendingPhoneNumbers = pickedNumbers
+            showPhoneSelectionDialog = true
+        }
+    }
     
     val isEdit = contact != null
 
@@ -301,6 +421,25 @@ fun AddEditContactDialog(
         title = { Text(if (isEdit) "Edit Contact" else "Add Contact", fontWeight = FontWeight.Bold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                // Pick from Phone Contacts Button
+                OutlinedButton(
+                    onClick = {
+                        try {
+                            contactPickerLauncher.launch(null)
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "Unable to open phone contacts: ${e.message}", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("pick_from_phone_contacts_btn"),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Default.Contacts, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Pick from Phone Contacts")
+                }
+
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
@@ -341,6 +480,49 @@ fun AddEditContactDialog(
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("Set as Primary Contact")
                 }
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                        .padding(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "SMS Template",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = if (customSmsTemplate.isNullOrBlank()) {
+                                    "Default emergency message"
+                                } else {
+                                    customSmsTemplate!!
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (customSmsTemplate.isNullOrBlank()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        TextButton(
+                            onClick = {
+                                tempTemplateText = customSmsTemplate ?: ""
+                                showTemplateEditorDialog = true
+                            }
+                        ) {
+                            Text(if (customSmsTemplate.isNullOrBlank()) "Set Template" else "Edit Message")
+                        }
+                    }
+                }
             }
         },
         confirmButton = {
@@ -352,14 +534,16 @@ fun AddEditContactDialog(
                                 name = name.trim(),
                                 phone = phone.trim(),
                                 relationship = relationship.trim(),
-                                priority = if (isPrimary) 1 else 2
+                                priority = if (isPrimary) 1 else 2,
+                                customSmsTemplate = customSmsTemplate?.trim()?.ifEmpty { null }
                             ) ?: EmergencyContact(
                                 id = "contact-${System.currentTimeMillis()}",
                                 userId = "", // Will be set by viewModel
                                 name = name.trim(),
                                 phone = phone.trim(),
                                 relationship = relationship.trim(),
-                                priority = if (isPrimary) 1 else 2
+                                priority = if (isPrimary) 1 else 2,
+                                customSmsTemplate = customSmsTemplate?.trim()?.ifEmpty { null }
                             )
                         )
                     }
@@ -375,4 +559,118 @@ fun AddEditContactDialog(
             }
         }
     )
+
+    if (showTemplateEditorDialog) {
+        AlertDialog(
+            onDismissRequest = { showTemplateEditorDialog = false },
+            title = { Text("SMS Template", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Customize the message sent to this contact. Emergency event, location, and time will be automatically included.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedTextField(
+                        value = tempTemplateText,
+                        onValueChange = { tempTemplateText = it },
+                        label = { Text("Custom message") },
+                        placeholder = { Text("e.g. Please help me immediately.") },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 100.dp),
+                        maxLines = 4
+                    )
+                    if (tempTemplateText.isNotBlank()) {
+                        TextButton(
+                            onClick = { tempTemplateText = "" },
+                            modifier = Modifier.align(Alignment.End)
+                        ) {
+                            Text("Use Default Message", fontSize = 12.sp)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val trimmed = tempTemplateText.trim()
+                        customSmsTemplate = trimmed.ifEmpty { null }
+                        showTemplateEditorDialog = false
+                    }
+                ) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showTemplateEditorDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (showPhoneSelectionDialog && pendingPhoneNumbers.isNotEmpty()) {
+        AlertDialog(
+            onDismissRequest = { 
+                showPhoneSelectionDialog = false
+                pendingPhoneNumbers = emptyList()
+            },
+            title = { Text("Select Phone Number", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Choose which phone number to use for ${pendingContactName.ifBlank { "this contact" }}:",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    pendingPhoneNumbers.forEach { numberOption ->
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable {
+                                    if (pendingContactName.isNotBlank()) {
+                                        name = pendingContactName
+                                    }
+                                    phone = numberOption
+                                    showPhoneSelectionDialog = false
+                                    pendingPhoneNumbers = emptyList()
+                                },
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Default.Phone,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text(
+                                    text = numberOption,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(
+                    onClick = { 
+                        showPhoneSelectionDialog = false
+                        pendingPhoneNumbers = emptyList()
+                    }
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 }

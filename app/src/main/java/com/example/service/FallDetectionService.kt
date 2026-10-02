@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.example.model.FallEvent
 import com.example.repository.FallRepository
+import com.example.repository.SettingsRepository
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -15,13 +16,14 @@ class FallDetectionService(
     private val fallRepository: FallRepository
 ) {
     private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    private val settingsRepository = SettingsRepository(context)
 
     // Active Gait State Flow
     private val _currentState = MutableStateFlow("STANDING") // "WALKING", "RUNNING", "SITTING", "STANDING", "SUDDEN_FALL_DETECTED", "FALL_COUNTDOWN", "FALL_CANCELLED", "FALL_SOS_AUTO_TRIGGER"
     val currentState: StateFlow<String> = _currentState.asStateFlow()
 
-    // Countdown state
-    private val _countdownSeconds = MutableStateFlow(15)
+    // Countdown state (initialized from persisted setting or default 12s)
+    private val _countdownSeconds = MutableStateFlow(settingsRepository.getFallResponseDelaySeconds())
     val countdownSeconds: StateFlow<Int> = _countdownSeconds.asStateFlow()
 
     private var countdownJob: Job? = null
@@ -47,9 +49,10 @@ class FallDetectionService(
     }
 
     private fun startFallCountdown() {
+        val initialSeconds = settingsRepository.getFallResponseDelaySeconds()
         countdownJob?.cancel()
         _currentState.value = "FALL_COUNTDOWN"
-        _countdownSeconds.value = 15
+        _countdownSeconds.value = initialSeconds
 
         countdownJob = serviceScope.launch {
             while (_countdownSeconds.value > 0) {
@@ -72,7 +75,7 @@ class FallDetectionService(
         countdownJob = null
         setGaitState(
             "FALL_CANCELLED",
-            "Wearer pressed Cancel on 15s countdown modal. Restored standby monitoring."
+            "Wearer pressed Cancel on fall response countdown modal. Restored standby monitoring."
         )
         // Reset to standing
         _currentState.value = "STANDING"

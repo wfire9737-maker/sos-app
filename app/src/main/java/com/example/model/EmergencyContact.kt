@@ -10,7 +10,8 @@ data class EmergencyContact(
     val relationship: String = "",
     val priority: Int = 1, // 1 = High/Primary, 2 = Medium/Secondary, 3 = Low
     val notes: String = "",
-    val avatarEmoji: String = "👤"
+    val avatarEmoji: String = "👤",
+    val customSmsTemplate: String? = null
 ) {
     fun toMap(): Map<String, Any?> {
         return mapOf(
@@ -21,7 +22,8 @@ data class EmergencyContact(
             "relationship" to relationship,
             "priority" to priority,
             "notes" to notes,
-            "avatarEmoji" to avatarEmoji
+            "avatarEmoji" to avatarEmoji,
+            "customSmsTemplate" to customSmsTemplate
         )
     }
 
@@ -35,6 +37,9 @@ data class EmergencyContact(
         obj.put("priority", priority)
         obj.put("notes", notes)
         obj.put("avatarEmoji", avatarEmoji)
+        if (customSmsTemplate != null) {
+            obj.put("customSmsTemplate", customSmsTemplate)
+        }
         return obj
     }
 
@@ -48,7 +53,8 @@ data class EmergencyContact(
                 relationship = map["relationship"] as? String ?: "",
                 priority = (map["priority"] as? Number)?.toInt() ?: 1,
                 notes = map["notes"] as? String ?: "",
-                avatarEmoji = map["avatarEmoji"] as? String ?: "👤"
+                avatarEmoji = map["avatarEmoji"] as? String ?: "👤",
+                customSmsTemplate = map["customSmsTemplate"] as? String
             )
         }
 
@@ -61,7 +67,8 @@ data class EmergencyContact(
                 relationship = obj.optString("relationship"),
                 priority = obj.optInt("priority", 1),
                 notes = obj.optString("notes"),
-                avatarEmoji = obj.optString("avatarEmoji", "👤")
+                avatarEmoji = obj.optString("avatarEmoji", "👤"),
+                customSmsTemplate = if (obj.has("customSmsTemplate") && !obj.isNull("customSmsTemplate")) obj.optString("customSmsTemplate") else null
             )
         }
     }

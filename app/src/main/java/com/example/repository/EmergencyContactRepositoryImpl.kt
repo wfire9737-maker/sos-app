@@ -31,7 +31,8 @@ class EmergencyContactRepositoryImpl @Inject constructor(
                 name = finalContact.name,
                 phone = finalContact.phone,
                 relationship = finalContact.relationship,
-                priority = finalContact.priority
+                priority = finalContact.priority,
+                customSmsTemplate = finalContact.customSmsTemplate
             )
             contactDao.insertContact(entity)
             Result.success(Unit)
@@ -76,7 +77,8 @@ class EmergencyContactRepositoryImpl @Inject constructor(
         name = this.name,
         phone = this.phone,
         relationship = this.relationship,
-        priority = this.priority
+        priority = this.priority,
+        customSmsTemplate = this.customSmsTemplate
     )
     
     // We will adjust the mapper after checking the actual EmergencyContact model

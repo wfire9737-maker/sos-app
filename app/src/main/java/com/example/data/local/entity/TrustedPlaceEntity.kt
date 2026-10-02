@@ -19,8 +19,10 @@ data class TrustedPlaceEntity(
     val alwaysSendSos: Boolean,
     val reduceNotificationSound: Boolean,
     val skipAutomaticPhoneCall: Boolean,
+    val skipAutomaticSms: Boolean = false,
     val delaySosSeconds: Int,
-    val showConfirmationDialog: Boolean
+    val showConfirmationDialog: Boolean,
+    val isEnabled: Boolean = true
 )
 
 fun TrustedPlace.toEntity(): TrustedPlaceEntity {
@@ -37,8 +39,10 @@ fun TrustedPlace.toEntity(): TrustedPlaceEntity {
         alwaysSendSos = alwaysSendSos,
         reduceNotificationSound = reduceNotificationSound,
         skipAutomaticPhoneCall = skipAutomaticPhoneCall,
+        skipAutomaticSms = skipAutomaticSms,
         delaySosSeconds = delaySosSeconds,
-        showConfirmationDialog = showConfirmationDialog
+        showConfirmationDialog = showConfirmationDialog,
+        isEnabled = isEnabled
     )
 }
 
@@ -56,7 +60,9 @@ fun TrustedPlaceEntity.toDomainModel(): TrustedPlace {
         alwaysSendSos = alwaysSendSos,
         reduceNotificationSound = reduceNotificationSound,
         skipAutomaticPhoneCall = skipAutomaticPhoneCall,
+        skipAutomaticSms = skipAutomaticSms,
         delaySosSeconds = delaySosSeconds,
-        showConfirmationDialog = showConfirmationDialog
+        showConfirmationDialog = showConfirmationDialog,
+        isEnabled = isEnabled
     )
 }

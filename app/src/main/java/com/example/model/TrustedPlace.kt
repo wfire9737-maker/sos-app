@@ -14,8 +14,10 @@ data class TrustedPlace(
     val alwaysSendSos: Boolean = true,
     val reduceNotificationSound: Boolean = false,
     val skipAutomaticPhoneCall: Boolean = false,
+    val skipAutomaticSms: Boolean = false,
     val delaySosSeconds: Int = 0,
-    val showConfirmationDialog: Boolean = false
+    val showConfirmationDialog: Boolean = false,
+    val isEnabled: Boolean = true
 ) {
     fun toMap(): Map<String, Any> {
         return mapOf(
@@ -31,8 +33,10 @@ data class TrustedPlace(
             "alwaysSendSos" to alwaysSendSos,
             "reduceNotificationSound" to reduceNotificationSound,
             "skipAutomaticPhoneCall" to skipAutomaticPhoneCall,
+            "skipAutomaticSms" to skipAutomaticSms,
             "delaySosSeconds" to delaySosSeconds,
-            "showConfirmationDialog" to showConfirmationDialog
+            "showConfirmationDialog" to showConfirmationDialog,
+            "isEnabled" to isEnabled
         )
     }
 
@@ -51,8 +55,10 @@ data class TrustedPlace(
                 alwaysSendSos = map["alwaysSendSos"] as? Boolean ?: true,
                 reduceNotificationSound = map["reduceNotificationSound"] as? Boolean ?: false,
                 skipAutomaticPhoneCall = map["skipAutomaticPhoneCall"] as? Boolean ?: false,
+                skipAutomaticSms = map["skipAutomaticSms"] as? Boolean ?: false,
                 delaySosSeconds = (map["delaySosSeconds"] as? Number)?.toInt() ?: 0,
-                showConfirmationDialog = map["showConfirmationDialog"] as? Boolean ?: false
+                showConfirmationDialog = map["showConfirmationDialog"] as? Boolean ?: false,
+                isEnabled = map["isEnabled"] as? Boolean ?: true
             )
         }
     }

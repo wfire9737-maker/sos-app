@@ -83,7 +83,11 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideHistoryService(@ApplicationContext context: Context, databaseService: DatabaseService): HistoryService = HistoryService(context, databaseService.firestoreInstance)
+    fun provideHistoryService(
+        @ApplicationContext context: Context,
+        databaseService: DatabaseService,
+        database: SmartSosDatabase
+    ): HistoryService = HistoryService(context, databaseService.firestoreInstance, database.sosHistoryDao())
 
     @Provides
     @Singleton
@@ -192,6 +196,11 @@ object AppModule {
             context,
             SmartSosDatabase::class.java,
             "smart_sos_db"
+        ).addMigrations(
+            SmartSosDatabase.MIGRATION_3_4,
+            SmartSosDatabase.MIGRATION_4_5,
+            SmartSosDatabase.MIGRATION_5_6,
+            SmartSosDatabase.MIGRATION_6_7
         ).fallbackToDestructiveMigration().build()
     }
 

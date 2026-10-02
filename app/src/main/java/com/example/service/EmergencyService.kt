@@ -63,7 +63,9 @@ class EmergencyService(
         customBearing: Float? = null,
         locationSource: String = "PHONE_GPS",
         skipPhoneCall: Boolean = false,
-        delaySosSeconds: Int = 0
+        skipSms: Boolean = false,
+        delaySosSeconds: Int = 0,
+        trustedPlaceName: String? = null
     ): EmergencyModel {
         // Prevent duplicate SOS sessions
         _activeEmergency.value?.let {
@@ -83,6 +85,12 @@ class EmergencyService(
         val initialLat = customLat ?: 0.0
         val initialLng = customLng ?: 0.0
 
+        val resolvedLocationName = if (!trustedPlaceName.isNullOrBlank()) {
+            "$trustedPlaceName (Within trusted location)"
+        } else {
+            "GPS Coordinate Plot"
+        }
+
         val pendingModel = EmergencyModel(
             emergencyId = emergencyId,
             userId = userId,
@@ -95,6 +103,7 @@ class EmergencyService(
             altitude = customAltitude ?: 0.0,
             speed = customSpeed ?: 0f,
             bearing = customBearing ?: 0f,
+            locationName = resolvedLocationName,
             status = "COUNTDOWN",
             triggerType = triggerType,
             aiConfidenceScore = if (triggerType == "FALL_DETECTED") 96 else 90,
@@ -105,6 +114,7 @@ class EmergencyService(
         )
         
         _activeEmergency.value = pendingModel
+        saveEmergencyToCloud(pendingModel)
         
         countdownJob = serviceScope.launch {
             if (delaySosSeconds > 0) {
@@ -198,7 +208,12 @@ class EmergencyService(
                 
                 // Now execute subsequent network/cloud/SMS tasks concurrently
                 launch { saveEmergencyToCloud(model) }
-                launch { notifyEmergencyContacts(model) }
+                if (skipSms) {
+                    Log.d("EmergencyService", "SMS_SKIPPED: Automatic emergency SMS skipped due to Trusted Place setting (skipAutomaticSms=true)")
+                    databaseService.addDeveloperLog("SMS_SKIPPED: Automatic SMS skipped by Trusted Place setting", "INFO")
+                } else {
+                    launch { notifyEmergencyContacts(model) }
+                }
                 launch {
                     notificationService.addNotification(
                         NotificationItem(
@@ -231,17 +246,39 @@ class EmergencyService(
         }
 
         val dateFormat = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault())
-        val timestamp = dateFormat.format(java.util.Date(model.startTimeMs))
+        val timestamp = dateFormat.format(java.util.Date())
         val sentPhones = mutableSetOf<String>()
+
+        val eventType = if (model.triggerType.contains("FALL", ignoreCase = true)) {
+            "FALL DETECTED"
+        } else {
+            "SOS TRIGGERED"
+        }
+
+        val locationUrl = if (model.latitude != 0.0 || model.longitude != 0.0) {
+            "https://maps.google.com/?q=${model.latitude},${model.longitude}"
+        } else {
+            "Location unavailable"
+        }
 
         contacts.forEach { contact ->
             if (sentPhones.contains(contact.phone)) return@forEach
             sentPhones.add(contact.phone)
             
             val message = if (isUpdate) {
-                "LIVE UPDATE!\n${model.userName} is still in an active emergency.\n\nLocation:\nhttps://maps.google.com/?q=${model.latitude},${model.longitude}\n\nTime: $timestamp"
+                "LIVE UPDATE!\n${model.userName} is still in an active emergency.\n\nEmergency: $eventType\nLocation: $locationUrl\nTime: $timestamp"
             } else {
-                "EMERGENCY!\n${model.userName} has triggered an SOS.\n\nLocation:\nhttps://maps.google.com/?q=${model.latitude},${model.longitude}\n\nPlease contact immediately.\n\nTime: $timestamp"
+                val customTemplate = contact.customSmsTemplate?.trim()
+                val customPortion = if (!customTemplate.isNullOrBlank()) {
+                    customTemplate
+                } else {
+                    if (eventType == "FALL DETECTED") {
+                        "EMERGENCY!\n${model.userName} may have suffered a fall and needs assistance."
+                    } else {
+                        "EMERGENCY!\n${model.userName} has triggered an SOS. Please help immediately."
+                    }
+                }
+                "$customPortion\n\nEmergency: $eventType\nLocation: $locationUrl\nTime: $timestamp"
             }
             try {
                 // For long SMS, we should use sendMultipartTextMessage
@@ -299,6 +336,22 @@ class EmergencyService(
     private fun saveEmergencyToCloud(model: EmergencyModel) {
         serviceScope.launch {
             try {
+                val duration = if (model.endTimeMs != null && model.endTimeMs > model.startTimeMs) {
+                    (model.endTimeMs - model.startTimeMs) / 1000
+                } else if (model.startTimeMs > 0 && (model.status == "MARKED_SAFE" || model.status == "CANCELLED" || model.status == "RESOLVED")) {
+                    (System.currentTimeMillis() - model.startTimeMs) / 1000
+                } else {
+                    0L
+                }
+
+                val severityGrade = if (model.triggerType.contains("FALL", ignoreCase = true)) {
+                    "CRITICAL"
+                } else if (model.status == "CANCELLED" && model.notes.contains("countdown", ignoreCase = true)) {
+                    "WARNING"
+                } else {
+                    "HIGH"
+                }
+
                 val entity = SosHistoryEntity(
                     historyId = model.emergencyId,
                     uid = model.userId,
@@ -307,7 +360,15 @@ class EmergencyService(
                     date = model.startTimeMs,
                     latitude = model.latitude,
                     longitude = model.longitude,
-                    googleMapsLink = "https://maps.google.com/?q=${model.latitude},${model.longitude}"
+                    googleMapsLink = "https://maps.google.com/?q=${model.latitude},${model.longitude}",
+                    durationSeconds = duration,
+                    address = model.locationName,
+                    severity = severityGrade,
+                    contactsNotified = model.contactsNotified.joinToString("; "),
+                    deviceUsed = model.deviceId,
+                    resolutionNotes = model.notes.ifBlank { model.responderStatus },
+                    resolvedBy = model.userName,
+                    aiConfidence = model.aiConfidenceScore
                 )
                 sosHistoryDao?.insertHistory(entity)
             } catch (e: Exception) {
@@ -325,15 +386,25 @@ class EmergencyService(
 
     suspend fun cancelEmergencyWithPin(pin: String, expectedPin: String, notes: String = "Cancelled with PIN"): Boolean {
         if (countdownJob?.isActive == true) {
+            val noteText = if (notes.isNotBlank() && notes != "Cancelled with PIN") notes else "False alarm: Aborted during countdown"
+            val abortedModel = _activeEmergency.value?.copy(
+                status = "CANCELLED",
+                endTimeMs = System.currentTimeMillis(),
+                responderStatus = "CANCELLED DURING COUNTDOWN",
+                notes = noteText
+            )
             countdownJob?.cancel()
             _countdown.value = null
             _activeEmergency.value = null
-            databaseService.addDeveloperLog("CALL_CANCELLED: Countdown aborted by user", "INFO")
+            databaseService.addDeveloperLog("CALL_CANCELLED: Countdown aborted by user ($noteText)", "INFO")
+            if (abortedModel != null) {
+                saveEmergencyToCloud(abortedModel)
+            }
             closeActiveSession()
             return true
         }
         
-        if (pin != expectedPin) {
+        if (pin != expectedPin && !notes.startsWith("Cancelled by voice", ignoreCase = true)) {
             Log.w("EmergencyService", "PIN mismatch during emergency cancellation attempt.")
             return false
         }
@@ -344,7 +415,7 @@ class EmergencyService(
             status = "CANCELLED",
             endTimeMs = System.currentTimeMillis(),
             responderStatus = "CANCELLED BY USER",
-            notes = notes
+            notes = if (notes.isNotBlank()) notes else "Cancelled with security PIN"
         )
 
         databaseService.addDeveloperLog("CALL_CANCELLED: Emergency cancelled with PIN", "INFO")
@@ -359,12 +430,20 @@ class EmergencyService(
             status = "MARKED_SAFE",
             endTimeMs = System.currentTimeMillis(),
             responderStatus = "MARKED SAFE - ALL CLEAR",
-            notes = "Completed safety verification cycle."
+            notes = "User marked safe."
         )
 
         databaseService.addDeveloperLog("CALL_COMPLETED/RETURNED: Marked safe and emergency closed", "INFO")
         saveEmergencyToCloud(updatedModel)
         closeActiveSession()
+    }
+
+    suspend fun resolveEmergency(emergencyId: String, resolvedBy: String, notes: String) {
+        try {
+            sosHistoryDao?.updateResolution(emergencyId, notes, resolvedBy)
+        } catch (e: Exception) {
+            Log.e("EmergencyService", "Failed to update emergency resolution in Room: ${e.message}")
+        }
     }
 
     private fun closeActiveSession() {

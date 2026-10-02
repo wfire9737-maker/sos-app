@@ -13,5 +13,13 @@ data class SosHistoryEntity(
     val googleMapsLink: String,
     val triggerSource: String,
     val date: Long,
-    val status: String
+    val status: String,
+    val durationSeconds: Long = 0L,
+    val address: String = "GPS Coordinate Plot",
+    val severity: String = "HIGH",
+    val contactsNotified: String = "",
+    val deviceUsed: String = "MOBILE-APP-SOS",
+    val resolutionNotes: String = "",
+    val resolvedBy: String = "",
+    val aiConfidence: Int = 90
 )

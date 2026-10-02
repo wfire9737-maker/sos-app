@@ -42,6 +42,7 @@ import com.example.service.VoiceSosService
 import com.example.service.VoiceActivationLog
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.combine
 import com.example.service.DeviceService
 import com.example.model.EmergencyModel
 import com.example.model.SosWorkflowState
@@ -240,6 +241,25 @@ class GuardianViewModel @Inject constructor(
     val routePoints = locationService.routePoints
     val isTrackingLocation = locationService.isTracking
 
+    val currentMatchedTrustedPlace: StateFlow<com.example.model.TrustedPlace?> =
+        combine(
+            locationService.currentLocation,
+            trustedPlacesService.trustedPlaces
+        ) { location, _ ->
+            if (location.latitude != 0.0 || location.longitude != 0.0) {
+                emergencyProvider.getMatchedTrustedPlace(
+                    location.latitude,
+                    location.longitude
+                )
+            } else {
+                null
+            }
+        }.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = null
+        )
+
     // Settings & Security Custom States
     private val _themeMode = MutableStateFlow(try { getApplication<Application>().getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE).getString("theme_mode", "SYSTEM") ?: "SYSTEM" } catch(e:Exception) { "SYSTEM" })
     val themeMode: StateFlow<String> = _themeMode.asStateFlow()
@@ -367,16 +387,6 @@ class GuardianViewModel @Inject constructor(
     private val _telemetrySharingEnabled = MutableStateFlow(true)
     val telemetrySharingEnabled = _telemetrySharingEnabled.asStateFlow()
     fun setTelemetrySharingEnabled(enabled: Boolean) { _telemetrySharingEnabled.value = enabled }
-
-    private val _biometricEnabled = MutableStateFlow(false)
-    val biometricEnabled = _biometricEnabled.asStateFlow()
-    fun setBiometricEnabled(enabled: Boolean) { _biometricEnabled.value = enabled }
-
-    private val _appLockPinEnabled = MutableStateFlow(false)
-    val appLockPinEnabled = _appLockPinEnabled.asStateFlow()
-    private val _appLockPin = MutableStateFlow("")
-    val appLockPin = _appLockPin.asStateFlow()
-    fun setAppLockPin(pin: String, enabled: Boolean) { _appLockPin.value = pin; _appLockPinEnabled.value = enabled }
 
     private val _emergencyPin = MutableStateFlow(securityService.getEmergencyPin())
     val emergencyPin = _emergencyPin.asStateFlow()
@@ -576,6 +586,10 @@ class GuardianViewModel @Inject constructor(
 
     fun shouldSkipPhoneCall(lat: Double? = null, lng: Double? = null): Boolean {
         return emergencyProvider.shouldSkipPhoneCall(lat, lng)
+    }
+
+    fun shouldSkipSms(lat: Double? = null, lng: Double? = null): Boolean {
+        return emergencyProvider.shouldSkipSms(lat, lng)
     }
 
     fun shouldSendSos(lat: Double? = null, lng: Double? = null): Boolean {
@@ -782,7 +796,7 @@ class GuardianViewModel @Inject constructor(
                     _isSirenPlaying.value = false
 
                     if (emergencyService.isEmergencyActive()) {
-                        emergencyService.markSafeAndClose()
+                        emergencyService.cancelEmergencyWithPin("", "", "Cancelled by voice command: ${command.matchedPhrase}")
                     }
                     
                     android.util.Log.d("SOS_ESP32", "SOS CANCELLED")
@@ -791,6 +805,7 @@ class GuardianViewModel @Inject constructor(
                     val currentAlert = _emergencySession.value.activeAlert
                     if (currentAlert != null) {
                         databaseService.resolveSOS(currentAlert.id, "Voice Command", "Cancelled by voice command: ${command.matchedPhrase}")
+                        emergencyService.resolveEmergency(currentAlert.id, "Voice Command", "Cancelled by voice command: ${command.matchedPhrase}")
                     }
 
                     val confirmationMsg = "✅ SOS Emergency cancelled via voice command: \"${command.matchedPhrase}\"."
@@ -840,6 +855,7 @@ fun startVoiceRecognition(context: Context) {
             val currentUser = (authState.value as? AuthState.Success)?.user
             val resolverName = currentUser?.name ?: "Responder HQ"
             databaseService.resolveSOS(alertId, resolverName, notes)
+            emergencyService.resolveEmergency(alertId, resolverName, notes)
             _uiEvents.emit(UiEvent.ShowToast("Alert successfully resolved."))
         }
     }

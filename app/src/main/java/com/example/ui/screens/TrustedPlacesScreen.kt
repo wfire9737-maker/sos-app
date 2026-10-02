@@ -54,6 +54,9 @@ fun TrustedPlacesScreen(
                 items(trustedPlaces) { place ->
                     TrustedPlaceItem(
                         place = place,
+                        onToggleEnabled = { enabled ->
+                            viewModel.updateTrustedPlace(place.copy(isEnabled = enabled))
+                        },
                         onEdit = { onNavigateToEditPlace(place.placeId) },
                         onDelete = {
                             viewModel.deleteTrustedPlace(place.placeId)
@@ -68,6 +71,7 @@ fun TrustedPlacesScreen(
 @Composable
 fun TrustedPlaceItem(
     place: TrustedPlace,
+    onToggleEnabled: (Boolean) -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
@@ -75,13 +79,35 @@ fun TrustedPlaceItem(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text(text = place.name, style = MaterialTheme.typography.titleMedium)
-            Text(text = place.address, style = MaterialTheme.typography.bodyMedium)
-            val camPos = com.google.maps.android.compose.rememberCameraPositionState { position = com.google.android.gms.maps.model.CameraPosition.fromLatLngZoom(com.google.android.gms.maps.model.LatLng(place.latitude, place.longitude), 15f) }
-            com.google.maps.android.compose.GoogleMap(modifier = Modifier.fillMaxWidth().height(150.dp), cameraPositionState = camPos) {
-                com.google.maps.android.compose.Circle(center = com.google.android.gms.maps.model.LatLng(place.latitude, place.longitude), radius = place.radius, strokeColor = MaterialTheme.colorScheme.primary, fillColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(text = place.name, style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        text = if (place.isEnabled) "Active" else "Disabled",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (place.isEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                    )
+                }
+                Switch(
+                    checked = place.isEnabled,
+                    onCheckedChange = { onToggleEnabled(it) }
+                )
             }
-            Text(text = "Radius: ${place.radius}m", style = MaterialTheme.typography.bodySmall)
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = place.address.ifBlank { "Current location detected" },
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Radius: ${place.radius.toInt()} m",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 IconButton(onClick = onEdit) {
