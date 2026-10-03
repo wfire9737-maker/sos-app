@@ -27,6 +27,8 @@ class HistoryService(
     private val _history = MutableStateFlow<List<HistoryModel>>(emptyList())
     val history: StateFlow<List<HistoryModel>> = _history.asStateFlow()
 
+    private var localEntitiesMap = mapOf<String, SosHistoryEntity>()
+
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     init {
@@ -50,6 +52,7 @@ class HistoryService(
         val dao = sosHistoryDao ?: return
         serviceScope.launch {
             dao.getAllHistory().collect { entities ->
+                localEntitiesMap = entities.associateBy { it.historyId }
                 val models = entities.map { it.toHistoryModel() }
                 _history.value = models
             }
@@ -96,18 +99,41 @@ class HistoryService(
                 return
             }
 
-            val localIds = _history.value.map { it.id }.toSet()
-            val missingEntities = snapshot.documents.mapNotNull { doc ->
-                if (!localIds.contains(doc.id)) {
-                    parseDocToEntity(doc.id, doc.data ?: emptyMap(), authUid)
+            val toSave = mutableListOf<SosHistoryEntity>()
+            var insertedCount = 0
+            var updatedCount = 0
+
+            for (doc in snapshot.documents) {
+                val data = doc.data ?: continue
+                val docId = (data["historyId"] as? String)?.takeIf { it.isNotBlank() } ?: doc.id
+                val cloudDate = (data["date"] as? Number)?.toLong() ?: 0L
+                val cloudUpdatedAt = (data["updatedAt"] as? Number)?.toLong() ?: cloudDate
+                val cloudVersion = maxOf(cloudDate, cloudUpdatedAt)
+
+                val localEntity = localEntitiesMap[docId]
+
+                if (localEntity == null) {
+                    // CASE D: Local record does not exist -> insert cloud record
+                    val entity = parseDocToEntity(docId, data, authUid)
+                    toSave.add(entity)
+                    insertedCount++
                 } else {
-                    null
+                    // Local record exists -> compare local version with cloud version
+                    val localVersion = localEntity.date
+                    if (cloudVersion > localVersion) {
+                        // CASE A: Cloud is newer -> update local record
+                        val entity = parseDocToEntity(docId, data, authUid)
+                        toSave.add(entity)
+                        updatedCount++
+                    }
+                    // CASE B: localVersion > cloudVersion -> keep local record
+                    // CASE C: localVersion == cloudVersion -> keep local record (no unnecessary update)
                 }
             }
 
-            if (missingEntities.isNotEmpty()) {
-                sosHistoryDao?.insertHistories(missingEntities)
-                Log.d("HistoryService", "Merged ${missingEntities.size} missing history records from cloud for uid: $authUid")
+            if (toSave.isNotEmpty()) {
+                sosHistoryDao?.insertHistories(toSave)
+                Log.d("HistoryService", "Synced history from cloud: inserted $insertedCount, updated $updatedCount for uid: $authUid")
             }
         } catch (e: Exception) {
             Log.e("HistoryService", "Failed to sync history from cloud for uid: $authUid (retaining local records): ${e.message}")
@@ -123,6 +149,9 @@ class HistoryService(
             is String -> contactsRaw
             else -> ""
         }
+        val cloudDate = (map["date"] as? Number)?.toLong() ?: System.currentTimeMillis()
+        val cloudUpdatedAt = (map["updatedAt"] as? Number)?.toLong() ?: cloudDate
+        val effectiveDate = maxOf(cloudDate, cloudUpdatedAt)
 
         return SosHistoryEntity(
             historyId = id,
@@ -131,7 +160,7 @@ class HistoryService(
             longitude = lng,
             googleMapsLink = map["googleMapsLink"]?.toString() ?: "https://maps.google.com/?q=$lat,$lng",
             triggerSource = map["triggerSource"]?.toString() ?: map["triggerType"]?.toString() ?: "MANUAL_BUTTON",
-            date = (map["date"] as? Number)?.toLong() ?: System.currentTimeMillis(),
+            date = effectiveDate,
             status = map["status"]?.toString() ?: "RESOLVED",
             durationSeconds = (map["durationSeconds"] as? Number)?.toLong() ?: 0L,
             address = map["address"]?.toString() ?: map["locationName"]?.toString() ?: "GPS Coordinate Plot",
@@ -261,10 +290,12 @@ class HistoryService(
     }
 
     private fun serializeHistoryItemToMap(item: HistoryModel, uid: String): Map<String, Any> {
+        val now = System.currentTimeMillis()
         return mapOf(
             "historyId" to item.id,
             "uid" to uid,
-            "date" to System.currentTimeMillis(),
+            "date" to now,
+            "updatedAt" to now,
             "durationSeconds" to item.durationSeconds,
             "responseTimeSeconds" to item.responseTimeSeconds,
             "address" to item.address,
@@ -290,6 +321,7 @@ class HistoryService(
         } catch (e: Exception) {
             Log.e("HistoryService", "Failed to clear history for user $uid: ${e.message}")
         }
+        localEntitiesMap = emptyMap()
         _history.value = emptyList()
     }
 }

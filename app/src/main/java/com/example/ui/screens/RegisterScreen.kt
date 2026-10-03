@@ -44,9 +44,6 @@ fun RegisterScreen(
     var name by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
-    var medicalInfo by remember { mutableStateOf("") }
-    var emergencyContactName by remember { mutableStateOf("") }
-    var emergencyContactPhone by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
 
@@ -168,7 +165,7 @@ fun RegisterScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // SECTION 2: Medical & Emergency Contact Card
+            // SECTION 2: Credentials Card
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 shape = RoundedCornerShape(24.dp),
@@ -182,75 +179,7 @@ fun RegisterScreen(
             ) {
                 Column(modifier = Modifier.padding(20.dp)) {
                     Text(
-                        text = "2. Critical Rescue Vitals",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = EmergencyRed
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // Medical Details
-                    OutlinedTextField(
-                        value = medicalInfo,
-                        onValueChange = { medicalInfo = it },
-                        label = { Text("Medical Notes (Blood type, Allergies)") },
-                        leadingIcon = { Icon(Icons.Default.MedicalServices, contentDescription = null) },
-                        placeholder = { Text("e.g. Blood type O+, No drug allergies") },
-                        singleLine = false,
-                        maxLines = 3,
-                        shape = RoundedCornerShape(12.dp),
-                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = EmergencyRed, focusedLabelColor = EmergencyRed),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // Emergency Contact Name
-                    OutlinedTextField(
-                        value = emergencyContactName,
-                        onValueChange = { emergencyContactName = it },
-                        label = { Text("Guardian Contact Name") },
-                        leadingIcon = { Icon(Icons.Default.ContactPhone, contentDescription = null) },
-                        singleLine = true,
-                        shape = RoundedCornerShape(12.dp),
-                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = EmergencyRed, focusedLabelColor = EmergencyRed),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // Emergency Contact Phone
-                    OutlinedTextField(
-                        value = emergencyContactPhone,
-                        onValueChange = { emergencyContactPhone = it },
-                        label = { Text("Guardian Contact Phone") },
-                        leadingIcon = { Icon(Icons.Default.Emergency, contentDescription = null) },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = EmergencyRed, focusedLabelColor = EmergencyRed),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // SECTION 3: Credentials Card
-            Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                shape = RoundedCornerShape(24.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(
-                        1.dp,
-                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f),
-                        RoundedCornerShape(24.dp)
-                    )
-            ) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    Text(
-                        text = "3. Security Configuration",
+                        text = "2. Security Configuration",
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
                         color = EmergencyRed
@@ -344,9 +273,9 @@ fun RegisterScreen(
                                 name = name.trim(),
                                 email = email.trim(),
                                 phone = phone.trim(),
-                                medical = medicalInfo.trim(),
-                                contactName = emergencyContactName.trim(),
-                                contactPhone = emergencyContactPhone.trim(),
+                                medical = "",
+                                contactName = "",
+                                contactPhone = "",
                                 pass = password
                             )
                         }

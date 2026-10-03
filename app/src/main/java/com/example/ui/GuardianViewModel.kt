@@ -141,6 +141,60 @@ class GuardianViewModel @Inject constructor(
         }
     )
     val sosVibrationEnabled = _sosVibrationEnabled.asStateFlow()
+
+    private val _emergencySoundId = MutableStateFlow(
+        try {
+            getApplication<Application>().getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE)
+                .getString("emergency_sound_id", "builtin_siren") ?: "builtin_siren"
+        } catch (e: Exception) {
+            "builtin_siren"
+        }
+    )
+    val emergencySoundId = _emergencySoundId.asStateFlow()
+
+    private val _emergencyCustomSoundName = MutableStateFlow(
+        try {
+            getApplication<Application>().getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE)
+                .getString("emergency_custom_sound_name", null)
+        } catch (e: Exception) {
+            null
+        }
+    )
+    val emergencyCustomSoundName = _emergencyCustomSoundName.asStateFlow()
+
+    fun setEmergencySoundId(soundId: String) {
+        _emergencySoundId.value = soundId
+        getApplication<Application>()
+            .getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE)
+            .edit()
+            .putString("emergency_sound_id", soundId)
+            .apply()
+    }
+
+    fun setEmergencyCustomSound(uri: String?, name: String?) {
+        val editor = getApplication<Application>()
+            .getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE)
+            .edit()
+        if (uri != null) {
+            editor.putString("emergency_custom_sound_uri", uri)
+            if (name != null) {
+                editor.putString("emergency_custom_sound_name", name)
+                _emergencyCustomSoundName.value = name
+            }
+            editor.putString("emergency_sound_id", "custom")
+            _emergencySoundId.value = "custom"
+        } else {
+            editor.remove("emergency_custom_sound_uri")
+            editor.remove("emergency_custom_sound_name")
+            _emergencyCustomSoundName.value = null
+            if (_emergencySoundId.value == "custom") {
+                editor.putString("emergency_sound_id", "builtin_siren")
+                _emergencySoundId.value = "builtin_siren"
+            }
+        }
+        editor.apply()
+    }
+
     private val _voiceSosEnabled = MutableStateFlow(
         try {
             getApplication<Application>().getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE)
@@ -377,6 +431,8 @@ class GuardianViewModel @Inject constructor(
             _fallDetectionEnabled.value = prefs.getBoolean("fall_detection_enabled", true)
             _sosSoundEnabled.value = prefs.getBoolean("sos_sound_enabled", true)
             _sosVibrationEnabled.value = prefs.getBoolean("sos_vibration_enabled", true)
+            _emergencySoundId.value = prefs.getString("emergency_sound_id", "builtin_siren") ?: "builtin_siren"
+            _emergencyCustomSoundName.value = prefs.getString("emergency_custom_sound_name", null)
             _voiceSosEnabled.value = prefs.getBoolean("voice_sos_enabled", false)
             _voiceSosPhrase.value = prefs.getString("voice_sos_phrase", "Emergency SOS") ?: "Emergency SOS"
             _criticalAlarmsEnabled.value = prefs.getBoolean("critical_alarms_enabled", true)
@@ -1409,10 +1465,12 @@ fun startVoiceRecognition(context: Context) {
         viewModelScope.launch {
             authService.authState.collect { state ->
                 if (state is AuthState.Success) {
-                    trustedPlacesService.initialize(state.user.uid)
-                    databaseService.loadUserSettingsFromCloud(state.user.uid)
-                    databaseService.syncContactsFromCloud(state.user.uid)
-                    historyService.syncHistoryFromCloud(state.user.uid)
+                    val uid = state.user.uid
+                    databaseService.loadUserSettingsFromCloud(uid)
+                    databaseService.syncContactsFromCloud(uid)
+                    trustedPlacesService.initialize(uid)
+                    historyService.syncHistoryFromCloud(uid)
+                    databaseService.startUserAlertsAndDevicesListeners(uid)
                     reloadLocalSettings()
                 }
             }

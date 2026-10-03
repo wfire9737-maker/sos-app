@@ -94,39 +94,12 @@ class DatabaseService(private val context: Context, private val authService: Aut
     }
 
     private fun loadData() {
-        val fs = firestore
-        if (fs != null) {
-            // Sync Contacts, Settings, Alerts, and Devices with current User
-            if (authService != null) {
-                serviceScope.launch {
-                    authService.authState.collect { state ->
-                        stopUserAlertsAndDevicesListeners()
-                        if (state is com.example.service.AuthState.Success) {
-                            val uid = state.user.uid
-                            loadUserSettingsFromCloud(uid)
-                            syncContactsFromCloud(uid)
-                            startUserAlertsAndDevicesListeners(uid)
-                        } else {
-                            loadLocalContacts()
-                            loadLocalAlerts()
-                            loadLocalDevices()
-                        }
-                    }
-                }
-            } else {
-                loadLocalContacts()
-                loadLocalAlerts()
-                loadLocalDevices()
-            }
-        } else {
-            // Load from persistent local JSON
-            loadLocalAlerts()
-            loadLocalDevices()
-            loadLocalContacts()
-        }
+        loadLocalAlerts()
+        loadLocalDevices()
+        loadLocalContacts()
     }
 
-    private fun startUserAlertsAndDevicesListeners(uid: String) {
+    fun startUserAlertsAndDevicesListeners(uid: String) {
         val fs = firestore ?: return
         if (!isValidAuthenticatedUid(uid)) return
 
@@ -833,47 +806,51 @@ class DatabaseService(private val context: Context, private val authService: Aut
                 return
             }
 
-            val currentContacts = _contacts.value.toMutableList()
-            val existingIds = currentContacts.map { it.id }.toSet()
-            val missingContacts = mutableListOf<EmergencyContact>()
-
+            val remoteContacts = mutableListOf<EmergencyContact>()
             for (doc in snapshot.documents) {
                 try {
-                    val contact = EmergencyContact.fromMap(doc.data ?: emptyMap())
-                    if (contact.id.isNotBlank() && !existingIds.contains(contact.id) && !isSeededContact(contact)) {
-                        missingContacts.add(contact)
+                    val data = doc.data ?: continue
+                    val id = (data["id"] as? String)?.takeIf { it.isNotBlank() } ?: doc.id
+                    val rawContact = EmergencyContact.fromMap(data)
+                    val contact = rawContact.copy(id = id, userId = authUid)
+                    if (contact.id.isNotBlank() && !isSeededContact(contact)) {
+                        remoteContacts.add(contact)
                     }
                 } catch (e: Exception) {
                     Log.e("DatabaseService", "Failed to parse contact doc ${doc.id}: ${e.message}")
                 }
             }
 
-            if (missingContacts.isNotEmpty()) {
-                currentContacts.addAll(missingContacts)
-                val sorted = currentContacts.sortedWith(compareBy({ it.priority }, { it.name }))
+            if (remoteContacts.isNotEmpty()) {
+                val currentLocal = _contacts.value.filter { !isSeededContact(it) }
+                val combinedMap = currentLocal.associateBy { it.id }.toMutableMap()
+                for (r in remoteContacts) {
+                    combinedMap[r.id] = r
+                }
+                val sorted = combinedMap.values.sortedWith(compareBy({ it.priority }, { it.name }))
                 _contacts.value = sorted
                 saveContactsListLocally(sorted)
 
-                // Save restored missing contacts to Room
-                serviceScope.launch {
-                    try {
-                        for (c in missingContacts) {
-                            val entity = EmergencyContactEntity(
-                                contactId = c.id,
-                                uid = authUid,
-                                name = c.name,
-                                phone = c.phone,
-                                relationship = c.relationship,
-                                priority = c.priority,
-                                customSmsTemplate = c.customSmsTemplate
-                            )
-                            contactDao?.insertContact(entity)
-                        }
-                    } catch (e: Exception) {
-                        Log.e("DatabaseService", "Error saving restored contacts to Room: ${e.message}")
+                // Persist restored contacts to Room database
+                try {
+                    val entities = sorted.map { c ->
+                        EmergencyContactEntity(
+                            contactId = c.id,
+                            uid = authUid,
+                            name = c.name,
+                            phone = c.phone,
+                            relationship = c.relationship,
+                            priority = c.priority,
+                            customSmsTemplate = c.customSmsTemplate
+                        )
                     }
+                    contactDao?.insertContacts(entities)
+                    Log.d("DatabaseService", "Saved ${entities.size} contacts to Room for uid: $authUid")
+                } catch (e: Exception) {
+                    Log.e("DatabaseService", "Error saving restored contacts to Room: ${e.message}")
                 }
-                Log.d("DatabaseService", "Restored ${missingContacts.size} missing contacts from cloud for uid: $authUid")
+
+                Log.d("DatabaseService", "Restored ${remoteContacts.size} contacts from cloud for uid: $authUid")
             }
         } catch (e: Exception) {
             Log.e("DatabaseService", "Failed to sync contacts from cloud for uid: $authUid (keeping local contacts): ${e.message}")

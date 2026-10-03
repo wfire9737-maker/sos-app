@@ -81,19 +81,24 @@ class TrustedPlacesService(
                 
             val places = snapshot.documents.mapNotNull { doc ->
                 try {
-                    TrustedPlace.fromMap(doc.data ?: emptyMap())
+                    val data = doc.data ?: return@mapNotNull null
+                    val id = (data["placeId"] as? String)?.takeIf { it.isNotBlank() } ?: doc.id
+                    val rawPlace = TrustedPlace.fromMap(data)
+                    rawPlace.copy(placeId = id, userId = sessionUserId)
                 } catch (e: Exception) {
+                    Log.e("TrustedPlacesService", "Failed to parse trusted place doc ${doc.id}", e)
                     null
                 }
             }
             
-            if (currentUserId == sessionUserId) {
+            if (currentUserId == sessionUserId && places.isNotEmpty()) {
                 trustedPlaceDao.insertTrustedPlaces(places.map { it.toEntity() })
+                Log.d("TrustedPlacesService", "Restored ${places.size} trusted places from cloud for uid: $sessionUserId")
             }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            Log.e("TrustedPlacesService", "Failed to sync trusted places from cloud", e)
+            Log.e("TrustedPlacesService", "Failed to sync trusted places from cloud for uid: $sessionUserId: ${e.message}")
         }
     }
 
@@ -106,10 +111,13 @@ class TrustedPlacesService(
         )
         try {
             trustedPlaceDao.insertTrustedPlace(newPlace.toEntity())
-            firestore?.collection("users")?.document(currentUserId)
-                ?.collection("trusted_places")?.document(newPlace.placeId)?.set(newPlace.toMap())
+            if (currentUserId.isNotBlank()) {
+                firestore?.collection("users")?.document(currentUserId)
+                    ?.collection("trusted_places")?.document(newPlace.placeId)?.set(newPlace.toMap())?.await()
+                Log.d("TrustedPlacesService", "Saved trusted place to cloud users/$currentUserId/trusted_places/${newPlace.placeId}")
+            }
         } catch (e: Exception) {
-            Log.e("TrustedPlacesService", "Failed to add trusted place", e)
+            Log.e("TrustedPlacesService", "Failed to add trusted place: ${e.message}")
         }
     }
     
@@ -120,20 +128,26 @@ class TrustedPlacesService(
         )
         try {
             trustedPlaceDao.insertTrustedPlace(updatedPlace.toEntity())
-            firestore?.collection("users")?.document(currentUserId)
-                ?.collection("trusted_places")?.document(updatedPlace.placeId)?.set(updatedPlace.toMap())
+            if (currentUserId.isNotBlank()) {
+                firestore?.collection("users")?.document(currentUserId)
+                    ?.collection("trusted_places")?.document(updatedPlace.placeId)?.set(updatedPlace.toMap())?.await()
+                Log.d("TrustedPlacesService", "Updated trusted place in cloud users/$currentUserId/trusted_places/${updatedPlace.placeId}")
+            }
         } catch (e: Exception) {
-            Log.e("TrustedPlacesService", "Failed to update trusted place", e)
+            Log.e("TrustedPlacesService", "Failed to update trusted place: ${e.message}")
         }
     }
 
     suspend fun deleteTrustedPlace(placeId: String) {
         try {
             trustedPlaceDao.deleteTrustedPlaceById(placeId)
-            firestore?.collection("users")?.document(currentUserId)
-                ?.collection("trusted_places")?.document(placeId)?.delete()
+            if (currentUserId.isNotBlank()) {
+                firestore?.collection("users")?.document(currentUserId)
+                    ?.collection("trusted_places")?.document(placeId)?.delete()?.await()
+                Log.d("TrustedPlacesService", "Deleted trusted place from cloud users/$currentUserId/trusted_places/$placeId")
+            }
         } catch (e: Exception) {
-            Log.e("TrustedPlacesService", "Failed to delete trusted place", e)
+            Log.e("TrustedPlacesService", "Failed to delete trusted place: ${e.message}")
         }
     }
 

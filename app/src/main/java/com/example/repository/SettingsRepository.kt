@@ -21,12 +21,71 @@ class SettingsRepository @Inject constructor(
         const val KEY_VOICE_SOS_ENABLED = "voice_sos_enabled"
         const val DEFAULT_VOICE_SOS_ENABLED = false
 
+        const val KEY_EMERGENCY_SOUND_ID = "emergency_sound_id"
+        const val DEFAULT_EMERGENCY_SOUND_ID = "builtin_siren"
+        const val KEY_EMERGENCY_CUSTOM_SOUND_URI = "emergency_custom_sound_uri"
+        const val KEY_EMERGENCY_CUSTOM_SOUND_NAME = "emergency_custom_sound_name"
+
+        const val SOUND_BUILTIN_SIREN = "builtin_siren"
+        const val SOUND_BUILTIN_RAPID_ALARM = "builtin_rapid_alarm"
+        const val SOUND_BUILTIN_WARNING_PULSE = "builtin_warning_pulse"
+        const val SOUND_BUILTIN_DOUBLE_BEEP = "builtin_double_beep"
+        const val SOUND_BUILTIN_CRITICAL_ALERT = "builtin_critical_alert"
+        const val SOUND_BUILTIN_EVACUATION_TONE = "builtin_evacuation_tone"
+        const val SOUND_CUSTOM = "custom"
+
         val AVAILABLE_FALL_RESPONSE_TIMES = listOf(5, 10, 12, 15, 20, 30)
         val AVAILABLE_NEARBY_PRESENCE_INTERVALS = listOf(0, 5, 10, 30, 60)
     }
 
     private val prefs: SharedPreferences by lazy {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    }
+
+    fun getEmergencySoundId(): String {
+        return try {
+            prefs.getString(KEY_EMERGENCY_SOUND_ID, DEFAULT_EMERGENCY_SOUND_ID) ?: DEFAULT_EMERGENCY_SOUND_ID
+        } catch (e: Exception) {
+            DEFAULT_EMERGENCY_SOUND_ID
+        }
+    }
+
+    fun setEmergencySoundId(soundId: String) {
+        prefs.edit().putString(KEY_EMERGENCY_SOUND_ID, soundId).apply()
+    }
+
+    fun getEmergencyCustomSoundUri(): String? {
+        return try {
+            prefs.getString(KEY_EMERGENCY_CUSTOM_SOUND_URI, null)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    fun getEmergencyCustomSoundName(): String? {
+        return try {
+            prefs.getString(KEY_EMERGENCY_CUSTOM_SOUND_NAME, null)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    fun setEmergencyCustomSound(uri: String?, name: String?) {
+        val editor = prefs.edit()
+        if (uri != null) {
+            editor.putString(KEY_EMERGENCY_CUSTOM_SOUND_URI, uri)
+            if (name != null) {
+                editor.putString(KEY_EMERGENCY_CUSTOM_SOUND_NAME, name)
+            }
+            editor.putString(KEY_EMERGENCY_SOUND_ID, SOUND_CUSTOM)
+        } else {
+            editor.remove(KEY_EMERGENCY_CUSTOM_SOUND_URI)
+            editor.remove(KEY_EMERGENCY_CUSTOM_SOUND_NAME)
+            if (getEmergencySoundId() == SOUND_CUSTOM) {
+                editor.putString(KEY_EMERGENCY_SOUND_ID, DEFAULT_EMERGENCY_SOUND_ID)
+            }
+        }
+        editor.apply()
     }
 
     fun isVoiceSosEnabled(): Boolean {
