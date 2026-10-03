@@ -245,6 +245,7 @@ fun SettingsScreen(
         if (nextVal == 0) {
             nearbyPresenceInterval = nextVal
             settingsRepository.setNearbyPresenceInterval(nextVal)
+            viewModel.setNearbyPresenceInterval(nextVal)
             com.example.service.NearbyBleService.startOrStop(context)
         } else {
             val hasAdvertise = context.hasBluetoothAdvertisePermission()
@@ -253,6 +254,7 @@ fun SettingsScreen(
             if (hasAdvertise && hasNotification) {
                 nearbyPresenceInterval = nextVal
                 settingsRepository.setNearbyPresenceInterval(nextVal)
+                viewModel.setNearbyPresenceInterval(nextVal)
                 com.example.service.NearbyBleService.startOrStop(context)
             } else {
                 pendingNearbyInterval = nextVal
@@ -674,7 +676,7 @@ fun SettingsScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(phrase, style = MaterialTheme.typography.bodyMedium)
-                                IconButton(onClick = { viewModel.voiceSosService.removeWakePhrase(phrase) }) {
+                                IconButton(onClick = { viewModel.removeWakePhrase(phrase) }) {
                                     Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error)
                                 }
                             }
@@ -685,7 +687,7 @@ fun SettingsScreen(
             confirmButton = {
                 Button(onClick = {
                     if (tempPhrase.isNotBlank()) {
-                        viewModel.voiceSosService.addWakePhrase(tempPhrase.trim())
+                        viewModel.addWakePhrase(tempPhrase.trim())
                         tempPhrase = ""
                     } else {
                         showVoicePhraseDialog = false
@@ -715,6 +717,7 @@ fun SettingsScreen(
                                 .clickable {
                                     fallResponseTime = seconds
                                     settingsRepository.setFallResponseDelaySeconds(seconds)
+                                    viewModel.setFallResponseDelaySeconds(seconds)
                                     showFallResponseTimeDialog = false
                                 }
                                 .padding(vertical = 12.dp),
@@ -725,6 +728,7 @@ fun SettingsScreen(
                                 onClick = {
                                     fallResponseTime = seconds
                                     settingsRepository.setFallResponseDelaySeconds(seconds)
+                                    viewModel.setFallResponseDelaySeconds(seconds)
                                     showFallResponseTimeDialog = false
                                 }
                             )
@@ -777,6 +781,7 @@ fun SettingsScreen(
                         val finalName = if (trimmed.isNotEmpty()) trimmed else com.example.ble.nearby.NearbyBleProtocol.DEFAULT_DEVICE_NAME
                         nearbyDeviceName = finalName
                         prefs.edit().putString("nearby_device_name", finalName).apply()
+                        viewModel.setNearbyDeviceName(finalName)
                         showDeviceNameDialog = false
                     }
                 ) {

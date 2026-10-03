@@ -694,16 +694,17 @@ class DatabaseService(private val context: Context, private val authService: Aut
         }
         
         // Save to Firestore
-        if (fs != null && authState is com.example.service.AuthState.Success) {
+        val authUid = (authState as? com.example.service.AuthState.Success)?.user?.uid ?: getAuthenticatedUid()
+        if (fs != null && authUid != null) {
             serviceScope.launch {
                 try {
                     val updates = mapOf(key to value)
-                    fs.collection("users").document(authState.user.uid)
+                    fs.collection("users").document(authUid)
                         .collection("settings").document("preferences")
                         .set(updates, com.google.firebase.firestore.SetOptions.merge())
                         .await()
                 } catch (e: Exception) {
-                    Log.e("DatabaseService", "Failed to save setting to Firestore: ${e.message}")
+                    Log.e("DatabaseService", "Failed to save setting to Firestore for $authUid: ${e.message}")
                 }
             }
         }

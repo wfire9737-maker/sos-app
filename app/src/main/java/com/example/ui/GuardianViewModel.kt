@@ -169,6 +169,9 @@ class GuardianViewModel @Inject constructor(
             .edit()
             .putString("emergency_sound_id", soundId)
             .apply()
+        if (soundId != "custom") {
+            databaseService.saveUserSetting("emergency_sound_id", soundId)
+        }
     }
 
     fun setEmergencyCustomSound(uri: String?, name: String?) {
@@ -327,6 +330,7 @@ class GuardianViewModel @Inject constructor(
             getApplication<Application>().getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE)
                 .edit().putBoolean("high_contrast", enabled).apply()
         } catch(e:Exception) {}
+        databaseService.saveUserSetting("high_contrast", enabled)
     }
 
     private val _language = MutableStateFlow(try { getApplication<Application>().getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE).getString("language", "en") ?: "en" } catch(e:Exception) { "en" })
@@ -413,6 +417,7 @@ class GuardianViewModel @Inject constructor(
         } catch (e: Exception) {
             android.util.Log.e("GuardianViewModel", "Failed to save/start voice_sos_enabled: ${e.message}")
         }
+        databaseService.saveUserSetting("voice_sos_enabled", enabled)
     }
 
     fun setVoiceSosPhrase(phrase: String) {
@@ -436,26 +441,122 @@ class GuardianViewModel @Inject constructor(
             _voiceSosEnabled.value = prefs.getBoolean("voice_sos_enabled", false)
             _voiceSosPhrase.value = prefs.getString("voice_sos_phrase", "Emergency SOS") ?: "Emergency SOS"
             _criticalAlarmsEnabled.value = prefs.getBoolean("critical_alarms_enabled", true)
+            _arrivalAlertsEnabled.value = prefs.getBoolean("arrival_alerts_enabled", true)
+            _deviceStatusNotificationsEnabled.value = prefs.getBoolean("device_status_notifications_enabled", true)
+            _locationSharingInterval.value = prefs.getString("location_sharing_interval", "10s") ?: "10s"
+            _backgroundLocationEnabled.value = prefs.getBoolean("background_location_enabled", true)
+            _fallResponseDelaySeconds.value = prefs.getInt("fall_response_delay_seconds", 12)
+            _nearbyPresenceInterval.value = prefs.getInt("nearby_presence_interval", 0)
+            _nearbyDeviceName.value = prefs.getString("nearby_device_name", com.example.ble.nearby.NearbyBleProtocol.DEFAULT_DEVICE_NAME) ?: com.example.ble.nearby.NearbyBleProtocol.DEFAULT_DEVICE_NAME
+            
+            val savedPhrasesJson = prefs.getString("wake_phrases", null)
+            if (!savedPhrasesJson.isNullOrBlank()) {
+                try {
+                    val arr = org.json.JSONArray(savedPhrasesJson)
+                    val list = mutableListOf<String>()
+                    for (i in 0 until arr.length()) {
+                        list.add(arr.getString(i))
+                    }
+                    if (list.isNotEmpty()) {
+                        voiceSosService.setWakePhrases(list)
+                    }
+                } catch (_: Exception) {}
+            }
         } catch (e: Exception) {
             android.util.Log.e("GuardianViewModel", "Error reloading local settings: ${e.message}")
         }
     }
 
+    private val _fallResponseDelaySeconds = MutableStateFlow(
+        try {
+            getApplication<Application>().getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE)
+                .getInt("fall_response_delay_seconds", 12)
+        } catch (e: Exception) { 12 }
+    )
+    val fallResponseDelaySeconds = _fallResponseDelaySeconds.asStateFlow()
+    fun setFallResponseDelaySeconds(seconds: Int) {
+        _fallResponseDelaySeconds.value = seconds
+        try {
+            getApplication<Application>().getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE)
+                .edit().putInt("fall_response_delay_seconds", seconds).apply()
+        } catch (e: Exception) {}
+        databaseService.saveUserSetting("fall_response_delay_seconds", seconds)
+    }
+
+    private val _nearbyPresenceInterval = MutableStateFlow(
+        try {
+            getApplication<Application>().getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE)
+                .getInt("nearby_presence_interval", 0)
+        } catch (e: Exception) { 0 }
+    )
+    val nearbyPresenceInterval = _nearbyPresenceInterval.asStateFlow()
+    fun setNearbyPresenceInterval(interval: Int) {
+        _nearbyPresenceInterval.value = interval
+        try {
+            getApplication<Application>().getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE)
+                .edit().putInt("nearby_presence_interval", interval).apply()
+        } catch (e: Exception) {}
+        databaseService.saveUserSetting("nearby_presence_interval", interval)
+    }
+
+    private val _nearbyDeviceName = MutableStateFlow(
+        try {
+            getApplication<Application>().getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE)
+                .getString("nearby_device_name", com.example.ble.nearby.NearbyBleProtocol.DEFAULT_DEVICE_NAME) ?: com.example.ble.nearby.NearbyBleProtocol.DEFAULT_DEVICE_NAME
+        } catch (e: Exception) { com.example.ble.nearby.NearbyBleProtocol.DEFAULT_DEVICE_NAME }
+    )
+    val nearbyDeviceName = _nearbyDeviceName.asStateFlow()
+    fun setNearbyDeviceName(name: String) {
+        _nearbyDeviceName.value = name
+        try {
+            getApplication<Application>().getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE)
+                .edit().putString("nearby_device_name", name).apply()
+        } catch (e: Exception) {}
+        databaseService.saveUserSetting("nearby_device_name", name)
+    }
+
+    fun addWakePhrase(phrase: String): Boolean {
+        val success = voiceSosService.addWakePhrase(phrase)
+        if (success) {
+            val phrasesJson = org.json.JSONArray(voiceSosService.wakePhrases.value).toString()
+            databaseService.saveUserSetting("wake_phrases", phrasesJson)
+        }
+        return success
+    }
+
+    fun removeWakePhrase(phrase: String) {
+        voiceSosService.removeWakePhrase(phrase)
+        val phrasesJson = org.json.JSONArray(voiceSosService.wakePhrases.value).toString()
+        databaseService.saveUserSetting("wake_phrases", phrasesJson)
+    }
+
     private val _arrivalAlertsEnabled = MutableStateFlow(true)
     val arrivalAlertsEnabled = _arrivalAlertsEnabled.asStateFlow()
-    fun setArrivalAlertsEnabled(enabled: Boolean) { _arrivalAlertsEnabled.value = enabled }
+    fun setArrivalAlertsEnabled(enabled: Boolean) { 
+        _arrivalAlertsEnabled.value = enabled
+        databaseService.saveUserSetting("arrival_alerts_enabled", enabled)
+    }
 
     private val _deviceStatusNotificationsEnabled = MutableStateFlow(true)
     val deviceStatusNotificationsEnabled = _deviceStatusNotificationsEnabled.asStateFlow()
-    fun setDeviceStatusNotificationsEnabled(enabled: Boolean) { _deviceStatusNotificationsEnabled.value = enabled }
+    fun setDeviceStatusNotificationsEnabled(enabled: Boolean) { 
+        _deviceStatusNotificationsEnabled.value = enabled
+        databaseService.saveUserSetting("device_status_notifications_enabled", enabled)
+    }
 
     private val _locationSharingInterval = MutableStateFlow("10s")
     val locationSharingInterval = _locationSharingInterval.asStateFlow()
-    fun setLocationSharingInterval(interval: String) { _locationSharingInterval.value = interval }
+    fun setLocationSharingInterval(interval: String) { 
+        _locationSharingInterval.value = interval
+        databaseService.saveUserSetting("location_sharing_interval", interval)
+    }
 
     private val _backgroundLocationEnabled = MutableStateFlow(true)
     val backgroundLocationEnabled = _backgroundLocationEnabled.asStateFlow()
-    fun setBackgroundLocationEnabled(enabled: Boolean) { _backgroundLocationEnabled.value = enabled }
+    fun setBackgroundLocationEnabled(enabled: Boolean) { 
+        _backgroundLocationEnabled.value = enabled
+        databaseService.saveUserSetting("background_location_enabled", enabled)
+    }
 
     private val _telemetrySharingEnabled = MutableStateFlow(true)
     val telemetrySharingEnabled = _telemetrySharingEnabled.asStateFlow()

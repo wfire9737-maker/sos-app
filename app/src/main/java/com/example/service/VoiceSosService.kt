@@ -456,6 +456,13 @@ class VoiceSosService(
         return false
     }
 
+    fun setWakePhrases(phrases: List<String>) {
+        if (phrases.isNotEmpty()) {
+            _wakePhrases.value = phrases
+            savePhrases()
+        }
+    }
+
     fun removeWakePhrase(phrase: String) {
         val current = _wakePhrases.value.toMutableList()
         if (current.remove(phrase)) {

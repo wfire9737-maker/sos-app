@@ -124,7 +124,10 @@ class EmergencyContactRepositoryImpl @Inject constructor(
                 .collection("contacts").get().await()
             val remoteContacts = snapshot.documents.mapNotNull { doc ->
                 try {
-                    EmergencyContact.fromMap(doc.data ?: emptyMap())
+                    val data = doc.data ?: return@mapNotNull null
+                    val id = (data["id"] as? String)?.takeIf { it.isNotBlank() } ?: doc.id
+                    val raw = EmergencyContact.fromMap(data)
+                    raw.copy(id = id, userId = authUid)
                 } catch (e: Exception) {
                     null
                 }
