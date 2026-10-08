@@ -34,7 +34,10 @@ fun NearbyChatScreen(
     viewModel: NearbyChatViewModel = hiltViewModel()
 ) {
     val messages by viewModel.messages.collectAsState()
-    val connectionState by viewModel.getConnectionState(macAddress).collectAsState()
+    val connectionStateFlow = remember(viewModel, macAddress) {
+        viewModel.getConnectionState(macAddress)
+    }
+    val connectionState by connectionStateFlow.collectAsState()
     
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()

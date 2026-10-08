@@ -8,6 +8,7 @@ import com.example.model.MessageDeliveryState
 import com.example.model.NearbyChatMessage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -76,8 +77,11 @@ class NearbyChatRepository @Inject constructor(
                     }
                 }
                 
-                // Always send ACK back, even for duplicate (in case earlier ACK was lost)
-                sendAck(macAddress, payload.messageId)
+                // Schedule ACK approximately 75 ms after processing to allow GATT write response completion
+                scope.launch {
+                    delay(75)
+                    sendAck(macAddress, payload.messageId)
+                }
             }
             NearbyPayload.PayloadType.ACK -> {
                 val ackedMessageId = payload.messageId

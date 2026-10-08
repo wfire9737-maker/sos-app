@@ -10,6 +10,10 @@ class NearbyGattClient(private val context: Context) {
     private val bluetoothAdapter: BluetoothAdapter? = bluetoothManager?.adapter
     
     private var bluetoothGatt: BluetoothGatt? = null
+    var isConnected: Boolean = false
+        private set
+    var connectedDeviceAddress: String? = null
+        private set
     var onConnectionStateChanged: ((String, NearbyConnectionState) -> Unit)? = null
     var onIncomingPayloadReceived: ((String, String) -> Unit)? = null
 
@@ -32,6 +36,8 @@ class NearbyGattClient(private val context: Context) {
                 }
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 Log.d("NearbyGattClient", "NEARBY_BLE: Disconnected from GATT server ${gatt.device.address}.")
+                isConnected = false
+                connectedDeviceAddress = null
                 onConnectionStateChanged?.invoke(gatt.device.address, NearbyConnectionState.DISCONNECTED)
                 closeGatt()
             }
@@ -140,9 +146,13 @@ class NearbyGattClient(private val context: Context) {
             if (characteristic.uuid == NearbyBleProtocol.CONNECTION_STATUS_CHAR_UUID) {
                 if (value[0] == 1.toByte()) {
                     Log.d("NearbyGattClient", "NEARBY_BLE: Connection accepted by remote device ${gatt.device.address}.")
+                    isConnected = true
+                    connectedDeviceAddress = gatt.device.address
                     onConnectionStateChanged?.invoke(gatt.device.address, NearbyConnectionState.CONNECTED)
                 } else if (value[0] == 2.toByte()) {
                     Log.d("NearbyGattClient", "NEARBY_BLE: Connection declined by remote device ${gatt.device.address}.")
+                    isConnected = false
+                    connectedDeviceAddress = null
                     onConnectionStateChanged?.invoke(gatt.device.address, NearbyConnectionState.DISCONNECTED)
                     disconnect()
                 }
@@ -173,6 +183,8 @@ class NearbyGattClient(private val context: Context) {
         if (bluetoothGatt != null) {
             disconnect()
         }
+        isConnected = false
+        connectedDeviceAddress = null
         try {
             val device = bluetoothAdapter?.getRemoteDevice(macAddress)
             if (device != null) {
@@ -226,6 +238,8 @@ class NearbyGattClient(private val context: Context) {
     
     private fun closeGatt() {
         try {
+            isConnected = false
+            connectedDeviceAddress = null
             bluetoothGatt?.close()
             bluetoothGatt = null
         } catch (_: SecurityException) {}

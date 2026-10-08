@@ -47,22 +47,30 @@ class NearbyBleManager @Inject constructor(
             updateDeviceConnectionState(targetMac, NearbyConnectionState.DISCONNECTED)
         }
         
-        // Stop temporary connection advertising if not in burst and no active server connections
-        if (isSessionActive && !isBurstActive && !gattServer.hasActiveConnections()) {
+        // Stop temporary connection advertising if not in burst and no active connections
+        if (isSessionActive && !isBurstActive && !hasActiveConnection()) {
             advertiser.stopAdvertising()
+            handler.removeCallbacks(advertiseRunnable)
+            handler.post(advertiseRunnable)
         }
     }
     
     init {
         gattServer.onRemoteDeviceDisconnected = { macAddress ->
             updateDeviceConnectionState(macAddress, NearbyConnectionState.DISCONNECTED)
+            if (isSessionActive && !hasActiveConnection() && !isConnectionPending) {
+                handler.removeCallbacks(advertiseRunnable)
+                handler.post(advertiseRunnable)
+            }
         }
         gattServer.onConnectionRequested = { macAddress, senderName ->
             updateDeviceConnectionState(macAddress, NearbyConnectionState.DISCONNECTED, senderName)
         }
         gattServer.onActiveConnectionsChanged = { count ->
-            if (count == 0 && isSessionActive && !isBurstActive && !isConnectionPending) {
+            if (count == 0 && isSessionActive && !isBurstActive && !isConnectionPending && !hasActiveConnection()) {
                 advertiser.stopAdvertising()
+                handler.removeCallbacks(advertiseRunnable)
+                handler.post(advertiseRunnable)
             }
         }
         gattServer.onIncomingPayloadReceived = { macAddress, payload ->
@@ -76,19 +84,17 @@ class NearbyBleManager @Inject constructor(
                 handler.removeCallbacks(connectionTimeoutRunnable)
                 isConnectionPending = false
                 pendingConnectionMac = null
-                // Stop unnecessary presence advertising while preserving active GATT connection
-                if (isSessionActive && !isBurstActive && !gattServer.hasActiveConnections()) {
-                    advertiser.stopAdvertising()
-                }
+                // Stop presence advertising while preserving active GATT connection
+                advertiser.stopAdvertising()
+                isBurstActive = false
             } else if (newState == NearbyConnectionState.DISCONNECTED) {
-                if (pendingConnectionMac == macAddress) {
-                    Log.d(TAG, "Connection disconnected/failed with $macAddress")
-                    handler.removeCallbacks(connectionTimeoutRunnable)
-                    isConnectionPending = false
-                    pendingConnectionMac = null
-                    if (isSessionActive && !isBurstActive && !gattServer.hasActiveConnections()) {
-                        advertiser.stopAdvertising()
-                    }
+                handler.removeCallbacks(connectionTimeoutRunnable)
+                isConnectionPending = false
+                pendingConnectionMac = null
+                if (isSessionActive && !hasActiveConnection()) {
+                    advertiser.stopAdvertising()
+                    handler.removeCallbacks(advertiseRunnable)
+                    handler.post(advertiseRunnable)
                 }
             }
         }
@@ -100,6 +106,10 @@ class NearbyBleManager @Inject constructor(
     
     private fun updateDeviceConnectionState(identifier: String, state: NearbyConnectionState, deviceName: String? = null) {
         scanner.updateDeviceConnectionState(identifier, state, deviceName)
+    }
+
+    fun hasActiveConnection(): Boolean {
+        return gattServer.hasActiveConnections() || gattClient.isConnected
     }
 
     fun findDevice(identifier: String): NearbyDevice? {
@@ -141,17 +151,19 @@ class NearbyBleManager @Inject constructor(
         gattClient.disconnect()
         gattServer.disconnectDevice(targetMac)
         updateDeviceConnectionState(targetMac, NearbyConnectionState.DISCONNECTED)
-        if (isSessionActive && !isBurstActive && !gattServer.hasActiveConnections()) {
+        if (isSessionActive && !isBurstActive && !hasActiveConnection()) {
             advertiser.stopAdvertising()
+            handler.removeCallbacks(advertiseRunnable)
+            handler.post(advertiseRunnable)
         }
     }
     
     fun acceptIncomingConnection(macAddress: String) {
         updateDeviceConnectionState(macAddress, NearbyConnectionState.CONNECTED)
         gattServer.acceptConnection(macAddress)
-        if (isSessionActive && !isBurstActive && !isConnectionPending && !gattServer.hasActiveConnections()) {
-            advertiser.stopAdvertising()
-        }
+        // Stop presence advertising once connection is accepted to avoid BLE radio interference
+        advertiser.stopAdvertising()
+        isBurstActive = false
     }
     
     fun declineIncomingConnection(macAddress: String) {
@@ -167,7 +179,7 @@ class NearbyBleManager @Inject constructor(
 
         Log.d(
             TAG,
-            "NEARBY_BLE: sendNearbyPayload requested for target=$target (resolvedMac=$targetMac, stableId=$stableId, bytes=$payloadByteLength, state=${device?.connectionState}, serverActive=${gattServer.hasActiveConnections()})"
+            "NEARBY_BLE: sendNearbyPayload requested for target=$target (resolvedMac=$targetMac, stableId=$stableId, bytes=$payloadByteLength, state=${device?.connectionState}, serverActive=${gattServer.hasActiveConnections()}, clientActive=${gattClient.isConnected})"
         )
 
         // 1. Try server notification first (if this phone accepted incoming connection from target)
@@ -190,6 +202,12 @@ class NearbyBleManager @Inject constructor(
         override fun run() {
             if (!isSessionActive || currentIntervalMs <= 0) return
             
+            // While a GATT connection is active or pending, do NOT start presence advertising bursts
+            if (hasActiveConnection() || isConnectionPending) {
+                handler.postDelayed(this, currentIntervalMs)
+                return
+            }
+
             // Expose presence for a short burst (e.g., 2 seconds)
             isBurstActive = true
             advertiser.startAdvertising()
@@ -197,8 +215,8 @@ class NearbyBleManager @Inject constructor(
             handler.postDelayed({
                 isBurstActive = false
                 if (isSessionActive) {
-                    // Do NOT stop advertising if a connection is being requested or in progress
-                    if (!gattServer.hasActiveConnections() && !isConnectionPending) {
+                    // Do NOT stop advertising if a connection became active or pending
+                    if (!hasActiveConnection() && !isConnectionPending) {
                         advertiser.stopAdvertising()
                     }
                 }
@@ -247,7 +265,7 @@ class NearbyBleManager @Inject constructor(
     }
 
     fun stopAdvertisingPresence() {
-        if (!isSessionActive && !isConnectionPending && !gattServer.hasActiveConnections()) {
+        if (!isSessionActive && !isConnectionPending && !hasActiveConnection()) {
             advertiser.stopAdvertising()
         }
     }

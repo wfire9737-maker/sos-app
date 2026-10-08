@@ -88,13 +88,22 @@ class NearbyDeviceScanner(private val context: Context) {
 
                     synchronized(deviceMapLock) {
                         val existing = deviceCache[stableDeviceId]
+                            ?: deviceCache.values.firstOrNull {
+                                it.macAddress.equals(address, ignoreCase = true) ||
+                                it.id.equals(stableDeviceId, ignoreCase = true)
+                            }
+
                         val resolvedName = if (!parsedName.isNullOrBlank()) {
                             parsedName
                         } else {
                             existing?.deviceName ?: NearbyBleProtocol.DEFAULT_DEVICE_NAME
                         }
 
-                        val connectionState = existing?.connectionState ?: NearbyConnectionState.DISCONNECTED
+                        val connectionState = when (existing?.connectionState) {
+                            NearbyConnectionState.CONNECTED -> NearbyConnectionState.CONNECTED
+                            NearbyConnectionState.REQUESTING -> NearbyConnectionState.REQUESTING
+                            else -> NearbyConnectionState.DISCONNECTED
+                        }
 
                         val updatedDevice = NearbyDevice(
                             id = stableDeviceId,
@@ -104,6 +113,11 @@ class NearbyDeviceScanner(private val context: Context) {
                             rssi = rssi,
                             connectionState = connectionState
                         )
+
+                        // If the existing entry was keyed under a different key (e.g. old MAC address), clean it up
+                        if (existing != null && existing.id != stableDeviceId) {
+                            deviceCache.remove(existing.id)
+                        }
 
                         deviceCache[stableDeviceId] = updatedDevice
                         _nearbyDevices.value = deviceCache.toMap()

@@ -56,6 +56,7 @@ import com.example.ui.screens.PermissionsScreen
 import com.example.ui.screens.AboutScreen
 import com.example.ui.screens.VoiceSosScreen
 import com.example.ui.screens.SafetyTimerScreen
+import com.example.ui.screens.EmergencySoundScreen
 
 @Composable
 fun NavGraph(
@@ -338,11 +339,18 @@ fun NavGraph(
                 onNavigateBack = { navController.navigateUp() },
                 onNavigateToSecurity = { navController.navigate(Screen.Security.route) },
                 onNavigateToVoiceSos = { navController.navigate(Screen.VoiceSos.route) },
+                onNavigateToEmergencySound = { navController.navigate(Screen.EmergencySound.route) },
                 onNavigateToSafetyTimer = { navController.navigate(Screen.SafetyTimer.route) },
                 onNavigateToHelpFaq = { navController.navigate(Screen.HelpFaq.route) },
                 onNavigateToTrustedPlaces = { navController.navigate(Screen.TrustedPlaces.route) },
                 onNavigateToPermissions = { navController.navigate(Screen.Permissions.route) },
                 onNavigateToAbout = { navController.navigate(Screen.About.route) }
+            )
+        }
+        composable(Screen.EmergencySound.route) {
+            EmergencySoundScreen(
+                viewModel = viewModel,
+                onNavigateBack = { navController.navigateUp() }
             )
         }
         composable(Screen.Security.route) {

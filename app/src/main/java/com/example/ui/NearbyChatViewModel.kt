@@ -22,9 +22,21 @@ class NearbyChatViewModel @Inject constructor(
     val messages: StateFlow<List<NearbyChatMessage>> = repository.messages
 
     fun getConnectionState(macAddress: String): StateFlow<NearbyConnectionState> {
-        return nearbyBleManager.nearbyDevices.map { devices ->
-            devices[macAddress]?.connectionState ?: NearbyConnectionState.DISCONNECTED
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), NearbyConnectionState.DISCONNECTED)
+        return nearbyBleManager.nearbyDevices
+            .map { devices ->
+                val device = devices[macAddress]
+                    ?: devices.values.firstOrNull {
+                        it.macAddress.equals(macAddress, ignoreCase = true) ||
+                        it.id.equals(macAddress, ignoreCase = true)
+                    }
+
+                device?.connectionState ?: NearbyConnectionState.DISCONNECTED
+            }
+            .stateIn(
+                viewModelScope,
+                SharingStarted.WhileSubscribed(5000),
+                NearbyConnectionState.DISCONNECTED
+            )
     }
 
     fun sendText(macAddress: String, text: String): Boolean {

@@ -21,6 +21,9 @@ class NearbyGattServer(private val context: Context) {
     
     // Track active connected remote BluetoothDevice
     private var connectedDevice: BluetoothDevice? = null
+    // Track remote devices that have subscribed to payload notifications via CCCD
+    private val subscribedPayloadDevices = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
     var onRemoteDeviceDisconnected: ((String) -> Unit)? = null
     var onConnectionRequested: ((String, String?) -> Unit)? = null
     var onIncomingPayloadReceived: ((String, String) -> Unit)? = null
@@ -45,6 +48,7 @@ class NearbyGattServer(private val context: Context) {
                 onActiveConnectionsChanged?.invoke(activeConnections)
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 Log.d("NearbyGattServer", "NEARBY_BLE: Device disconnected from GATT server: ${device.address}")
+                subscribedPayloadDevices.remove(device.address)
                 if (activeConnections > 0) activeConnections--
                 onActiveConnectionsChanged?.invoke(activeConnections)
                 if (connectedDevice?.address == device.address) {
@@ -52,6 +56,11 @@ class NearbyGattServer(private val context: Context) {
                     onRemoteDeviceDisconnected?.invoke(device.address)
                 }
             }
+        }
+
+        override fun onNotificationSent(device: BluetoothDevice, status: Int) {
+            super.onNotificationSent(device, status)
+            Log.d("NearbyGattServer", "NEARBY_BLE: onNotificationSent device=${device.address} status=$status (${if (status == BluetoothGatt.GATT_SUCCESS) "SUCCESS" else "FAILURE"})")
         }
 
         override fun onMtuChanged(device: BluetoothDevice, mtu: Int) {
@@ -132,6 +141,17 @@ class NearbyGattServer(private val context: Context) {
                         value.contentEquals(BluetoothGattDescriptor.ENABLE_INDICATION_VALUE)
                 if (isValid) {
                     descriptor.value = value
+                    if (descriptor.characteristic?.uuid == NearbyBleProtocol.NEARBY_PAYLOAD_CHAR_UUID) {
+                        if (value.contentEquals(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE) ||
+                            value.contentEquals(BluetoothGattDescriptor.ENABLE_INDICATION_VALUE)
+                        ) {
+                            subscribedPayloadDevices.add(device.address)
+                            Log.d("NearbyGattServer", "NEARBY_BLE: Payload notifications subscribed by ${device.address}")
+                        } else {
+                            subscribedPayloadDevices.remove(device.address)
+                            Log.d("NearbyGattServer", "NEARBY_BLE: Payload notifications unsubscribed by ${device.address}")
+                        }
+                    }
                     Log.d("NearbyGattServer", "NEARBY_BLE: CCCD written for ${descriptor.characteristic.uuid} by ${device.address}: value=${value.contentToString()}")
                     if (responseNeeded) {
                         try {
@@ -217,6 +237,7 @@ class NearbyGattServer(private val context: Context) {
             gattServer?.close()
             gattServer = null
             connectedDevice = null
+            subscribedPayloadDevices.clear()
         } catch (_: SecurityException) {}
     }
     
@@ -326,6 +347,11 @@ class NearbyGattServer(private val context: Context) {
         
         if (targetAddress.isNotBlank() && !targetDevice.address.equals(targetAddress, ignoreCase = true)) {
             Log.w("NearbyGattServer", "NEARBY_BLE: Target address $targetAddress does not match connected device ${targetDevice.address}")
+            return false
+        }
+
+        if (!subscribedPayloadDevices.contains(targetDevice.address)) {
+            Log.w("NearbyGattServer", "NEARBY_BLE: Target device ${targetDevice.address} has not enabled payload notifications via CCCD. Notification aborted.")
             return false
         }
 

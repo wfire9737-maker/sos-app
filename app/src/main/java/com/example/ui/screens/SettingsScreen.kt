@@ -43,6 +43,7 @@ fun SettingsScreen(
     onNavigateBack: () -> Unit,
     onNavigateToSecurity: () -> Unit,
     onNavigateToVoiceSos: () -> Unit = {},
+    onNavigateToEmergencySound: () -> Unit = {},
     onNavigateToSafetyTimer: () -> Unit = {},
     onNavigateToHelpFaq: () -> Unit = {},
     onNavigateToTrustedPlaces: () -> Unit = {},
@@ -92,136 +93,6 @@ fun SettingsScreen(
     val maxBattery = devices.filter { it.status == "CONNECTED" || it.status == "ALERTing" }.maxOfOrNull { it.batteryLevel } ?: 0
     
     var showLogoutDialog by remember { mutableStateOf(false) }
-
-    val coroutineScope = rememberCoroutineScope()
-    var previewPlayer by remember { mutableStateOf<android.media.MediaPlayer?>(null) }
-    var isPreviewPlaying by remember { mutableStateOf(false) }
-
-    val stopPreview = {
-        try {
-            previewPlayer?.stop()
-            previewPlayer?.release()
-        } catch (_: Exception) {}
-        previewPlayer = null
-        isPreviewPlaying = false
-    }
-
-    val startPreview: (String) -> Unit = { soundId ->
-        stopPreview()
-        try {
-            val audioAttributes = android.media.AudioAttributes.Builder()
-                .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
-                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
-                .build()
-
-            val player = when (soundId) {
-                "builtin_rapid_alarm" -> android.media.MediaPlayer.create(context, com.example.R.raw.emergency_rapid_alarm)
-                "builtin_warning_pulse" -> android.media.MediaPlayer.create(context, com.example.R.raw.emergency_warning_pulse)
-                "builtin_double_beep" -> android.media.MediaPlayer.create(context, com.example.R.raw.emergency_double_beep)
-                "builtin_critical_alert" -> android.media.MediaPlayer.create(context, com.example.R.raw.emergency_critical_alert)
-                "builtin_evacuation_tone" -> android.media.MediaPlayer.create(context, com.example.R.raw.emergency_evacuation_tone)
-                "custom" -> {
-                    val customUriStr = prefs.getString("emergency_custom_sound_uri", null)
-                    if (!customUriStr.isNullOrBlank()) {
-                        try {
-                            android.media.MediaPlayer().apply {
-                                setAudioAttributes(audioAttributes)
-                                setDataSource(context, android.net.Uri.parse(customUriStr))
-                                prepare()
-                            }
-                        } catch (e: Exception) {
-                            android.util.Log.w("SettingsScreen", "Failed to preview custom sound, falling back to siren: ${e.message}")
-                            android.media.MediaPlayer.create(context, com.example.R.raw.sos_emergency_siren)
-                        }
-                    } else {
-                        android.media.MediaPlayer.create(context, com.example.R.raw.sos_emergency_siren)
-                    }
-                }
-                else -> android.media.MediaPlayer.create(context, com.example.R.raw.sos_emergency_siren)
-            }
-
-            player?.let { p ->
-                p.setOnCompletionListener {
-                    stopPreview()
-                }
-                p.start()
-                previewPlayer = p
-                isPreviewPlaying = true
-
-                coroutineScope.launch {
-                    kotlinx.coroutines.delay(4000)
-                    if (previewPlayer == p) {
-                        stopPreview()
-                    }
-                }
-            } ?: run {
-                android.widget.Toast.makeText(context, "Failed to load audio preview", android.widget.Toast.LENGTH_SHORT).show()
-            }
-        } catch (e: Exception) {
-            android.util.Log.e("SettingsScreen", "Preview playback failed: ${e.message}")
-            stopPreview()
-        }
-    }
-
-    DisposableEffect(Unit) {
-        onDispose {
-            stopPreview()
-        }
-    }
-
-    val customSoundPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { uri: android.net.Uri? ->
-        if (uri != null) {
-            try {
-                try {
-                    context.contentResolver.takePersistableUriPermission(
-                        uri,
-                        android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
-                    )
-                } catch (_: Exception) {}
-
-                var canOpen = false
-                try {
-                    context.contentResolver.openInputStream(uri)?.use {
-                        canOpen = true
-                    }
-                } catch (_: Exception) {}
-
-                if (canOpen) {
-                    var displayName: String? = null
-                    try {
-                        context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
-                            if (cursor.moveToFirst()) {
-                                val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-                                if (nameIndex != -1) {
-                                    displayName = cursor.getString(nameIndex)
-                                }
-                            }
-                        }
-                    } catch (_: Exception) {}
-
-                    val resolvedName = displayName ?: uri.lastPathSegment ?: "Custom Sound"
-                    viewModel.setEmergencyCustomSound(uri.toString(), resolvedName)
-                    android.widget.Toast.makeText(context, "Selected: $resolvedName", android.widget.Toast.LENGTH_SHORT).show()
-                } else {
-                    android.widget.Toast.makeText(context, "Cannot read selected audio file. Keeping previous sound.", android.widget.Toast.LENGTH_LONG).show()
-                }
-            } catch (e: Exception) {
-                android.widget.Toast.makeText(context, "Error importing audio: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
-            }
-        }
-    }
-
-    val soundOptions = listOf(
-        "builtin_siren" to "Emergency Siren",
-        "builtin_rapid_alarm" to "Rapid Alarm",
-        "builtin_warning_pulse" to "Warning Pulse",
-        "builtin_double_beep" to "Double Beep",
-        "builtin_critical_alert" to "Critical Alert",
-        "builtin_evacuation_tone" to "Evacuation Tone",
-        "custom" to "Custom Sound"
-    )
 
     val nearbyPermissions = mutableListOf<String>()
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -469,145 +340,28 @@ fun SettingsScreen(
             }
 
             item {
+                val selectedSoundName = when (emergencySoundId) {
+                    "builtin_rapid_alarm" -> "Rapid Alarm"
+                    "builtin_warning_pulse" -> "Warning Pulse"
+                    "builtin_double_beep" -> "Double Beep"
+                    "builtin_critical_alert" -> "Critical Alert"
+                    "builtin_evacuation_tone" -> "Evacuation Tone"
+                    "custom" -> if (!emergencyCustomSoundName.isNullOrBlank()) "Custom: $emergencyCustomSoundName" else "Custom Sound"
+                    else -> "Built-in Siren"
+                }
+
                 SettingsSection(title = "Emergency Sound") {
-                    val selectedSoundName = when (emergencySoundId) {
-                        "builtin_rapid_alarm" -> "Rapid Alarm"
-                        "builtin_warning_pulse" -> "Warning Pulse"
-                        "builtin_double_beep" -> "Double Beep"
-                        "builtin_critical_alert" -> "Critical Alert"
-                        "builtin_evacuation_tone" -> "Evacuation Tone"
-                        "custom" -> if (!emergencyCustomSoundName.isNullOrBlank()) "Custom: $emergencyCustomSoundName" else "Custom Sound"
-                        else -> "Emergency Siren"
-                    }
-
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text(
-                            text = "Choose the sound played when an emergency starts.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        soundOptions.forEach { (id, title) ->
-                            val isSelected = emergencySoundId == id
-                            Surface(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 4.dp)
-                                    .clickable {
-                                        if (id == "custom" && prefs.getString("emergency_custom_sound_uri", null).isNullOrBlank()) {
-                                            customSoundPickerLauncher.launch(arrayOf("audio/*"))
-                                        } else {
-                                            viewModel.setEmergencySoundId(id)
-                                        }
-                                    },
-                                shape = RoundedCornerShape(12.dp),
-                                color = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f) else Color.Transparent,
-                                tonalElevation = if (isSelected) 2.dp else 0.dp
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    RadioButton(
-                                        selected = isSelected,
-                                        onClick = {
-                                            if (id == "custom" && prefs.getString("emergency_custom_sound_uri", null).isNullOrBlank()) {
-                                                customSoundPickerLauncher.launch(arrayOf("audio/*"))
-                                            } else {
-                                                viewModel.setEmergencySoundId(id)
-                                            }
-                                        }
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = title,
-                                            style = MaterialTheme.typography.bodyLarge,
-                                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
-                                        if (id == "custom") {
-                                            val customName = emergencyCustomSoundName
-                                            Text(
-                                                text = if (!customName.isNullOrBlank()) customName else "No custom sound selected.",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = if (!customName.isNullOrBlank()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                    }
-
-                                    if (id == "custom") {
-                                        OutlinedButton(
-                                            onClick = { customSoundPickerLauncher.launch(arrayOf("audio/*")) },
-                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                                            shape = RoundedCornerShape(8.dp)
-                                        ) {
-                                            Text(
-                                                text = if (!emergencyCustomSoundName.isNullOrBlank()) "Change" else "Import from Phone",
-                                                style = MaterialTheme.typography.labelMedium
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "Current: $selectedSoundName",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontWeight = FontWeight.Medium,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.width(8.dp))
-
-                            OutlinedButton(
-                                onClick = {
-                                    if (isPreviewPlaying) {
-                                        stopPreview()
-                                    } else {
-                                        startPreview(emergencySoundId)
-                                    }
-                                },
-                                shape = RoundedCornerShape(12.dp),
-                                colors = ButtonDefaults.outlinedButtonColors(
-                                    contentColor = if (isPreviewPlaying) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
-                                )
-                            ) {
-                                Icon(
-                                    imageVector = if (isPreviewPlaying) Icons.Default.Stop else Icons.Default.PlayArrow,
-                                    contentDescription = if (isPreviewPlaying) "Stop Preview" else "Preview Sound",
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(if (isPreviewPlaying) "Stop" else "Preview")
-                            }
-                        }
-                    }
+                    SettingsItem(
+                        icon = Icons.AutoMirrored.Filled.VolumeUp,
+                        title = "Emergency Sound",
+                        subtitle = selectedSoundName,
+                        onClick = onNavigateToEmergencySound
+                    )
                 }
             }
 
             item {
                 SettingsSection(title = "Preferences") {
-                    SettingsSwitchItem(
-                        icon = if (sosSoundEnabled) Icons.AutoMirrored.Filled.VolumeUp else Icons.AutoMirrored.Filled.VolumeOff,
-                        title = "SOS Trigger Sound",
-                        subtitle = if (sosSoundEnabled) "Sound siren automatically when SOS triggers" else "Silent SOS mode (alarm sound disabled)",
-                        checked = sosSoundEnabled,
-                        onCheckedChange = { enabled -> viewModel.setSosSoundEnabled(enabled) }
-                    )
                     SettingsSwitchItem(
                         icon = Icons.Default.Vibration,
                         title = "SOS Trigger Vibration",
