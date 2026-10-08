@@ -64,6 +64,12 @@ fun SettingsScreen(
     var fallResponseTime by remember { mutableStateOf(settingsRepository.getFallResponseDelaySeconds()) }
     var showFallResponseTimeDialog by remember { mutableStateOf(false) }
 
+    var physicalSosCancellationWindow by remember { mutableStateOf(settingsRepository.getPhysicalSosCancellationWindowSeconds()) }
+    var showPhysicalSosWindowDialog by remember { mutableStateOf(false) }
+
+    var inAppSosActivationDelay by remember { mutableStateOf(settingsRepository.getInAppSosActivationDelaySeconds()) }
+    var showInAppSosDelayDialog by remember { mutableStateOf(false) }
+
     val prefs = context.getSharedPreferences("smart_sos_settings", android.content.Context.MODE_PRIVATE)
     var nearbyPresenceInterval by remember { mutableStateOf(settingsRepository.getNearbyPresenceInterval()) }
     var showNearbyPresenceDialog by remember { mutableStateOf(false) }
@@ -422,6 +428,23 @@ fun SettingsScreen(
             }
 
             item {
+                SettingsSection(title = "SOS Timing & Cancellation") {
+                    SettingsItem(
+                        icon = Icons.Default.RadioButtonChecked,
+                        title = "Physical SOS Cancellation Window",
+                        subtitle = "Time available to press the physical SOS button again to cancel the SOS.\n$physicalSosCancellationWindow seconds",
+                        onClick = { showPhysicalSosWindowDialog = true }
+                    )
+                    SettingsItem(
+                        icon = Icons.Default.HourglassTop,
+                        title = "In-App SOS Activation Delay",
+                        subtitle = "Time to wait before starting the emergency workflow after pressing in-app SOS.\n${if (inAppSosActivationDelay == 0) "Immediate" else "$inAppSosActivationDelay seconds"}",
+                        onClick = { showInAppSosDelayDialog = true }
+                    )
+                }
+            }
+
+            item {
                 SettingsSection(title = "Device Settings") {
                     SettingsSwitchItem(
                         icon = Icons.AutoMirrored.Filled.DirectionsRun,
@@ -740,6 +763,103 @@ fun SettingsScreen(
             },
             confirmButton = {
                 TextButton(onClick = { showFallResponseTimeDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (showPhysicalSosWindowDialog) {
+        AlertDialog(
+            onDismissRequest = { showPhysicalSosWindowDialog = false },
+            title = { Text("Physical SOS Cancellation Window") },
+            text = {
+                Column {
+                    Text(
+                        text = "Time available to press the physical SOS button again to cancel the SOS.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    SettingsRepository.AVAILABLE_PHYSICAL_SOS_CANCELLATION_WINDOWS.forEach { seconds ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    physicalSosCancellationWindow = seconds
+                                    settingsRepository.setPhysicalSosCancellationWindowSeconds(seconds)
+                                    viewModel.setPhysicalSosCancellationWindowSeconds(seconds)
+                                    showPhysicalSosWindowDialog = false
+                                }
+                                .padding(vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = physicalSosCancellationWindow == seconds,
+                                onClick = {
+                                    physicalSosCancellationWindow = seconds
+                                    settingsRepository.setPhysicalSosCancellationWindowSeconds(seconds)
+                                    viewModel.setPhysicalSosCancellationWindowSeconds(seconds)
+                                    showPhysicalSosWindowDialog = false
+                                }
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("$seconds seconds")
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showPhysicalSosWindowDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (showInAppSosDelayDialog) {
+        AlertDialog(
+            onDismissRequest = { showInAppSosDelayDialog = false },
+            title = { Text("In-App SOS Activation Delay") },
+            text = {
+                Column {
+                    Text(
+                        text = "Time to wait before starting the emergency workflow after pressing in-app SOS.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    SettingsRepository.AVAILABLE_IN_APP_SOS_ACTIVATION_DELAYS.forEach { seconds ->
+                        val label = if (seconds == 0) "Immediate" else "$seconds seconds"
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    inAppSosActivationDelay = seconds
+                                    settingsRepository.setInAppSosActivationDelaySeconds(seconds)
+                                    viewModel.setInAppSosActivationDelaySeconds(seconds)
+                                    showInAppSosDelayDialog = false
+                                }
+                                .padding(vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = inAppSosActivationDelay == seconds,
+                                onClick = {
+                                    inAppSosActivationDelay = seconds
+                                    settingsRepository.setInAppSosActivationDelaySeconds(seconds)
+                                    viewModel.setInAppSosActivationDelaySeconds(seconds)
+                                    showInAppSosDelayDialog = false
+                                }
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(label)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showInAppSosDelayDialog = false }) {
                     Text("Cancel")
                 }
             }

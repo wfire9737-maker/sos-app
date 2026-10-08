@@ -26,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -65,6 +66,15 @@ fun EmergencyScreen(
     LaunchedEffect(countdown, activeEmergency?.status) {
         if (countdown == null && activeEmergency != null && activeEmergency?.status != "COUNTDOWN") {
             permissionHandler()
+        }
+    }
+
+    var hasEverBeenActive by remember { mutableStateOf(activeEmergency != null || countdown != null) }
+    LaunchedEffect(activeEmergency, countdown) {
+        if (activeEmergency != null || countdown != null) {
+            hasEverBeenActive = true
+        } else if (hasEverBeenActive) {
+            onNavigateBack()
         }
     }
     
@@ -152,44 +162,100 @@ fun EmergencyScreen(
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    if (countdown != null) {
+                    val isPending = countdown != null || activeEmergency?.status == "COUNTDOWN"
+                    val isPhysicalSos = activeEmergency?.triggerType == "PHYSICAL_BLE_BUTTON"
+                    val secondsRemaining = countdown ?: 0
+
+                    if (isPending && isPhysicalSos) {
                         Text(
-                            text = countdown.toString(),
+                            text = if (secondsRemaining > 0) secondsRemaining.toString() else "!",
                             fontSize = 72.sp,
                             fontWeight = FontWeight.Black,
                             color = MaterialTheme.colorScheme.onError
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "SENDING SOS...",
+                            text = "Emergency SOS Pending",
                             fontSize = 24.sp,
+                            fontWeight = FontWeight.Black,
+                            color = MaterialTheme.colorScheme.onError,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = if (secondsRemaining > 0) "Activating in $secondsRemaining second${if (secondsRemaining == 1) "" else "s"}" else "Activating...",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onError
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Card(
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)
+                            ),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Default.Emergency,
+                                    contentDescription = "Physical SOS button",
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Press the physical SOS button again to cancel",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+                    } else if (isPending) {
+                        Text(
+                            text = if (secondsRemaining > 0) secondsRemaining.toString() else "!",
+                            fontSize = 72.sp,
                             fontWeight = FontWeight.Black,
                             color = MaterialTheme.colorScheme.onError
                         )
+                        Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "Tap CANCEL to abort.",
-                            fontSize = 16.sp,
-                            color = MaterialTheme.colorScheme.onError.copy(alpha=0.8f)
-                        )
-                    } else if (activeEmergency?.status == "COUNTDOWN") {
-                        Icon(
-                            Icons.Default.Timer,
-                            contentDescription = "Delayed SOS",
-                            modifier = Modifier.size(64.dp),
-                            tint = if (flashWarning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onError
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            text = "SOS DELAYED",
+                            text = "Emergency SOS Pending",
                             fontSize = 24.sp,
                             fontWeight = FontWeight.Black,
-                            color = if (flashWarning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onError
+                            color = MaterialTheme.colorScheme.onError,
+                            textAlign = TextAlign.Center
                         )
+                        Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "Trusted Place delay in progress. Tap CANCEL to abort.",
-                            fontSize = 16.sp,
-                            color = if (flashWarning) MaterialTheme.colorScheme.error.copy(alpha=0.8f) else MaterialTheme.colorScheme.onError.copy(alpha=0.8f)
+                            text = if (secondsRemaining > 0) "Activating in $secondsRemaining second${if (secondsRemaining == 1) "" else "s"}" else "Activating...",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onError
                         )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Button(
+                            onClick = {
+                                viewModel.cancelEmergencyWithPin("") { success ->
+                                    if (success) onNavigateBack()
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.surface,
+                                contentColor = MaterialTheme.colorScheme.error
+                            ),
+                            shape = RoundedCornerShape(24.dp),
+                            modifier = Modifier
+                                .testTag("in_app_cancel_pending_sos_button")
+                                .padding(horizontal = 8.dp)
+                        ) {
+                            Icon(Icons.Default.Cancel, contentDescription = null, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Cancel SOS", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        }
                     } else {
                         Icon(
                             Icons.Default.Warning,

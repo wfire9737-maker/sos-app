@@ -26,6 +26,33 @@ class EmergencyProvider(
     init {
         scope.launch {
             deviceService.bleManager.sosEvents.collect { sosEvent ->
+                android.util.Log.d("BleManager", "EMERGENCY: Physical SOS event received (Event #${sosEvent.eventId})")
+
+                // 1. Check if physical SOS is currently in its cancellation window
+                if (emergencyService.isPhysicalSosPendingCancellation()) {
+                    android.util.Log.d("BleManager", "PHYSICAL SOS: Second press detected within cancellation window -> CANCEL SOS")
+                    deviceService.addCommLog("⏹️ Second Physical SOS button press detected within cancellation window. SOS CANCELLED.")
+                    val cancelled = emergencyService.cancelPendingPhysicalSos()
+                    if (cancelled) {
+                        alarmVibratorService.stopAlarm()
+                        alarmVibratorService.stopVibration()
+                        deviceService.resetEsp32()
+                    }
+                    return@collect
+                }
+
+                // 2. If an emergency is already active (past countdown window)
+                if (emergencyService.isEmergencyActive() && !emergencyService.isCountdownActive()) {
+                    android.util.Log.d("BleManager", "PHYSICAL SOS: Emergency is already active. Updating contacts.")
+                    deviceService.addCommLog("🚨 Physical SOS pressed while emergency active. Updating emergency contacts.")
+                    val currentModel = emergencyService.activeEmergency.value
+                    if (currentModel != null) {
+                        emergencyService.notifyEmergencyContacts(currentModel, isUpdate = true)
+                    }
+                    return@collect
+                }
+
+                // 3. First physical SOS button press: proceed with emergency trigger
                 android.util.Log.d("BleManager", "EMERGENCY: activating from PHYSICAL_BLE_BUTTON (Event #${sosEvent.eventId})")
                 val hwGps = sosEvent.hardwareGpsLocation ?: deviceService.bleManager.latestHardwareGpsLocation.value
                 val isGpsValid = deviceService.bleManager.hardwareGpsState.value is com.example.ble.HardwareGpsState.ValidLocation && hwGps != null

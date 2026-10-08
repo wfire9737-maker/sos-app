@@ -24,25 +24,28 @@ import kotlinx.coroutines.launch
 class NearbyDeviceScanner(private val context: Context) {
     companion object {
         private const val TAG = "NearbyScanner"
-        const val DISCOVERY_WINDOW_MS = 5000L
+        const val STALE_DEVICE_THRESHOLD_MS = 60_000L // 60-second stale retention window
+        private const val PRUNE_INTERVAL_MS = 5_000L // 5-second periodic stale cleanup check
     }
 
     private val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
-    private val bluetoothAdapter: BluetoothAdapter? = bluetoothManager?.adapter
-    private val scanner: BluetoothLeScanner? = bluetoothAdapter?.bluetoothLeScanner
-    
+    private val bluetoothAdapter: BluetoothAdapter?
+        get() = bluetoothManager?.adapter
+    private val scanner: BluetoothLeScanner?
+        get() = bluetoothAdapter?.bluetoothLeScanner
+
     private var isHardwareScanning = false
     private var isDiscoverySessionActive = false
-    private var discoveryCycleJob: Job? = null
+    private var stalePruningJob: Job? = null
     private val scannerScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
-    // UI-exposed list of discovered devices
+    // Internal cache of discovered devices keyed by application-level stableDeviceId
+    private val deviceCache = mutableMapOf<String, NearbyDevice>()
+    private val deviceMapLock = Any()
+
+    // UI-exposed map of discovered devices (Key: stableDeviceId, Value: NearbyDevice)
     private val _nearbyDevices = MutableStateFlow<Map<String, NearbyDevice>>(emptyMap())
     val nearbyDevices: StateFlow<Map<String, NearbyDevice>> = _nearbyDevices.asStateFlow()
-
-    // Internal buffer for collecting scan results during the current 5-second window
-    private val temporaryDiscoveredDevices = mutableMapOf<String, NearbyDevice>()
-    private val deviceMapLock = Any()
 
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult?) {
@@ -57,171 +60,208 @@ class NearbyDeviceScanner(private val context: Context) {
                     val address = device.address ?: return
                     val rssi = result.rssi
                     val timestamp = System.currentTimeMillis()
-                    
-                    // Extract Nearby-specific advertised name from service data if available
-                    var discoveredName: String? = null
+
+                    var parsedStableId: String? = null
+                    var parsedName: String? = null
+
+                    // Extract payload: "${stableDeviceId}:${deviceName}" from service data
                     val nameServiceData = result.scanRecord?.getServiceData(ParcelUuid(NearbyBleProtocol.NEARBY_NAME_SERVICE_UUID))
                     if (nameServiceData != null && nameServiceData.isNotEmpty()) {
                         try {
                             val decoded = String(nameServiceData, Charsets.UTF_8).trim()
-                            if (decoded.isNotBlank()) {
-                                discoveredName = decoded
+                            if (decoded.contains(":")) {
+                                val parts = decoded.split(":", limit = 2)
+                                if (parts[0].isNotBlank()) {
+                                    parsedStableId = parts[0].trim()
+                                }
+                                if (parts.size > 1 && parts[1].isNotBlank()) {
+                                    parsedName = parts[1].trim()
+                                }
+                            } else if (decoded.isNotBlank()) {
+                                parsedName = decoded
                             }
-                        } catch (e: Exception) {}
+                        } catch (_: Exception) {}
                     }
 
+                    // Use stableDeviceId as the primary unique key, falling back to BLE address only if missing
+                    val stableDeviceId = parsedStableId ?: address
+
                     synchronized(deviceMapLock) {
-                        val existingInBatch = temporaryDiscoveredDevices[address]
-                        val existingInUi = _nearbyDevices.value[address]
-                        val resolvedName = if (!discoveredName.isNullOrBlank()) {
-                            discoveredName
+                        val existing = deviceCache[stableDeviceId]
+                        val resolvedName = if (!parsedName.isNullOrBlank()) {
+                            parsedName
                         } else {
-                            existingInBatch?.deviceName ?: existingInUi?.deviceName ?: NearbyBleProtocol.DEFAULT_DEVICE_NAME
+                            existing?.deviceName ?: NearbyBleProtocol.DEFAULT_DEVICE_NAME
                         }
 
-                        val connectionState = existingInUi?.connectionState ?: NearbyConnectionState.DISCONNECTED
+                        val connectionState = existing?.connectionState ?: NearbyConnectionState.DISCONNECTED
 
-                        // Deduplicate: Exactly ONE NearbyDevice entry per stable BLE MAC address
-                        temporaryDiscoveredDevices[address] = NearbyDevice(
-                            macAddress = address,
+                        val updatedDevice = NearbyDevice(
+                            id = stableDeviceId,
+                            macAddress = address, // Always keep the freshest BLE MAC for GATT connection
                             deviceName = resolvedName,
                             lastSeen = timestamp,
                             rssi = rssi,
                             connectionState = connectionState
                         )
+
+                        deviceCache[stableDeviceId] = updatedDevice
+                        _nearbyDevices.value = deviceCache.toMap()
+
+                        if (existing == null) {
+                            Log.d(
+                                TAG,
+                                "NEARBY_DEBUG: [NEW_ENTRY] stableDeviceId=$stableDeviceId address=$address name=$resolvedName rssi=$rssi"
+                            )
+                        } else {
+                            Log.d(
+                                TAG,
+                                "NEARBY_DEBUG: [UPDATE_ENTRY] stableDeviceId=$stableDeviceId address=$address name=$resolvedName rssi=$rssi"
+                            )
+                        }
                     }
                 } catch (e: SecurityException) {
-                    Log.e(TAG, "SecurityException during scan", e)
+                    Log.e(TAG, "NEARBY_DEBUG: SecurityException during scan result processing", e)
+                } catch (e: Exception) {
+                    Log.e(TAG, "NEARBY_DEBUG: Error processing scan result", e)
                 }
             }
         }
 
         override fun onScanFailed(errorCode: Int) {
             isHardwareScanning = false
-            Log.e(TAG, "Scan failed with error code: $errorCode")
+            Log.e(TAG, "NEARBY_DEBUG: Scan failure callback errorCode=$errorCode")
         }
     }
 
-    private fun startBleHardwareScan() {
-        if (isHardwareScanning) return
-        try {
-            if (scanner == null) {
-                Log.w(TAG, "Bluetooth LE Scanner not available.")
-                return
-            }
+    fun startScanning() {
+        if (isDiscoverySessionActive) {
+            Log.d(TAG, "NEARBY_DEBUG: Scanner already running")
+            return
+        }
 
+        val adapter = bluetoothAdapter
+        if (adapter == null || !adapter.isEnabled) {
+            Log.w(TAG, "NEARBY_DEBUG: Bluetooth adapter unavailable or disabled. Cannot start scan.")
+            return
+        }
+
+        val leScanner = scanner
+        if (leScanner == null) {
+            Log.w(TAG, "NEARBY_DEBUG: BluetoothLeScanner not available.")
+            return
+        }
+
+        try {
             val filter = ScanFilter.Builder()
                 .setServiceUuid(ParcelUuid(NearbyBleProtocol.NEARBY_SERVICE_UUID))
                 .build()
 
             val settings = ScanSettings.Builder()
-                .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+                .setScanMode(ScanSettings.SCAN_MODE_BALANCED)
                 .build()
 
-            scanner.startScan(listOf(filter), settings, scanCallback)
+            leScanner.startScan(listOf(filter), settings, scanCallback)
             isHardwareScanning = true
-            Log.d(TAG, "Started 5-second BLE hardware scan.")
-        } catch (e: SecurityException) {
-            Log.e(TAG, "Missing BLUETOOTH_SCAN permission", e)
-        }
-    }
+            isDiscoverySessionActive = true
+            Log.d(TAG, "NEARBY_DEBUG: Scanner started (single continuous session, mode=BALANCED)")
 
-    private fun stopBleHardwareScan() {
-        if (!isHardwareScanning) return
-        try {
-            scanner?.stopScan(scanCallback)
+            startPeriodicStalePruning()
+        } catch (e: SecurityException) {
+            Log.e(TAG, "NEARBY_DEBUG: Missing BLUETOOTH_SCAN permission to start scan", e)
+            isDiscoverySessionActive = false
             isHardwareScanning = false
-            Log.d(TAG, "Stopped 5-second BLE hardware scan.")
-        } catch (e: SecurityException) {
-            Log.e(TAG, "Missing BLUETOOTH_SCAN permission", e)
-        }
-    }
-
-    fun startScanning() {
-        if (isDiscoverySessionActive) return
-        isDiscoverySessionActive = true
-        Log.d(TAG, "Starting controlled 5-second discovery refresh cycle.")
-
-        discoveryCycleJob?.cancel()
-        discoveryCycleJob = scannerScope.launch {
-            while (isActive && isDiscoverySessionActive) {
-                // 1. Clear temporary discovery buffer for the new 5-second cycle
-                synchronized(deviceMapLock) {
-                    temporaryDiscoveredDevices.clear()
-                }
-
-                // 2. Start BLE hardware scan
-                startBleHardwareScan()
-
-                // 3. Collect scan results during the 5-second window
-                delay(DISCOVERY_WINDOW_MS)
-
-                // 4. Stop BLE hardware scan
-                stopBleHardwareScan()
-
-                // 5. Build fresh deduplicated snapshot while protecting active/requesting connections
-                synchronized(deviceMapLock) {
-                    val freshMap = mutableMapOf<String, NearbyDevice>()
-
-                    // Add all devices discovered in the current 5-second window
-                    freshMap.putAll(temporaryDiscoveredDevices)
-
-                    // Preserve any currently CONNECTED or REQUESTING device
-                    _nearbyDevices.value.forEach { (mac, existingDevice) ->
-                        if (existingDevice.connectionState != NearbyConnectionState.DISCONNECTED) {
-                            if (!freshMap.containsKey(mac)) {
-                                freshMap[mac] = existingDevice
-                            } else {
-                                freshMap[mac] = freshMap[mac]!!.copy(
-                                    connectionState = existingDevice.connectionState
-                                )
-                            }
-                        }
-                    }
-
-                    // 6. Replace the UI's discovered-device StateFlow with the fresh snapshot
-                    _nearbyDevices.value = freshMap
-                    Log.d(TAG, "Discovery cycle complete: ${_nearbyDevices.value.size} active devices.")
-                }
-            }
+        } catch (e: Exception) {
+            Log.e(TAG, "NEARBY_DEBUG: Failed to start BLE scan", e)
+            isDiscoverySessionActive = false
+            isHardwareScanning = false
         }
     }
 
     fun stopScanning() {
-        isDiscoverySessionActive = false
-        discoveryCycleJob?.cancel()
-        discoveryCycleJob = null
-        stopBleHardwareScan()
-        synchronized(deviceMapLock) {
-            temporaryDiscoveredDevices.clear()
+        if (!isDiscoverySessionActive && !isHardwareScanning) {
+            return
         }
-        Log.d(TAG, "Stopped nearby discovery session.")
+
+        isDiscoverySessionActive = false
+        stalePruningJob?.cancel()
+        stalePruningJob = null
+
+        if (isHardwareScanning) {
+            try {
+                scanner?.stopScan(scanCallback)
+                Log.d(TAG, "NEARBY_DEBUG: Scanner stopped")
+            } catch (e: SecurityException) {
+                Log.e(TAG, "NEARBY_DEBUG: Missing BLUETOOTH_SCAN permission to stop scan", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "NEARBY_DEBUG: Error stopping BLE scan", e)
+            } finally {
+                isHardwareScanning = false
+            }
+        }
     }
 
-    fun updateDeviceConnectionState(macAddress: String, state: NearbyConnectionState, deviceName: String? = null) {
+    private fun startPeriodicStalePruning() {
+        stalePruningJob?.cancel()
+        stalePruningJob = scannerScope.launch {
+            while (isActive && isDiscoverySessionActive) {
+                delay(PRUNE_INTERVAL_MS)
+                pruneStaleDevices()
+            }
+        }
+    }
+
+    private fun pruneStaleDevices() {
+        val now = System.currentTimeMillis()
+        var hasPruned = false
+
         synchronized(deviceMapLock) {
-            val updatedMap = _nearbyDevices.value.toMutableMap()
-            val existing = updatedMap[macAddress]
-            val resolvedName = deviceName ?: existing?.deviceName ?: NearbyBleProtocol.DEFAULT_DEVICE_NAME
-            val updatedDevice = existing?.copy(
+            val iterator = deviceCache.entries.iterator()
+            while (iterator.hasNext()) {
+                val entry = iterator.next()
+                val device = entry.value
+
+                // Never prune devices with active or pending connections
+                if (device.connectionState == NearbyConnectionState.DISCONNECTED) {
+                    if (now - device.lastSeen > STALE_DEVICE_THRESHOLD_MS) {
+                        iterator.remove()
+                        hasPruned = true
+                        Log.d(
+                            TAG,
+                            "NEARBY_DEBUG: [STALE_REMOVE] stableDeviceId=${device.id} address=${device.macAddress} name=${device.deviceName} (inactive for >60s)"
+                        )
+                    }
+                }
+            }
+
+            if (hasPruned) {
+                _nearbyDevices.value = deviceCache.toMap()
+            }
+        }
+    }
+
+    fun updateDeviceConnectionState(identifier: String, state: NearbyConnectionState, deviceName: String? = null) {
+        synchronized(deviceMapLock) {
+            // Find existing device by stableDeviceId OR BLE macAddress
+            val existingEntry = deviceCache.values.firstOrNull { it.id == identifier || it.macAddress == identifier }
+            val resolvedKey = existingEntry?.id ?: identifier
+            val resolvedMac = existingEntry?.macAddress ?: identifier
+            val resolvedName = deviceName ?: existingEntry?.deviceName ?: NearbyBleProtocol.DEFAULT_DEVICE_NAME
+
+            val updatedDevice = existingEntry?.copy(
                 connectionState = state,
                 deviceName = resolvedName
             ) ?: NearbyDevice(
-                macAddress = macAddress,
+                id = resolvedKey,
+                macAddress = resolvedMac,
                 deviceName = resolvedName,
                 lastSeen = System.currentTimeMillis(),
                 rssi = -50,
                 connectionState = state
             )
-            updatedMap[macAddress] = updatedDevice
-            _nearbyDevices.value = updatedMap
 
-            if (temporaryDiscoveredDevices.containsKey(macAddress)) {
-                temporaryDiscoveredDevices[macAddress] = temporaryDiscoveredDevices[macAddress]!!.copy(
-                    connectionState = state,
-                    deviceName = resolvedName
-                )
-            }
+            deviceCache[resolvedKey] = updatedDevice
+            _nearbyDevices.value = deviceCache.toMap()
         }
     }
 }

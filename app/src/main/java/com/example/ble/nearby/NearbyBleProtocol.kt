@@ -13,8 +13,9 @@ object NearbyBleProtocol {
     // Maximum safe payload size without advanced MTU chunking
     const val MAX_PAYLOAD_SIZE = 512
 
-    // 16-bit UUID for Nearby Device Name advertising service data
+    // 16-bit UUID for Nearby Device Name & Stable ID advertising service data
     val NEARBY_NAME_SERVICE_UUID: UUID = UUID.fromString("00009bf9-0000-1000-8000-00805f9b34fb")
     
     const val DEFAULT_DEVICE_NAME = "Smart SOS Phone"
+    const val PREFS_KEY_STABLE_DEVICE_ID = "nearby_stable_device_id"
 }

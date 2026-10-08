@@ -9,11 +9,14 @@ import android.bluetooth.le.BluetoothLeAdvertiser
 import android.content.Context
 import android.os.ParcelUuid
 import android.util.Log
+import java.util.UUID
 
 class NearbyPresenceAdvertiser(private val context: Context) {
     private val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
-    private val bluetoothAdapter: BluetoothAdapter? = bluetoothManager?.adapter
-    private val advertiser: BluetoothLeAdvertiser? = bluetoothAdapter?.bluetoothLeAdvertiser
+    private val bluetoothAdapter: BluetoothAdapter?
+        get() = bluetoothManager?.adapter
+    private val advertiser: BluetoothLeAdvertiser?
+        get() = bluetoothAdapter?.bluetoothLeAdvertiser
     private var isAdvertising = false
 
     private val advertiseCallback = object : AdvertiseCallback() {
@@ -30,19 +33,35 @@ class NearbyPresenceAdvertiser(private val context: Context) {
         }
     }
 
+    private fun getOrCreateStableDeviceId(): String {
+        val prefs = context.getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE)
+        var deviceId = prefs.getString(NearbyBleProtocol.PREFS_KEY_STABLE_DEVICE_ID, null)
+        if (deviceId.isNullOrBlank()) {
+            // Generate a compact 12-char hex unique device identifier (48 bits entropy)
+            deviceId = UUID.randomUUID().toString().replace("-", "").take(12)
+            prefs.edit().putString(NearbyBleProtocol.PREFS_KEY_STABLE_DEVICE_ID, deviceId).apply()
+        }
+        return deviceId
+    }
+
     fun startAdvertising() {
         if (isAdvertising) return
         try {
-            if (advertiser == null) {
+            val leAdvertiser = advertiser
+            if (leAdvertiser == null) {
                 Log.w("NearbyAdvertiser", "Bluetooth LE Advertiser not available.")
                 return
             }
 
+            val stableDeviceId = getOrCreateStableDeviceId()
             val prefs = context.getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE)
             val configuredName = prefs.getString("nearby_device_name", NearbyBleProtocol.DEFAULT_DEVICE_NAME)?.trim()
             val deviceName = if (configuredName.isNullOrBlank()) NearbyBleProtocol.DEFAULT_DEVICE_NAME else configuredName
-            val nameBytes = deviceName.toByteArray(Charsets.UTF_8).let {
-                if (it.size > 24) it.copyOfRange(0, 24) else it
+
+            // Format: "${stableDeviceId}:${deviceName}" (e.g. "a1b2c3d4e5f6:Redmi Note 13")
+            val payloadString = "$stableDeviceId:$deviceName"
+            val payloadBytes = payloadString.toByteArray(Charsets.UTF_8).let {
+                if (it.size > 26) it.copyOfRange(0, 26) else it
             }
 
             val settings = AdvertiseSettings.Builder()
@@ -58,10 +77,10 @@ class NearbyPresenceAdvertiser(private val context: Context) {
 
             val scanResponse = AdvertiseData.Builder()
                 .setIncludeDeviceName(false)
-                .addServiceData(ParcelUuid(NearbyBleProtocol.NEARBY_NAME_SERVICE_UUID), nameBytes)
+                .addServiceData(ParcelUuid(NearbyBleProtocol.NEARBY_NAME_SERVICE_UUID), payloadBytes)
                 .build()
 
-            advertiser.startAdvertising(settings, data, scanResponse, advertiseCallback)
+            leAdvertiser.startAdvertising(settings, data, scanResponse, advertiseCallback)
         } catch (e: SecurityException) {
             Log.e("NearbyAdvertiser", "Missing BLUETOOTH_ADVERTISE permission", e)
         }

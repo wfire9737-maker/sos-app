@@ -2,6 +2,7 @@ package com.example.ble.nearby
 
 import android.bluetooth.*
 import android.content.Context
+import android.os.Build
 import android.util.Log
 
 class NearbyGattClient(private val context: Context) {
@@ -16,22 +17,21 @@ class NearbyGattClient(private val context: Context) {
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
             super.onConnectionStateChange(gatt, status, newState)
             if (newState == BluetoothProfile.STATE_CONNECTED) {
-                Log.d("NearbyGattClient", "Connected to GATT server. Requesting MTU 512...")
+                Log.d("NearbyGattClient", "NEARBY_BLE: Connected to GATT server ${gatt.device.address}. Requesting MTU 512...")
                 try {
-                    // Request MTU to allow larger payload transfers
                     val mtuRequested = gatt.requestMtu(512)
                     if (!mtuRequested) {
-                        Log.d("NearbyGattClient", "MTU request failed synchronously, discovering services...")
+                        Log.d("NearbyGattClient", "NEARBY_BLE: MTU request failed synchronously, discovering services...")
                         gatt.discoverServices()
                     }
                 } catch (e: SecurityException) {
                     Log.d("NearbyGattClient", "Security Exception on MTU request, discovering services...")
                     try {
                         gatt.discoverServices()
-                    } catch (e2: SecurityException) {}
+                    } catch (_: SecurityException) {}
                 }
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                Log.d("NearbyGattClient", "Disconnected from GATT server.")
+                Log.d("NearbyGattClient", "NEARBY_BLE: Disconnected from GATT server ${gatt.device.address}.")
                 onConnectionStateChanged?.invoke(gatt.device.address, NearbyConnectionState.DISCONNECTED)
                 closeGatt()
             }
@@ -39,10 +39,10 @@ class NearbyGattClient(private val context: Context) {
 
         override fun onMtuChanged(gatt: BluetoothGatt, mtu: Int, status: Int) {
             super.onMtuChanged(gatt, mtu, status)
-            Log.d("NearbyGattClient", "MTU changed to $mtu. Discovering services...")
+            Log.d("NearbyGattClient", "NEARBY_BLE: MTU changed to $mtu. Discovering services...")
             try {
                 gatt.discoverServices()
-            } catch (e: SecurityException) {}
+            } catch (_: SecurityException) {}
         }
 
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
@@ -72,11 +72,10 @@ class NearbyGattClient(private val context: Context) {
                             configDesc.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
                             gatt.writeDescriptor(configDesc)
                         } else {
-                            // If descriptor is missing, just write the request immediately
                             sendConnectionRequest(gatt, requestChar)
                         }
                     }
-                } catch (e: SecurityException) {}
+                } catch (_: SecurityException) {}
             }
         }
 
@@ -98,7 +97,7 @@ class NearbyGattClient(private val context: Context) {
                                 sendConnectionRequest(gatt, requestChar)
                             }
                         }
-                    } catch (e: SecurityException) {}
+                    } catch (_: SecurityException) {}
                 } else if (descriptor.characteristic.uuid == NearbyBleProtocol.CONNECTION_STATUS_CHAR_UUID) {
                     try {
                         val service = gatt.getService(NearbyBleProtocol.NEARBY_SERVICE_UUID)
@@ -106,7 +105,7 @@ class NearbyGattClient(private val context: Context) {
                         if (requestChar != null) {
                             sendConnectionRequest(gatt, requestChar)
                         }
-                    } catch (e: SecurityException) {}
+                    } catch (_: SecurityException) {}
                 }
             }
         }
@@ -117,7 +116,10 @@ class NearbyGattClient(private val context: Context) {
             characteristic: BluetoothGattCharacteristic
         ) {
             super.onCharacteristicChanged(gatt, characteristic)
-            handleCharacteristicChange(gatt, characteristic, characteristic.value)
+            // On Android 13+ (API 33), the 3-arg overload below is called instead. Avoid duplicate processing.
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                handleCharacteristicChange(gatt, characteristic, characteristic.value)
+            }
         }
         
         override fun onCharacteristicChanged(
@@ -130,20 +132,24 @@ class NearbyGattClient(private val context: Context) {
         }
         
         private fun handleCharacteristicChange(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray?) {
+            if (value == null || value.isEmpty()) {
+                Log.w("NearbyGattClient", "NEARBY_BLE: Empty notification bytes received for ${characteristic.uuid}")
+                return
+            }
+
             if (characteristic.uuid == NearbyBleProtocol.CONNECTION_STATUS_CHAR_UUID) {
-                if (value != null && value.isNotEmpty()) {
-                    if (value[0] == 1.toByte()) {
-                        Log.d("NearbyGattClient", "Connection accepted by remote device.")
-                        onConnectionStateChanged?.invoke(gatt.device.address, NearbyConnectionState.CONNECTED)
-                    } else if (value[0] == 2.toByte()) {
-                        Log.d("NearbyGattClient", "Connection declined by remote device.")
-                        onConnectionStateChanged?.invoke(gatt.device.address, NearbyConnectionState.DISCONNECTED)
-                        disconnect()
-                    }
+                if (value[0] == 1.toByte()) {
+                    Log.d("NearbyGattClient", "NEARBY_BLE: Connection accepted by remote device ${gatt.device.address}.")
+                    onConnectionStateChanged?.invoke(gatt.device.address, NearbyConnectionState.CONNECTED)
+                } else if (value[0] == 2.toByte()) {
+                    Log.d("NearbyGattClient", "NEARBY_BLE: Connection declined by remote device ${gatt.device.address}.")
+                    onConnectionStateChanged?.invoke(gatt.device.address, NearbyConnectionState.DISCONNECTED)
+                    disconnect()
                 }
             } else if (characteristic.uuid == NearbyBleProtocol.NEARBY_PAYLOAD_CHAR_UUID) {
-                if (value != null && value.isNotEmpty()) {
-                    val payloadString = String(value, Charsets.UTF_8)
+                val payloadString = String(value, Charsets.UTF_8)
+                if (payloadString.isNotBlank()) {
+                    Log.d("NearbyGattClient", "NEARBY_BLE: Received payload notification from ${gatt.device.address}, byte length=${value.size}")
                     onIncomingPayloadReceived?.invoke(gatt.device.address, payloadString)
                 }
             }
@@ -159,25 +165,24 @@ class NearbyGattClient(private val context: Context) {
             val payload = byteArrayOf(1) + nameBytes
             requestChar.value = payload
             gatt.writeCharacteristic(requestChar)
-            Log.d("NearbyGattClient", "Sent connection request with name payload.")
-        } catch (e: SecurityException) {}
+            Log.d("NearbyGattClient", "NEARBY_BLE: Sent connection request with name payload.")
+        } catch (_: SecurityException) {}
     }
 
     fun connectToDevice(macAddress: String) {
-        // Prevent duplicate connections
         if (bluetoothGatt != null) {
             disconnect()
         }
         try {
             val device = bluetoothAdapter?.getRemoteDevice(macAddress)
             if (device != null) {
-                bluetoothGatt = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                bluetoothGatt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                     device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
                 } else {
                     device.connectGatt(context, false, gattCallback)
                 }
                 onConnectionStateChanged?.invoke(macAddress, NearbyConnectionState.REQUESTING)
-                Log.d("NearbyGattClient", "Initiated GATT connection to $macAddress (TRANSPORT_LE)")
+                Log.d("NearbyGattClient", "NEARBY_BLE: Initiated GATT connection to $macAddress (TRANSPORT_LE)")
             }
         } catch (e: SecurityException) {
             Log.e("NearbyGattClient", "Missing BLUETOOTH_CONNECT permission", e)
@@ -185,11 +190,15 @@ class NearbyGattClient(private val context: Context) {
     }
 
     fun sendPayload(payload: String): Boolean {
-        val gatt = bluetoothGatt ?: return false
+        val gatt = bluetoothGatt
+        if (gatt == null) {
+            Log.w("NearbyGattClient", "NEARBY_BLE: Cannot send payload: bluetoothGatt is null")
+            return false
+        }
         try {
             val payloadBytes = payload.toByteArray(Charsets.UTF_8)
             if (payloadBytes.size > NearbyBleProtocol.MAX_PAYLOAD_SIZE) {
-                Log.e("NearbyGattClient", "Payload too large: ${payloadBytes.size} bytes (max ${NearbyBleProtocol.MAX_PAYLOAD_SIZE})")
+                Log.e("NearbyGattClient", "NEARBY_BLE: Payload too large: ${payloadBytes.size} bytes (max ${NearbyBleProtocol.MAX_PAYLOAD_SIZE})")
                 return false
             }
             
@@ -197,7 +206,11 @@ class NearbyGattClient(private val context: Context) {
             val payloadChar = service?.getCharacteristic(NearbyBleProtocol.NEARBY_PAYLOAD_CHAR_UUID)
             if (payloadChar != null) {
                 payloadChar.value = payloadBytes
-                return gatt.writeCharacteristic(payloadChar)
+                val writeSuccess = gatt.writeCharacteristic(payloadChar)
+                Log.d("NearbyGattClient", "NEARBY_BLE: writeCharacteristic invoked for ${gatt.device.address}, success=$writeSuccess")
+                return writeSuccess
+            } else {
+                Log.e("NearbyGattClient", "NEARBY_BLE: payload characteristic not found on client connection")
             }
         } catch (e: SecurityException) {
             Log.e("NearbyGattClient", "Security Exception on send payload", e)
@@ -208,13 +221,13 @@ class NearbyGattClient(private val context: Context) {
     fun disconnect() {
         try {
             bluetoothGatt?.disconnect()
-        } catch (e: SecurityException) {}
+        } catch (_: SecurityException) {}
     }
     
     private fun closeGatt() {
         try {
             bluetoothGatt?.close()
             bluetoothGatt = null
-        } catch (e: SecurityException) {}
+        } catch (_: SecurityException) {}
     }
 }

@@ -708,6 +708,10 @@ class DeviceService(
                 Log.d("SOS_ESP32", "RESETTING ESP32")
                 bleManager.sendCommand(com.example.ble.BleProtocol.CMD_RESET_SOS)
                 addCommLog("📡 Sent RESET command via BLE to ESP32")
+                val device = databaseService.devices.value.find { it.deviceId == "ESP32-SOS-BAND-81F4" }
+                if (device != null && device.status == "ALERTing") {
+                    databaseService.updateDevice(device.copy(status = "CONNECTED"))
+                }
             } catch (e: Exception) {
                 Log.w("SOS_ESP32", "ESP32 RESET ERROR: ${e.message}")
             }

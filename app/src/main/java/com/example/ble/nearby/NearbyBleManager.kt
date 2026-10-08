@@ -98,19 +98,25 @@ class NearbyBleManager @Inject constructor(
         }
     }
     
-    private fun updateDeviceConnectionState(macAddress: String, state: NearbyConnectionState, deviceName: String? = null) {
-        scanner.updateDeviceConnectionState(macAddress, state, deviceName)
+    private fun updateDeviceConnectionState(identifier: String, state: NearbyConnectionState, deviceName: String? = null) {
+        scanner.updateDeviceConnectionState(identifier, state, deviceName)
+    }
+
+    fun findDevice(identifier: String): NearbyDevice? {
+        return nearbyDevices.value[identifier]
+            ?: nearbyDevices.value.values.firstOrNull { it.id == identifier || it.macAddress == identifier }
     }
     
-    fun requestConnection(macAddress: String) {
-        val device = nearbyDevices.value[macAddress]
+    fun requestConnection(target: String) {
+        val device = findDevice(target)
+        val targetMac = device?.macAddress ?: target
         if (device != null && System.currentTimeMillis() - device.lastSeen > STALE_DEVICE_THRESHOLD_MS) {
-            Log.w(TAG, "Device $macAddress is stale (last seen > 60s ago), ignoring connection request.")
-            updateDeviceConnectionState(macAddress, NearbyConnectionState.DISCONNECTED)
+            Log.w(TAG, "Device $target is stale (last seen > 60s ago), ignoring connection request.")
+            updateDeviceConnectionState(targetMac, NearbyConnectionState.DISCONNECTED)
             return
         }
 
-        pendingConnectionMac = macAddress
+        pendingConnectionMac = targetMac
         isConnectionPending = true
 
         // Ensure advertising remains connectable during connection handshake
@@ -118,21 +124,23 @@ class NearbyBleManager @Inject constructor(
             advertiser.startAdvertising()
         }
 
-        updateDeviceConnectionState(macAddress, NearbyConnectionState.REQUESTING)
+        updateDeviceConnectionState(targetMac, NearbyConnectionState.REQUESTING)
 
         handler.removeCallbacks(connectionTimeoutRunnable)
         handler.postDelayed(connectionTimeoutRunnable, CONNECTION_TIMEOUT_MS)
 
-        gattClient.connectToDevice(macAddress)
+        gattClient.connectToDevice(targetMac)
     }
     
-    fun disconnect(macAddress: String) {
+    fun disconnect(target: String) {
+        val device = findDevice(target)
+        val targetMac = device?.macAddress ?: target
         handler.removeCallbacks(connectionTimeoutRunnable)
         isConnectionPending = false
         pendingConnectionMac = null
         gattClient.disconnect()
-        gattServer.disconnectDevice(macAddress)
-        updateDeviceConnectionState(macAddress, NearbyConnectionState.DISCONNECTED)
+        gattServer.disconnectDevice(targetMac)
+        updateDeviceConnectionState(targetMac, NearbyConnectionState.DISCONNECTED)
         if (isSessionActive && !isBurstActive && !gattServer.hasActiveConnections()) {
             advertiser.stopAdvertising()
         }
@@ -151,25 +159,29 @@ class NearbyBleManager @Inject constructor(
         gattServer.declineConnection(macAddress)
     }
 
-    fun sendNearbyPayload(macAddress: String, payload: String): Boolean {
-        val device = nearbyDevices.value[macAddress]
-        if (device == null || device.connectionState != NearbyConnectionState.CONNECTED) {
-            Log.w(TAG, "Cannot send payload: Device $macAddress is not connected.")
-            return false
-        }
+    fun sendNearbyPayload(target: String, payload: String): Boolean {
+        val device = findDevice(target)
+        val targetMac = device?.macAddress ?: target
+        val stableId = device?.id ?: target
+        val payloadByteLength = payload.toByteArray(Charsets.UTF_8).size
+
+        Log.d(
+            TAG,
+            "NEARBY_BLE: sendNearbyPayload requested for target=$target (resolvedMac=$targetMac, stableId=$stableId, bytes=$payloadByteLength, state=${device?.connectionState}, serverActive=${gattServer.hasActiveConnections()})"
+        )
+
+        // 1. Try server notification first (if this phone accepted incoming connection from target)
+        var success = gattServer.sendPayloadNotification(targetMac, payload)
         
-        // Try server side first (if we accepted their request)
-        var success = gattServer.sendPayloadNotification(macAddress, payload)
-        
+        // 2. If server notification didn't send (e.g. this phone is in client role), try client GATT write
         if (!success) {
-            // Try client side (if we initiated the request)
             success = gattClient.sendPayload(payload)
         }
         
         if (success) {
-            Log.d(TAG, "Payload sent successfully to $macAddress")
+            Log.d(TAG, "NEARBY_BLE: Payload sent successfully to $targetMac (stableId=$stableId)")
         } else {
-            Log.e(TAG, "Failed to send payload to $macAddress")
+            Log.e(TAG, "NEARBY_BLE: Failed to send payload to $targetMac (stableId=$stableId)")
         }
         return success
     }
@@ -213,6 +225,8 @@ class NearbyBleManager @Inject constructor(
         gattServer.startServer()
         // Trigger the first advertisement immediately
         handler.post(advertiseRunnable)
+        // Start single scanner session owned by the service/manager
+        scanner.startScanning()
     }
 
     private fun stopPresenceSession() {
@@ -223,15 +237,19 @@ class NearbyBleManager @Inject constructor(
         handler.removeCallbacks(connectionTimeoutRunnable)
         handler.removeCallbacks(advertiseRunnable)
         advertiser.stopAdvertising()
+        scanner.stopScanning()
         gattServer.stopServer()
     }
 
     fun startAdvertisingPresence() {
+        gattServer.startServer()
         advertiser.startAdvertising()
     }
 
     fun stopAdvertisingPresence() {
-        advertiser.stopAdvertising()
+        if (!isSessionActive && !isConnectionPending && !gattServer.hasActiveConnections()) {
+            advertiser.stopAdvertising()
+        }
     }
 
     fun startScanningForNearby() {
@@ -239,6 +257,8 @@ class NearbyBleManager @Inject constructor(
     }
 
     fun stopScanningForNearby() {
-        scanner.stopScanning()
+        if (!isSessionActive) {
+            scanner.stopScanning()
+        }
     }
 }

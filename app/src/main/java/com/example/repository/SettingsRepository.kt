@@ -36,6 +36,14 @@ class SettingsRepository @Inject constructor(
 
         val AVAILABLE_FALL_RESPONSE_TIMES = listOf(5, 10, 12, 15, 20, 30)
         val AVAILABLE_NEARBY_PRESENCE_INTERVALS = listOf(0, 5, 10, 30, 60)
+
+        const val KEY_PHYSICAL_SOS_CANCELLATION_WINDOW_SECONDS = "physical_sos_cancellation_window_seconds"
+        const val DEFAULT_PHYSICAL_SOS_CANCELLATION_WINDOW_SECONDS = 5
+        val AVAILABLE_PHYSICAL_SOS_CANCELLATION_WINDOWS = listOf(3, 5, 10, 15, 30)
+
+        const val KEY_IN_APP_SOS_ACTIVATION_DELAY_SECONDS = "in_app_sos_activation_delay_seconds"
+        const val DEFAULT_IN_APP_SOS_ACTIVATION_DELAY_SECONDS = 10
+        val AVAILABLE_IN_APP_SOS_ACTIVATION_DELAYS = listOf(0, 5, 10, 15, 30, 60)
     }
 
     private val prefs: SharedPreferences by lazy {
@@ -126,5 +134,33 @@ class SettingsRepository @Inject constructor(
     fun setNearbyPresenceInterval(interval: Int) {
         val validValue = if (interval in AVAILABLE_NEARBY_PRESENCE_INTERVALS) interval else DEFAULT_NEARBY_PRESENCE_INTERVAL
         prefs.edit().putInt(KEY_NEARBY_PRESENCE_INTERVAL, validValue).apply()
+    }
+
+    fun getPhysicalSosCancellationWindowSeconds(): Int {
+        val value = try {
+            prefs.getInt(KEY_PHYSICAL_SOS_CANCELLATION_WINDOW_SECONDS, DEFAULT_PHYSICAL_SOS_CANCELLATION_WINDOW_SECONDS)
+        } catch (e: Exception) {
+            DEFAULT_PHYSICAL_SOS_CANCELLATION_WINDOW_SECONDS
+        }
+        return if (value in AVAILABLE_PHYSICAL_SOS_CANCELLATION_WINDOWS) value else DEFAULT_PHYSICAL_SOS_CANCELLATION_WINDOW_SECONDS
+    }
+
+    fun setPhysicalSosCancellationWindowSeconds(seconds: Int) {
+        val validValue = if (seconds in AVAILABLE_PHYSICAL_SOS_CANCELLATION_WINDOWS) seconds else DEFAULT_PHYSICAL_SOS_CANCELLATION_WINDOW_SECONDS
+        prefs.edit().putInt(KEY_PHYSICAL_SOS_CANCELLATION_WINDOW_SECONDS, validValue).apply()
+    }
+
+    fun getInAppSosActivationDelaySeconds(): Int {
+        val value = try {
+            prefs.getInt(KEY_IN_APP_SOS_ACTIVATION_DELAY_SECONDS, DEFAULT_IN_APP_SOS_ACTIVATION_DELAY_SECONDS)
+        } catch (e: Exception) {
+            DEFAULT_IN_APP_SOS_ACTIVATION_DELAY_SECONDS
+        }
+        return if (value in AVAILABLE_IN_APP_SOS_ACTIVATION_DELAYS) value else DEFAULT_IN_APP_SOS_ACTIVATION_DELAY_SECONDS
+    }
+
+    fun setInAppSosActivationDelaySeconds(seconds: Int) {
+        val validValue = if (seconds in AVAILABLE_IN_APP_SOS_ACTIVATION_DELAYS) seconds else DEFAULT_IN_APP_SOS_ACTIVATION_DELAY_SECONDS
+        prefs.edit().putInt(KEY_IN_APP_SOS_ACTIVATION_DELAY_SECONDS, validValue).apply()
     }
 }

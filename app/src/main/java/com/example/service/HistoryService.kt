@@ -87,14 +87,27 @@ class HistoryService(
     }
 
     suspend fun syncHistoryFromCloud(uid: String) {
-        val authUid = getAuthenticatedUid() ?: uid.takeIf { !it.startsWith("demo-", ignoreCase = true) && it != "user-101" && it != "anonymous" } ?: return
-        val db = firestore ?: return
+        Log.d("CLOUD_DEBUG", "RESTORE_HISTORY_START uid=$uid")
+        val authUid = getAuthenticatedUid() ?: uid.takeIf { !it.startsWith("demo-", ignoreCase = true) && it != "user-101" && it != "anonymous" }
+        if (authUid == null) {
+            Log.d("CLOUD_DEBUG", "RESTORE_HISTORY_RESULT uid=$uid success=false cloudCount=0 roomCount=0")
+            return
+        }
+        val db = firestore
+        if (db == null) {
+            Log.d("CLOUD_DEBUG", "RESTORE_HISTORY_RESULT uid=$authUid success=false cloudCount=0 roomCount=0")
+            return
+        }
 
         try {
             val snapshot = db.collection("users").document(authUid)
                 .collection("emergency_history").get().await()
 
+            val cloudCount = snapshot.size()
+            Log.d("CLOUD_DEBUG", "FIRESTORE_READ path=emergency_history count=$cloudCount")
+
             if (snapshot.isEmpty) {
+                Log.d("CLOUD_DEBUG", "RESTORE_HISTORY_RESULT uid=$authUid success=true cloudCount=0 roomCount=0")
                 Log.d("HistoryService", "No remote emergency history found for uid: $authUid")
                 return
             }
@@ -135,7 +148,9 @@ class HistoryService(
                 sosHistoryDao?.insertHistories(toSave)
                 Log.d("HistoryService", "Synced history from cloud: inserted $insertedCount, updated $updatedCount for uid: $authUid")
             }
+            Log.d("CLOUD_DEBUG", "RESTORE_HISTORY_RESULT uid=$authUid success=true cloudCount=$cloudCount roomCount=${toSave.size}")
         } catch (e: Exception) {
+            Log.e("CLOUD_DEBUG", "RESTORE_HISTORY_RESULT uid=$authUid success=false cloudCount=0 roomCount=0 error=${e.message}", e)
             Log.e("HistoryService", "Failed to sync history from cloud for uid: $authUid (retaining local records): ${e.message}")
         }
     }
@@ -202,15 +217,19 @@ class HistoryService(
                 Log.e("HistoryService", "Failed to save history item to Room: ${e.message}")
             }
 
+            Log.d("CLOUD_DEBUG", "AUTH_CHECK currentUid=$authUid")
             if (authUid != null && firestore != null) {
+                Log.d("CLOUD_DEBUG", "HISTORY_WRITE_START uid=$authUid historyId=${item.id}")
                 try {
                     val map = serializeHistoryItemToMap(item, authUid)
                     firestore.collection("users").document(authUid)
                         .collection("emergency_history").document(item.id)
                         .set(map, com.google.firebase.firestore.SetOptions.merge())
                         .await()
+                    Log.d("CLOUD_DEBUG", "HISTORY_WRITE_RESULT uid=$authUid historyId=${item.id} success=true")
                     Log.d("HistoryService", "Synced history item to users/$authUid/emergency_history/${item.id}")
                 } catch (e: Exception) {
+                    Log.e("CLOUD_DEBUG", "HISTORY_WRITE_RESULT uid=$authUid historyId=${item.id} success=false error=${e.message}", e)
                     Log.e("HistoryService", "Failed to sync history item to cloud (retaining local record): ${e.message}")
                 }
             }
@@ -226,14 +245,18 @@ class HistoryService(
                 Log.e("HistoryService", "Failed to delete history item from Room: ${e.message}")
             }
 
+            Log.d("CLOUD_DEBUG", "AUTH_CHECK currentUid=$authUid")
             if (authUid != null && firestore != null) {
+                Log.d("CLOUD_DEBUG", "HISTORY_WRITE_START uid=$authUid historyId=$id")
                 try {
                     firestore.collection("users").document(authUid)
                         .collection("emergency_history").document(id)
                         .delete()
                         .await()
+                    Log.d("CLOUD_DEBUG", "HISTORY_WRITE_RESULT uid=$authUid historyId=$id success=true")
                     Log.d("HistoryService", "Deleted history item from users/$authUid/emergency_history/$id")
                 } catch (e: Exception) {
+                    Log.e("CLOUD_DEBUG", "HISTORY_WRITE_RESULT uid=$authUid historyId=$id success=false error=${e.message}", e)
                     Log.e("HistoryService", "Failed to delete history item from cloud: ${e.message}")
                 }
             }

@@ -653,19 +653,23 @@ class DatabaseService(private val context: Context, private val authService: Aut
         // 2. If authenticated, synchronize ONLY to users/{uid}/contacts/{contactId}
         val authUid = getAuthenticatedUid()
         val fs = firestore
+        Log.d("CLOUD_DEBUG", "AUTH_CHECK currentUid=$authUid")
         if (authUid != null && fs != null) {
             val contactToSave = if (finalContact.userId.isBlank() || finalContact.userId != authUid) {
                 finalContact.copy(userId = authUid)
             } else {
                 finalContact
             }
+            Log.d("CLOUD_DEBUG", "CONTACT_WRITE_START uid=$authUid contactId=${contactToSave.id}")
             try {
                 fs.collection("users").document(authUid)
                     .collection("contacts").document(contactToSave.id)
                     .set(contactToSave.toMap(), com.google.firebase.firestore.SetOptions.merge())
                     .await()
+                Log.d("CLOUD_DEBUG", "CONTACT_WRITE_RESULT uid=$authUid contactId=${contactToSave.id} success=true")
                 Log.d("DatabaseService", "Synchronized contact to users/$authUid/contacts/${contactToSave.id}")
             } catch (e: Exception) {
+                Log.e("CLOUD_DEBUG", "CONTACT_WRITE_RESULT uid=$authUid contactId=${contactToSave.id} success=false error=${e.message}", e)
                 Log.e("DatabaseService", "Failed to sync contact to Firestore for uid: $authUid (local contact preserved): ${e.message}")
             }
         }
@@ -695,7 +699,9 @@ class DatabaseService(private val context: Context, private val authService: Aut
         
         // Save to Firestore
         val authUid = (authState as? com.example.service.AuthState.Success)?.user?.uid ?: getAuthenticatedUid()
+        Log.d("CLOUD_DEBUG", "AUTH_CHECK currentUid=$authUid")
         if (fs != null && authUid != null) {
+            Log.d("CLOUD_DEBUG", "SETTING_WRITE_START uid=$authUid key=$key")
             serviceScope.launch {
                 try {
                     val updates = mapOf(key to value)
@@ -703,7 +709,9 @@ class DatabaseService(private val context: Context, private val authService: Aut
                         .collection("settings").document("preferences")
                         .set(updates, com.google.firebase.firestore.SetOptions.merge())
                         .await()
+                    Log.d("CLOUD_DEBUG", "SETTING_WRITE_RESULT uid=$authUid key=$key success=true")
                 } catch (e: Exception) {
+                    Log.e("CLOUD_DEBUG", "SETTING_WRITE_RESULT uid=$authUid key=$key success=false error=${e.message}", e)
                     Log.e("DatabaseService", "Failed to save setting to Firestore for $authUid: ${e.message}")
                 }
             }
@@ -711,12 +719,17 @@ class DatabaseService(private val context: Context, private val authService: Aut
     }
 
     suspend fun loadUserSettingsFromCloud(uid: String) {
+        Log.d("CLOUD_DEBUG", "RESTORE_SETTINGS_START uid=$uid")
         val fs = firestore
         if (fs == null) {
+            Log.d("CLOUD_DEBUG", "RESTORE_SETTINGS_RESULT uid=$uid success=false fields=0")
             Log.d("DatabaseService", "Firestore unavailable, skipping cloud settings load.")
             return
         }
-        if (uid.isBlank()) return
+        if (uid.isBlank()) {
+            Log.d("CLOUD_DEBUG", "RESTORE_SETTINGS_RESULT uid=$uid success=false fields=0")
+            return
+        }
 
         try {
             val snapshot = fs.collection("users").document(uid)
@@ -725,12 +738,18 @@ class DatabaseService(private val context: Context, private val authService: Aut
                 .await()
 
             if (!snapshot.exists()) {
+                Log.d("CLOUD_DEBUG", "FIRESTORE_READ path=settings count=0")
+                Log.d("CLOUD_DEBUG", "RESTORE_SETTINGS_RESULT uid=$uid success=true fields=0")
                 Log.d("DatabaseService", "No remote preferences document found for uid: $uid. Retaining local settings.")
                 return
             }
 
             val data = snapshot.data
+            val fieldsCount = data?.size ?: 0
+            Log.d("CLOUD_DEBUG", "FIRESTORE_READ path=settings count=$fieldsCount")
+
             if (data.isNullOrEmpty()) {
+                Log.d("CLOUD_DEBUG", "RESTORE_SETTINGS_RESULT uid=$uid success=true fields=0")
                 Log.d("DatabaseService", "Remote preferences document is empty for uid: $uid. Retaining local settings.")
                 return
             }
@@ -768,8 +787,10 @@ class DatabaseService(private val context: Context, private val authService: Aut
                 }
             }
             editor.apply()
+            Log.d("CLOUD_DEBUG", "RESTORE_SETTINGS_RESULT uid=$uid success=true fields=$fieldsCount")
             Log.d("DatabaseService", "Successfully hydrated ${data.size} preferences from cloud for uid: $uid")
         } catch (e: Exception) {
+            Log.e("CLOUD_DEBUG", "RESTORE_SETTINGS_RESULT uid=$uid success=false fields=0 error=${e.message}", e)
             Log.e("DatabaseService", "Failed to hydrate settings from Firestore for uid: $uid (retaining local settings): ${e.message}")
         }
     }
@@ -795,14 +816,27 @@ class DatabaseService(private val context: Context, private val authService: Aut
     }
 
     suspend fun syncContactsFromCloud(uid: String) {
-        val authUid = getAuthenticatedUid() ?: uid.takeIf { isValidAuthenticatedUid(it) } ?: return
-        val fs = firestore ?: return
+        Log.d("CLOUD_DEBUG", "RESTORE_CONTACTS_START uid=$uid")
+        val authUid = getAuthenticatedUid() ?: uid.takeIf { isValidAuthenticatedUid(it) }
+        if (authUid == null) {
+            Log.d("CLOUD_DEBUG", "RESTORE_CONTACTS_RESULT uid=$uid success=false cloudCount=0 roomCount=0")
+            return
+        }
+        val fs = firestore
+        if (fs == null) {
+            Log.d("CLOUD_DEBUG", "RESTORE_CONTACTS_RESULT uid=$authUid success=false cloudCount=0 roomCount=0")
+            return
+        }
 
         try {
             val snapshot = fs.collection("users").document(authUid)
                 .collection("contacts").get().await()
 
+            val cloudCount = snapshot.size()
+            Log.d("CLOUD_DEBUG", "FIRESTORE_READ path=contacts count=$cloudCount")
+
             if (snapshot.isEmpty) {
+                Log.d("CLOUD_DEBUG", "RESTORE_CONTACTS_RESULT uid=$authUid success=true cloudCount=0 roomCount=0")
                 Log.d("DatabaseService", "No remote contacts found for uid: $authUid")
                 return
             }
@@ -822,6 +856,7 @@ class DatabaseService(private val context: Context, private val authService: Aut
                 }
             }
 
+            var roomCount = 0
             if (remoteContacts.isNotEmpty()) {
                 val currentLocal = _contacts.value.filter { !isSeededContact(it) }
                 val combinedMap = currentLocal.associateBy { it.id }.toMutableMap()
@@ -846,6 +881,7 @@ class DatabaseService(private val context: Context, private val authService: Aut
                         )
                     }
                     contactDao?.insertContacts(entities)
+                    roomCount = entities.size
                     Log.d("DatabaseService", "Saved ${entities.size} contacts to Room for uid: $authUid")
                 } catch (e: Exception) {
                     Log.e("DatabaseService", "Error saving restored contacts to Room: ${e.message}")
@@ -853,7 +889,9 @@ class DatabaseService(private val context: Context, private val authService: Aut
 
                 Log.d("DatabaseService", "Restored ${remoteContacts.size} contacts from cloud for uid: $authUid")
             }
+            Log.d("CLOUD_DEBUG", "RESTORE_CONTACTS_RESULT uid=$authUid success=true cloudCount=${remoteContacts.size} roomCount=$roomCount")
         } catch (e: Exception) {
+            Log.e("CLOUD_DEBUG", "RESTORE_CONTACTS_RESULT uid=$authUid success=false cloudCount=0 roomCount=0 error=${e.message}", e)
             Log.e("DatabaseService", "Failed to sync contacts from cloud for uid: $authUid (keeping local contacts): ${e.message}")
         }
     }
@@ -916,6 +954,7 @@ class DatabaseService(private val context: Context, private val authService: Aut
     }
 
     private fun loadLocalContacts() {
+        Log.d("CLOUD_DEBUG", "POSSIBLE_OVERWRITE source=loadLocalContacts")
         val contactsJson = sharedPrefs.getString("contacts_list", null)
         if (contactsJson != null) {
             try {

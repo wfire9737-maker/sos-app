@@ -3,6 +3,7 @@ package com.example.ui.screens
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
@@ -58,7 +59,11 @@ fun NearbyDiscoveryScreen(
     ) { results ->
         hasPermissions = results.values.all { it }
         if (hasPermissions) {
+            Log.d("NearbyDiscoveryScreen", "NEARBY_DEBUG: Discovery screen entered")
             viewModel.nearbyBleManager.startScanningForNearby()
+            Log.d("NearbyDiscoveryScreen", "NEARBY_DEBUG: Scanner started")
+            viewModel.nearbyBleManager.startAdvertisingPresence()
+            Log.d("NearbyDiscoveryScreen", "NEARBY_DEBUG: Foreground presence started")
         }
     }
 
@@ -68,12 +73,19 @@ fun NearbyDiscoveryScreen(
         }
         if (allGranted) {
             hasPermissions = true
+            Log.d("NearbyDiscoveryScreen", "NEARBY_DEBUG: Discovery screen entered")
             viewModel.nearbyBleManager.startScanningForNearby()
+            Log.d("NearbyDiscoveryScreen", "NEARBY_DEBUG: Scanner started")
+            viewModel.nearbyBleManager.startAdvertisingPresence()
+            Log.d("NearbyDiscoveryScreen", "NEARBY_DEBUG: Foreground presence started")
         } else {
             permissionLauncher.launch(permissions.toTypedArray())
         }
 
         onDispose {
+            Log.d("NearbyDiscoveryScreen", "NEARBY_DEBUG: Discovery screen leaving")
+            viewModel.nearbyBleManager.stopAdvertisingPresence()
+            Log.d("NearbyDiscoveryScreen", "NEARBY_DEBUG: Foreground presence stopped")
             viewModel.nearbyBleManager.stopScanningForNearby()
         }
     }
@@ -135,7 +147,7 @@ fun NearbyDiscoveryScreen(
                 ) {
                     items(
                         items = nearbyDevices.values.toList().sortedByDescending { it.lastSeen },
-                        key = { it.macAddress }
+                        key = { it.id }
                     ) { device ->
                         Card(
                             modifier = Modifier.fillMaxWidth(),

@@ -50,6 +50,7 @@ import dagger.hilt.android.AndroidEntryPoint
 class MainActivity : ComponentActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
+    Log.d("CLOUD_DEBUG", "BUILD_MARKER version=1.0.0")
     try {
         enableEdgeToEdge()
         setContent {

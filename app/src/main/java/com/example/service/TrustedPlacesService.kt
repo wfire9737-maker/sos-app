@@ -74,10 +74,17 @@ class TrustedPlacesService(
     }
 
     private suspend fun syncFromCloud(sessionUserId: String) {
-        if (firestore == null || sessionUserId.isBlank()) return
+        Log.d("CLOUD_DEBUG", "RESTORE_TRUSTED_PLACES_START uid=$sessionUserId")
+        if (firestore == null || sessionUserId.isBlank()) {
+            Log.d("CLOUD_DEBUG", "RESTORE_TRUSTED_PLACES_RESULT uid=$sessionUserId success=false cloudCount=0 roomCount=0")
+            return
+        }
         try {
             val snapshot = firestore.collection("users").document(sessionUserId)
                 .collection("trusted_places").get().await()
+
+            val cloudCount = snapshot.size()
+            Log.d("CLOUD_DEBUG", "FIRESTORE_READ path=trusted_places count=$cloudCount")
                 
             val places = snapshot.documents.mapNotNull { doc ->
                 try {
@@ -91,13 +98,18 @@ class TrustedPlacesService(
                 }
             }
             
+            var roomCount = 0
             if (currentUserId == sessionUserId && places.isNotEmpty()) {
-                trustedPlaceDao.insertTrustedPlaces(places.map { it.toEntity() })
+                val entities = places.map { it.toEntity() }
+                trustedPlaceDao.insertTrustedPlaces(entities)
+                roomCount = entities.size
                 Log.d("TrustedPlacesService", "Restored ${places.size} trusted places from cloud for uid: $sessionUserId")
             }
+            Log.d("CLOUD_DEBUG", "RESTORE_TRUSTED_PLACES_RESULT uid=$sessionUserId success=true cloudCount=${places.size} roomCount=$roomCount")
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
+            Log.e("CLOUD_DEBUG", "RESTORE_TRUSTED_PLACES_RESULT uid=$sessionUserId success=false cloudCount=0 roomCount=0 error=${e.message}", e)
             Log.e("TrustedPlacesService", "Failed to sync trusted places from cloud for uid: $sessionUserId: ${e.message}")
         }
     }
@@ -111,12 +123,16 @@ class TrustedPlacesService(
         )
         try {
             trustedPlaceDao.insertTrustedPlace(newPlace.toEntity())
+            Log.d("CLOUD_DEBUG", "AUTH_CHECK currentUid=$currentUserId")
             if (currentUserId.isNotBlank()) {
+                Log.d("CLOUD_DEBUG", "PLACE_WRITE_START uid=$currentUserId placeId=${newPlace.placeId} operation=add")
                 firestore?.collection("users")?.document(currentUserId)
                     ?.collection("trusted_places")?.document(newPlace.placeId)?.set(newPlace.toMap())?.await()
+                Log.d("CLOUD_DEBUG", "PLACE_WRITE_RESULT uid=$currentUserId placeId=${newPlace.placeId} operation=add success=true")
                 Log.d("TrustedPlacesService", "Saved trusted place to cloud users/$currentUserId/trusted_places/${newPlace.placeId}")
             }
         } catch (e: Exception) {
+            Log.e("CLOUD_DEBUG", "PLACE_WRITE_RESULT uid=$currentUserId placeId=${newPlace.placeId} operation=add success=false error=${e.message}", e)
             Log.e("TrustedPlacesService", "Failed to add trusted place: ${e.message}")
         }
     }
@@ -128,12 +144,16 @@ class TrustedPlacesService(
         )
         try {
             trustedPlaceDao.insertTrustedPlace(updatedPlace.toEntity())
+            Log.d("CLOUD_DEBUG", "AUTH_CHECK currentUid=$currentUserId")
             if (currentUserId.isNotBlank()) {
+                Log.d("CLOUD_DEBUG", "PLACE_WRITE_START uid=$currentUserId placeId=${updatedPlace.placeId} operation=update")
                 firestore?.collection("users")?.document(currentUserId)
                     ?.collection("trusted_places")?.document(updatedPlace.placeId)?.set(updatedPlace.toMap())?.await()
+                Log.d("CLOUD_DEBUG", "PLACE_WRITE_RESULT uid=$currentUserId placeId=${updatedPlace.placeId} operation=update success=true")
                 Log.d("TrustedPlacesService", "Updated trusted place in cloud users/$currentUserId/trusted_places/${updatedPlace.placeId}")
             }
         } catch (e: Exception) {
+            Log.e("CLOUD_DEBUG", "PLACE_WRITE_RESULT uid=$currentUserId placeId=${updatedPlace.placeId} operation=update success=false error=${e.message}", e)
             Log.e("TrustedPlacesService", "Failed to update trusted place: ${e.message}")
         }
     }
@@ -141,12 +161,16 @@ class TrustedPlacesService(
     suspend fun deleteTrustedPlace(placeId: String) {
         try {
             trustedPlaceDao.deleteTrustedPlaceById(placeId)
+            Log.d("CLOUD_DEBUG", "AUTH_CHECK currentUid=$currentUserId")
             if (currentUserId.isNotBlank()) {
+                Log.d("CLOUD_DEBUG", "PLACE_WRITE_START uid=$currentUserId placeId=$placeId operation=delete")
                 firestore?.collection("users")?.document(currentUserId)
                     ?.collection("trusted_places")?.document(placeId)?.delete()?.await()
+                Log.d("CLOUD_DEBUG", "PLACE_WRITE_RESULT uid=$currentUserId placeId=$placeId operation=delete success=true")
                 Log.d("TrustedPlacesService", "Deleted trusted place from cloud users/$currentUserId/trusted_places/$placeId")
             }
         } catch (e: Exception) {
+            Log.e("CLOUD_DEBUG", "PLACE_WRITE_RESULT uid=$currentUserId placeId=$placeId operation=delete success=false error=${e.message}", e)
             Log.e("TrustedPlacesService", "Failed to delete trusted place: ${e.message}")
         }
     }

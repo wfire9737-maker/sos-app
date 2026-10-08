@@ -52,6 +52,9 @@ fun ProfileScreen(
     var showSaveDialog by remember { mutableStateOf(false) }
     var showLogoutDialog by remember { mutableStateOf(false) }
 
+    val isSyncing by viewModel.isSyncing.collectAsState()
+    val syncStatusMessage by viewModel.syncStatusMessage.collectAsState()
+
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia(),
         onResult = { uri -> uri?.let { profilePhotoUri = it } }
@@ -165,6 +168,68 @@ fun ProfileScreen(
 
             item {
                 Spacer(modifier = Modifier.height(16.dp))
+
+                // Manual Two-Way Cloud Synchronization Button
+                OutlinedButton(
+                    onClick = {
+                        viewModel.syncAllUserData()
+                    },
+                    enabled = !isSyncing,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp)
+                        .testTag("profile_sync_data_button"),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.primary
+                    )
+                ) {
+                    if (isSyncing) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(24.dp),
+                            strokeWidth = 2.5.dp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = "Syncing...",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.Sync,
+                            contentDescription = "Sync Data",
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Sync Data",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp
+                        )
+                    }
+                }
+
+                if (!syncStatusMessage.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = syncStatusMessage ?: "",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (syncStatusMessage?.contains("fail", ignoreCase = true) == true ||
+                                    syncStatusMessage?.contains("warning", ignoreCase = true) == true ||
+                                    syncStatusMessage?.contains("error", ignoreCase = true) == true) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.primary
+                        },
+                        modifier = Modifier.padding(horizontal = 4.dp)
+                    )
+                }
+            }
+
+            item {
+                Spacer(modifier = Modifier.height(12.dp))
                 Button(
                     onClick = { showLogoutDialog = true },
                     modifier = Modifier

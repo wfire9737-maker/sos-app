@@ -96,8 +96,68 @@ class GuardianViewModel @Inject constructor(
     val settingsDataStore: com.example.data.SettingsDataStore,
     val nearbyEmergencyAlertRepository: com.example.repository.NearbyEmergencyAlertRepository,
     val nearbyEmergencyNotificationManager: com.example.service.NearbyEmergencyNotificationManager,
-    val nearbyLocationRepository: com.example.repository.NearbyLocationRepository
+    val nearbyLocationRepository: com.example.repository.NearbyLocationRepository,
+    val syncService: com.example.service.SyncService
 ) : AndroidViewModel(application) {
+
+    private val _isSyncing = MutableStateFlow(false)
+    val isSyncing: StateFlow<Boolean> = _isSyncing.asStateFlow()
+
+    private val _syncStatusMessage = MutableStateFlow<String?>(null)
+    val syncStatusMessage: StateFlow<String?> = _syncStatusMessage.asStateFlow()
+
+    fun clearSyncStatusMessage() {
+        _syncStatusMessage.value = null
+    }
+
+    fun syncAllUserData(onComplete: (com.example.model.SyncResult) -> Unit = {}) {
+        if (_isSyncing.value) return
+
+        val currentUid = authService.currentUserUid 
+            ?: (authService.authState.value as? AuthState.Success)?.user?.uid 
+            ?: try { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid } catch (e: Exception) { null }
+            ?: ""
+
+        if (currentUid.isBlank()) {
+            val result = com.example.model.SyncResult(
+                success = false,
+                syncedCategories = emptyList(),
+                failedCategories = listOf("Authentication"),
+                message = "Please log in to sync your data."
+            )
+            _syncStatusMessage.value = result.message
+            viewModelScope.launch {
+                _uiEvents.emit(UiEvent.ShowToast(result.message))
+            }
+            onComplete(result)
+            return
+        }
+
+        _isSyncing.value = true
+        _syncStatusMessage.value = "Synchronizing data with cloud..."
+
+        viewModelScope.launch {
+            try {
+                val result = syncService.syncAllUserData(currentUid)
+                reloadLocalSettings()
+                _syncStatusMessage.value = result.message
+                _uiEvents.emit(UiEvent.ShowToast(result.message))
+                onComplete(result)
+            } catch (e: Exception) {
+                val errorResult = com.example.model.SyncResult(
+                    success = false,
+                    syncedCategories = emptyList(),
+                    failedCategories = listOf("Unknown"),
+                    message = "Sync failed: ${e.message}"
+                )
+                _syncStatusMessage.value = errorResult.message
+                _uiEvents.emit(UiEvent.ShowToast(errorResult.message))
+                onComplete(errorResult)
+            } finally {
+                _isSyncing.value = false
+            }
+        }
+    }
 
     
     val developerModeEnabled = settingsDataStore.developerModeFlow.stateIn(
@@ -446,6 +506,8 @@ class GuardianViewModel @Inject constructor(
             _locationSharingInterval.value = prefs.getString("location_sharing_interval", "10s") ?: "10s"
             _backgroundLocationEnabled.value = prefs.getBoolean("background_location_enabled", true)
             _fallResponseDelaySeconds.value = prefs.getInt("fall_response_delay_seconds", 12)
+            _physicalSosCancellationWindowSeconds.value = prefs.getInt(com.example.repository.SettingsRepository.KEY_PHYSICAL_SOS_CANCELLATION_WINDOW_SECONDS, com.example.repository.SettingsRepository.DEFAULT_PHYSICAL_SOS_CANCELLATION_WINDOW_SECONDS)
+            _inAppSosActivationDelaySeconds.value = prefs.getInt(com.example.repository.SettingsRepository.KEY_IN_APP_SOS_ACTIVATION_DELAY_SECONDS, com.example.repository.SettingsRepository.DEFAULT_IN_APP_SOS_ACTIVATION_DELAY_SECONDS)
             _nearbyPresenceInterval.value = prefs.getInt("nearby_presence_interval", 0)
             _nearbyDeviceName.value = prefs.getString("nearby_device_name", com.example.ble.nearby.NearbyBleProtocol.DEFAULT_DEVICE_NAME) ?: com.example.ble.nearby.NearbyBleProtocol.DEFAULT_DEVICE_NAME
             
@@ -481,6 +543,38 @@ class GuardianViewModel @Inject constructor(
                 .edit().putInt("fall_response_delay_seconds", seconds).apply()
         } catch (e: Exception) {}
         databaseService.saveUserSetting("fall_response_delay_seconds", seconds)
+    }
+
+    private val _physicalSosCancellationWindowSeconds = MutableStateFlow(
+        try {
+            getApplication<Application>().getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE)
+                .getInt(com.example.repository.SettingsRepository.KEY_PHYSICAL_SOS_CANCELLATION_WINDOW_SECONDS, com.example.repository.SettingsRepository.DEFAULT_PHYSICAL_SOS_CANCELLATION_WINDOW_SECONDS)
+        } catch (e: Exception) { com.example.repository.SettingsRepository.DEFAULT_PHYSICAL_SOS_CANCELLATION_WINDOW_SECONDS }
+    )
+    val physicalSosCancellationWindowSeconds = _physicalSosCancellationWindowSeconds.asStateFlow()
+    fun setPhysicalSosCancellationWindowSeconds(seconds: Int) {
+        _physicalSosCancellationWindowSeconds.value = seconds
+        try {
+            getApplication<Application>().getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE)
+                .edit().putInt(com.example.repository.SettingsRepository.KEY_PHYSICAL_SOS_CANCELLATION_WINDOW_SECONDS, seconds).apply()
+        } catch (e: Exception) {}
+        databaseService.saveUserSetting(com.example.repository.SettingsRepository.KEY_PHYSICAL_SOS_CANCELLATION_WINDOW_SECONDS, seconds)
+    }
+
+    private val _inAppSosActivationDelaySeconds = MutableStateFlow(
+        try {
+            getApplication<Application>().getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE)
+                .getInt(com.example.repository.SettingsRepository.KEY_IN_APP_SOS_ACTIVATION_DELAY_SECONDS, com.example.repository.SettingsRepository.DEFAULT_IN_APP_SOS_ACTIVATION_DELAY_SECONDS)
+        } catch (e: Exception) { com.example.repository.SettingsRepository.DEFAULT_IN_APP_SOS_ACTIVATION_DELAY_SECONDS }
+    )
+    val inAppSosActivationDelaySeconds = _inAppSosActivationDelaySeconds.asStateFlow()
+    fun setInAppSosActivationDelaySeconds(seconds: Int) {
+        _inAppSosActivationDelaySeconds.value = seconds
+        try {
+            getApplication<Application>().getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE)
+                .edit().putInt(com.example.repository.SettingsRepository.KEY_IN_APP_SOS_ACTIVATION_DELAY_SECONDS, seconds).apply()
+        } catch (e: Exception) {}
+        databaseService.saveUserSetting(com.example.repository.SettingsRepository.KEY_IN_APP_SOS_ACTIVATION_DELAY_SECONDS, seconds)
     }
 
     private val _nearbyPresenceInterval = MutableStateFlow(
@@ -729,6 +823,7 @@ class GuardianViewModel @Inject constructor(
             ?: try { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid } catch (e: Exception) { null }
             ?: ""
 
+        Log.d("CLOUD_DEBUG", "LOGOUT_START uid=$currentUid")
         viewModelScope.launch {
             if (currentUid.isNotBlank()) {
                 databaseService.clearUserSessionData(currentUid)
@@ -739,8 +834,10 @@ class GuardianViewModel @Inject constructor(
                 trustedPlacesService.clearSession("")
                 historyService.clearSession("")
             }
+            Log.d("CLOUD_DEBUG", "LOGOUT_LOCAL_CLEANUP_COMPLETE uid=$currentUid")
 
             authService.logout()
+            Log.d("CLOUD_DEBUG", "LOGOUT_FIREBASE_COMPLETE")
             _uiEvents.emit(UiEvent.ShowToast("Logged out successfully."))
             _uiEvents.emit(UiEvent.NavigateToLogin)
         }
@@ -1567,6 +1664,7 @@ fun startVoiceRecognition(context: Context) {
             authService.authState.collect { state ->
                 if (state is AuthState.Success) {
                     val uid = state.user.uid
+                    android.util.Log.d("CLOUD_DEBUG", "LOGIN_SUCCESS uid=$uid")
                     databaseService.loadUserSettingsFromCloud(uid)
                     databaseService.syncContactsFromCloud(uid)
                     trustedPlacesService.initialize(uid)

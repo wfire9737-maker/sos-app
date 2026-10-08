@@ -99,6 +99,8 @@ fun HomeScreen(
     val sosWorkflowState by viewModel.sosWorkflowState.collectAsState()
     val matchedTrustedPlace by viewModel.currentMatchedTrustedPlace.collectAsState()
     val currentLocation by viewModel.currentLocation.collectAsState()
+    val activeEmergency by viewModel.activeEmergency.collectAsState()
+    val countdown by viewModel.countdown.collectAsState()
 
     LaunchedEffect(Unit) {
         viewModel.startLocationTracking()
@@ -140,7 +142,6 @@ fun HomeScreen(
     Scaffold(
         bottomBar = {
             HomeBottomNav(
-                onNavigateToMap = onNavigateToMap,
                 onNavigateToContacts = onNavigateToContacts,
                 onNavigateToHistory = onNavigateToHistory,
                 onNavigateToSettings = onNavigateToSettings
@@ -168,6 +169,109 @@ fun HomeScreen(
                     onNotificationsClick = onNavigateToNotifications,
                     unreadCount = notifications.count { !it.isRead }
                 )
+
+                // Pending SOS Indication (Physical or In-App SOS)
+                val isPendingSos = countdown != null || activeEmergency?.status == "COUNTDOWN"
+                if (isPendingSos) {
+                    val isPhysicalSos = activeEmergency?.triggerType == "PHYSICAL_BLE_BUTTON"
+                    val secondsRemaining = countdown ?: 0
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onNavigateToEmergency() }
+                            .testTag("home_pending_sos_card"),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer
+                        ),
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(2.dp, MaterialTheme.colorScheme.error)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(44.dp)
+                                        .background(MaterialTheme.colorScheme.error, CircleShape),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = if (secondsRemaining > 0) "$secondsRemaining" else "!",
+                                        color = MaterialTheme.colorScheme.onError,
+                                        fontWeight = FontWeight.Black,
+                                        fontSize = 20.sp
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Emergency SOS Pending",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onErrorContainer
+                                    )
+                                    Text(
+                                        text = if (secondsRemaining > 0) "Activating in $secondsRemaining second${if (secondsRemaining == 1) "" else "s"}" else "Activating...",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(10.dp))
+                            if (isPhysicalSos) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.7f), RoundedCornerShape(8.dp))
+                                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Emergency,
+                                        contentDescription = "Physical SOS button",
+                                        tint = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Press the physical SOS button again to cancel",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                            } else {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.End
+                                ) {
+                                    Button(
+                                        onClick = {
+                                            viewModel.cancelEmergencyWithPin("") {}
+                                        },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = MaterialTheme.colorScheme.error,
+                                            contentColor = MaterialTheme.colorScheme.onError
+                                        ),
+                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier.testTag("home_cancel_pending_sos_button")
+                                    ) {
+                                        Icon(Icons.Default.Cancel, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Cancel SOS", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
 
                 // Trusted Place presence indicator
                 TrustedPlacePresenceCard(
@@ -569,19 +673,17 @@ fun ResolveAlertDialog(alert: Alert, onDismiss: () -> Unit, onResolveConfirm: (S
 }
 
 @Composable
-fun HomeBottomNav(onNavigateToMap: () -> Unit, onNavigateToContacts: () -> Unit, onNavigateToHistory: () -> Unit, onNavigateToSettings: () -> Unit) {
+fun HomeBottomNav(
+    onNavigateToContacts: () -> Unit,
+    onNavigateToHistory: () -> Unit,
+    onNavigateToSettings: () -> Unit
+) {
     NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
         NavigationBarItem(
             icon = { Icon(Icons.Default.Home, contentDescription = null) },
             label = { Text("Home") },
             selected = true,
             onClick = { }
-        )
-        NavigationBarItem(
-            icon = { Icon(Icons.Default.Map, contentDescription = null) },
-            label = { Text("Map") },
-            selected = false,
-            onClick = onNavigateToMap
         )
         NavigationBarItem(
             icon = { Icon(Icons.Default.Contacts, contentDescription = null) },

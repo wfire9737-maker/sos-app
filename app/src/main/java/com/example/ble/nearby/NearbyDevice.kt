@@ -2,6 +2,7 @@ package com.example.ble.nearby
 
 data class NearbyDevice(
     val macAddress: String,
+    val id: String = macAddress,
     val deviceName: String = NearbyBleProtocol.DEFAULT_DEVICE_NAME,
     val lastSeen: Long,
     val rssi: Int,

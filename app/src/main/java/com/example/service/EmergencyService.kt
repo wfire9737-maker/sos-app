@@ -47,7 +47,50 @@ class EmergencyService(
     private val _countdown = MutableStateFlow<Int?>(null)
     val countdown: StateFlow<Int?> = _countdown.asStateFlow()
 
+    private val stateTransitionLock = Any()
+
     fun isEmergencyActive(): Boolean = _activeEmergency.value != null || countdownJob?.isActive == true
+
+    fun isPhysicalSosPendingCancellation(): Boolean {
+        synchronized(stateTransitionLock) {
+            return countdownJob?.isActive == true &&
+                    _activeEmergency.value?.status == "COUNTDOWN" &&
+                    _activeEmergency.value?.triggerType == "PHYSICAL_BLE_BUTTON"
+        }
+    }
+
+    fun isCountdownActive(): Boolean {
+        synchronized(stateTransitionLock) {
+            return countdownJob?.isActive == true && _activeEmergency.value?.status == "COUNTDOWN"
+        }
+    }
+
+    suspend fun cancelPendingPhysicalSos(): Boolean {
+        synchronized(stateTransitionLock) {
+            if (countdownJob?.isActive == true &&
+                _activeEmergency.value?.status == "COUNTDOWN" &&
+                _activeEmergency.value?.triggerType == "PHYSICAL_BLE_BUTTON"
+            ) {
+                countdownJob?.cancel()
+                _countdown.value = null
+                val noteText = "Physical SOS cancelled by second button press within cancellation window"
+                val abortedModel = _activeEmergency.value?.copy(
+                    status = "CANCELLED",
+                    endTimeMs = System.currentTimeMillis(),
+                    responderStatus = "CANCELLED BY SECOND PHYSICAL BUTTON PRESS",
+                    notes = noteText
+                )
+                _activeEmergency.value = null
+                databaseService.addDeveloperLog("PHYSICAL_SOS_CANCELLED: $noteText", "INFO")
+                if (abortedModel != null) {
+                    saveEmergencyToCloud(abortedModel)
+                }
+                closeActiveSession()
+                return true
+            }
+        }
+        return false
+    }
 
     suspend fun startEmergency(
         userId: String,
@@ -91,6 +134,25 @@ class EmergencyService(
             "GPS Coordinate Plot"
         }
 
+        val windowDuration = when (triggerType) {
+            "PHYSICAL_BLE_BUTTON" -> {
+                context.getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE)
+                    .getInt(
+                        com.example.repository.SettingsRepository.KEY_PHYSICAL_SOS_CANCELLATION_WINDOW_SECONDS,
+                        com.example.repository.SettingsRepository.DEFAULT_PHYSICAL_SOS_CANCELLATION_WINDOW_SECONDS
+                    )
+            }
+            "MANUAL" -> {
+                context.getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE)
+                    .getInt(
+                        com.example.repository.SettingsRepository.KEY_IN_APP_SOS_ACTIVATION_DELAY_SECONDS,
+                        com.example.repository.SettingsRepository.DEFAULT_IN_APP_SOS_ACTIVATION_DELAY_SECONDS
+                    )
+            }
+            else -> 5
+        }
+        val isImmediate = windowDuration == 0 && delaySosSeconds == 0
+
         val pendingModel = EmergencyModel(
             emergencyId = emergencyId,
             userId = userId,
@@ -104,11 +166,11 @@ class EmergencyService(
             speed = customSpeed ?: 0f,
             bearing = customBearing ?: 0f,
             locationName = resolvedLocationName,
-            status = "COUNTDOWN",
+            status = if (isImmediate) "ACTIVE" else "COUNTDOWN",
             triggerType = triggerType,
             aiConfidenceScore = if (triggerType == "FALL_DETECTED") 96 else 90,
             contactsNotified = databaseService.contacts.value.map { "${it.name} (${it.phone})" },
-            responderStatus = if (delaySosSeconds > 0) "DELAYED (${delaySosSeconds}s)" else "COUNTDOWN ACTIVE",
+            responderStatus = if (isImmediate) "SOS TRIGGERED - BROADCASTING" else if (delaySosSeconds > 0) "DELAYED (${delaySosSeconds}s)" else "COUNTDOWN ACTIVE",
             deviceId = deviceId,
             locationSource = locationSource
         )
@@ -117,22 +179,63 @@ class EmergencyService(
         saveEmergencyToCloud(pendingModel)
         
         countdownJob = serviceScope.launch {
-            if (delaySosSeconds > 0) {
-                Log.d("EmergencyService", "TRUSTED PLACE DELAY: Waiting ${delaySosSeconds}s before starting SOS countdown")
-                databaseService.addDeveloperLog("TRUSTED_PLACE_DELAY: Waiting ${delaySosSeconds}s before SOS dispatch", "INFO")
-                delay(delaySosSeconds * 1000L)
-                Log.d("EmergencyService", "TRUSTED PLACE DELAY: Delay finished, starting 5s countdown")
+            if (!isImmediate) {
+                if (delaySosSeconds > 0) {
+                    Log.d("EmergencyService", "TRUSTED PLACE DELAY: Waiting ${delaySosSeconds}s before starting SOS countdown")
+                    databaseService.addDeveloperLog("TRUSTED_PLACE_DELAY: Waiting ${delaySosSeconds}s before SOS dispatch", "INFO")
+                    delay(delaySosSeconds * 1000L)
+                    Log.d("EmergencyService", "TRUSTED PLACE DELAY: Delay finished, starting countdown")
+                }
+
+                if (windowDuration > 0) {
+                    Log.d("SOS_ESP32", "SOS COUNTDOWN STARTED (Duration: ${windowDuration}s, Trigger: $triggerType)")
+                    for (i in windowDuration downTo 1) {
+                        val shouldContinue = synchronized(stateTransitionLock) {
+                            isActive && _activeEmergency.value?.status == "COUNTDOWN"
+                        }
+                        if (!shouldContinue) {
+                            Log.d("SOS_ESP32", "SOS COUNTDOWN ABORTED (cancelled during window)")
+                            return@launch
+                        }
+                        Log.d("SOS_ESP32", "SOS COUNTDOWN: $i")
+                        _countdown.value = i
+                        delay(1000)
+                    }
+                    Log.d("SOS_ESP32", "SOS COUNTDOWN FINISHED")
+                }
+
+                // Atomic state transition to ACTIVE
+                val canProceed = synchronized(stateTransitionLock) {
+                    if (!isActive || _activeEmergency.value == null || _activeEmergency.value?.status != "COUNTDOWN") {
+                        false
+                    } else {
+                        _countdown.value = null
+                        val currentLoc = locationService.currentLocation.value // Fallback
+                        var model = pendingModel.copy(
+                            latitude = customLat ?: currentLoc.latitude,
+                            longitude = customLng ?: currentLoc.longitude,
+                            accuracy = customAccuracy ?: currentLoc.accuracy,
+                            altitude = customAltitude ?: currentLoc.altitude,
+                            speed = customSpeed ?: currentLoc.speed.toFloat(),
+                            bearing = customBearing ?: currentLoc.bearing,
+                            status = "ACTIVE",
+                            responderStatus = "SOS TRIGGERED - BROADCASTING",
+                            locationSource = locationSource
+                        )
+                        _activeEmergency.value = model
+                        true
+                    }
+                }
+
+                if (!canProceed) {
+                    Log.d("SOS_ESP32", "SOS WORKFLOW SUPPRESSED (Emergency was cancelled before activation)")
+                    return@launch
+                }
+            } else {
+                _countdown.value = null
             }
 
-            Log.d("SOS_ESP32", "SOS COUNTDOWN STARTED")
-            for (i in 5 downTo 1) {
-                Log.d("SOS_ESP32", "SOS COUNTDOWN: $i")
-                _countdown.value = i
-                delay(1000)
-            }
-            Log.d("SOS_ESP32", "SOS COUNTDOWN FINISHED")
             Log.d("SOS_ESP32", "STARTING EMERGENCY WORKFLOW")
-            _countdown.value = null
             
             // Immediate UI update first
             val currentLoc = locationService.currentLocation.value // Fallback
@@ -417,22 +520,29 @@ class EmergencyService(
     }
 
     suspend fun cancelEmergencyWithPin(pin: String, expectedPin: String, notes: String = "Cancelled with PIN"): Boolean {
-        if (countdownJob?.isActive == true) {
-            val noteText = if (notes.isNotBlank() && notes != "Cancelled with PIN") notes else "False alarm: Aborted during countdown"
-            val abortedModel = _activeEmergency.value?.copy(
-                status = "CANCELLED",
-                endTimeMs = System.currentTimeMillis(),
-                responderStatus = "CANCELLED DURING COUNTDOWN",
-                notes = noteText
-            )
-            countdownJob?.cancel()
-            _countdown.value = null
-            _activeEmergency.value = null
-            databaseService.addDeveloperLog("CALL_CANCELLED: Countdown aborted by user ($noteText)", "INFO")
-            if (abortedModel != null) {
-                saveEmergencyToCloud(abortedModel)
+        val wasCountdownCancelled = synchronized(stateTransitionLock) {
+            if (countdownJob?.isActive == true && _activeEmergency.value?.status == "COUNTDOWN") {
+                val noteText = if (notes.isNotBlank() && notes != "Cancelled with PIN") notes else "False alarm: Aborted during countdown"
+                val abortedModel = _activeEmergency.value?.copy(
+                    status = "CANCELLED",
+                    endTimeMs = System.currentTimeMillis(),
+                    responderStatus = "CANCELLED DURING COUNTDOWN",
+                    notes = noteText
+                )
+                countdownJob?.cancel()
+                _countdown.value = null
+                _activeEmergency.value = null
+                databaseService.addDeveloperLog("CALL_CANCELLED: Countdown aborted by user ($noteText)", "INFO")
+                if (abortedModel != null) {
+                    saveEmergencyToCloud(abortedModel)
+                }
+                closeActiveSession()
+                true
+            } else {
+                false
             }
-            closeActiveSession()
+        }
+        if (wasCountdownCancelled) {
             return true
         }
         

@@ -187,6 +187,28 @@ object AppModule {
 
     @Provides
     @Singleton
+    fun provideSyncService(
+        @ApplicationContext context: Context,
+        authService: AuthService,
+        databaseService: DatabaseService,
+        trustedPlacesService: TrustedPlacesService,
+        historyService: HistoryService,
+        database: SmartSosDatabase,
+        geofenceManager: com.example.service.GeofenceManager
+    ): com.example.service.SyncService = com.example.service.SyncService(
+        context = context,
+        authService = authService,
+        databaseService = databaseService,
+        trustedPlacesService = trustedPlacesService,
+        historyService = historyService,
+        contactDao = database.emergencyContactDao(),
+        trustedPlaceDao = database.trustedPlaceDao(),
+        sosHistoryDao = database.sosHistoryDao(),
+        geofenceManager = geofenceManager
+    )
+
+    @Provides
+    @Singleton
     fun provideSecurityService(@ApplicationContext context: Context): com.example.service.SecurityService = com.example.service.SecurityService(context)
 
     @Provides
