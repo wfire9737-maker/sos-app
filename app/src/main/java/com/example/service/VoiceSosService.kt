@@ -42,6 +42,21 @@ class VoiceSosService(
     private val context: Context
 ) {
     var isContinuousMode = false
+    @Volatile var isPausedForCall = false
+
+    fun pauseForCall() {
+        Log.d("VoiceSosService", "Pausing Voice SOS speech recognition for emergency call")
+        isPausedForCall = true
+        stopSpeechRecognition()
+    }
+
+    fun resumeFromCall() {
+        Log.d("VoiceSosService", "Resuming Voice SOS speech recognition after emergency call")
+        isPausedForCall = false
+        if (isContinuousMode) {
+            startSpeechRecognition(context)
+        }
+    }
 
     private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -211,6 +226,12 @@ class VoiceSosService(
             return
         }
 
+        if (isPausedForCall) {
+            _speechStatusMessage.value = "Voice recognition paused during active call"
+            Log.d("VoiceSosService", "startSpeechRecognition skipped: paused for emergency call")
+            return
+        }
+
         mainHandler.post {
             try {
                 if (speechRecognizer == null) {
@@ -249,7 +270,7 @@ class VoiceSosService(
                             _isSpeechRecognizerActive.value = false
                             _voiceState.value = "LISTENING"
 
-                            if (isContinuousMode) {
+                            if (isContinuousMode && !isPausedForCall) {
                                 // Keep streams muted so restart remains silent
                                 restartListening(context)
                             } else {
@@ -270,7 +291,7 @@ class VoiceSosService(
                             _isSpeechRecognizerActive.value = false
                             _voiceState.value = "LISTENING"
 
-                            if (isContinuousMode) {
+                            if (isContinuousMode && !isPausedForCall) {
                                 restartListening(context)
                             } else {
                                 mainHandler.postDelayed({ unmuteBeep() }, 300)
@@ -312,9 +333,9 @@ class VoiceSosService(
                 speechRecognizer?.destroy()
                 speechRecognizer = null
                 
-                if (isContinuousMode) {
+                if (isContinuousMode && !isPausedForCall) {
                     mainHandler.postDelayed({
-                        if (isContinuousMode) startSpeechRecognition(context)
+                        if (isContinuousMode && !isPausedForCall) startSpeechRecognition(context)
                     }, 1000)
                 }
             }
@@ -322,7 +343,7 @@ class VoiceSosService(
     }
     
     private fun restartListening(context: Context) {
-        if (!isContinuousMode) return
+        if (!isContinuousMode || isPausedForCall) return
         mainHandler.post {
             try {
                 val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
@@ -337,7 +358,9 @@ class VoiceSosService(
                 speechRecognizer?.cancel()
                 speechRecognizer?.destroy()
                 speechRecognizer = null
-                startSpeechRecognition(context)
+                if (!isPausedForCall) {
+                    startSpeechRecognition(context)
+                }
             }
         }
     }

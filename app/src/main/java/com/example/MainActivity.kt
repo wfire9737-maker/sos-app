@@ -201,8 +201,20 @@ fun AppPermissionChecker(viewModel: GuardianViewModel) {
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { _ ->
+        val hasBlePermissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            context.hasPermission(android.Manifest.permission.BLUETOOTH_SCAN) &&
+                    context.hasPermission(android.Manifest.permission.BLUETOOTH_CONNECT)
+        } else {
+            true
+        }
+        if (hasBlePermissions) {
+            try {
+                BleForegroundService.start(context)
+            } catch (e: Exception) {
+                // Ignore
+            }
+        }
         try {
-            BleForegroundService.start(context)
             NearbyBleService.startOrStop(context)
         } catch (e: Exception) {
             // Ignore
@@ -216,15 +228,29 @@ fun AppPermissionChecker(viewModel: GuardianViewModel) {
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_START) {
+                val missingPermissions = permissionsToRequest.toList().filter {
+                    !context.hasPermission(it)
+                }
+                val hasBlePermissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    context.hasPermission(android.Manifest.permission.BLUETOOTH_SCAN) &&
+                            context.hasPermission(android.Manifest.permission.BLUETOOTH_CONNECT)
+                } else {
+                    true
+                }
+
+                if (hasBlePermissions) {
+                    try {
+                        BleForegroundService.start(context)
+                    } catch (e: Exception) {
+                        // Ignore
+                    }
+                }
                 try {
-                    BleForegroundService.start(context)
                     NearbyBleService.startOrStop(context)
                 } catch (e: Exception) {
                     // Ignore
                 }
-                val missingPermissions = permissionsToRequest.toList().filter {
-                    !context.hasPermission(it)
-                }
+
                 if (missingPermissions.isNotEmpty()) {
                     permissionLauncher.launch(missingPermissions.toTypedArray())
                 } else {

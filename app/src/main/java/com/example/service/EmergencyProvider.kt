@@ -24,6 +24,16 @@ class EmergencyProvider(
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     init {
+        emergencyService.onCallStateChanged = { isCallActive ->
+            if (isCallActive) {
+                android.util.Log.d("EmergencyProvider", "Emergency call ACTIVE -> stopping siren & pausing Voice SOS")
+                alarmVibratorService.stopAlarm()
+                voiceSosService.pauseForCall()
+            } else {
+                android.util.Log.d("EmergencyProvider", "Emergency call ENDED -> resuming Voice SOS if continuous mode was enabled")
+                voiceSosService.resumeFromCall()
+            }
+        }
         scope.launch {
             deviceService.bleManager.sosEvents.collect { sosEvent ->
                 android.util.Log.d("BleManager", "EMERGENCY: Physical SOS event received (Event #${sosEvent.eventId})")
@@ -93,7 +103,7 @@ class EmergencyProvider(
             voiceSosService.lastRecognizedCommand.collect { command ->
                 when (command) {
                     is VoiceCommand.CancelSos -> {
-                        cancelEmergency("", "", "Voice SOS Cancelled")
+                        // Voice SOS cancellation is routed through GuardianViewModel to enforce PIN security
                         voiceSosService.clearLastRecognizedCommand()
                     }
                     else -> {}

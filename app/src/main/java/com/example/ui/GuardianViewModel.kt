@@ -915,6 +915,17 @@ class GuardianViewModel @Inject constructor(
     private val _showSosConfirmationDialog = MutableStateFlow(false)
     val showSosConfirmationDialog: StateFlow<Boolean> = _showSosConfirmationDialog.asStateFlow()
 
+    private val _showCancelPinDialog = MutableStateFlow(false)
+    val showCancelPinDialog: StateFlow<Boolean> = _showCancelPinDialog.asStateFlow()
+
+    fun openCancelPinDialog() {
+        _showCancelPinDialog.value = true
+    }
+
+    fun dismissCancelPinDialog() {
+        _showCancelPinDialog.value = false
+    }
+
     private var pendingSosConfirmationAction: (() -> Unit)? = null
 
     fun confirmPendingSos() {
@@ -1096,22 +1107,18 @@ class GuardianViewModel @Inject constructor(
                     alarmVibratorService.stopVibration()
                     _isSirenPlaying.value = false
 
-                    if (emergencyService.isEmergencyActive()) {
-                        emergencyService.cancelEmergencyWithPin("", "", "Cancelled by voice command: ${command.matchedPhrase}")
+                    if (emergencyService.isEmergencyActive() || countdown.value != null) {
+                        val expectedPin = securityService.getEmergencyPin()
+                        if (expectedPin.isEmpty()) {
+                            cancelEmergencyWithPin("") { }
+                        } else {
+                            _showCancelPinDialog.value = true
+                            val confirmationMsg = "Voice cancellation requested: Please enter Security PIN to confirm."
+                            _voiceCommandConfirmation.value = confirmationMsg
+                            _uiEvents.emit(UiEvent.NavigateToEmergency)
+                            _uiEvents.emit(UiEvent.ShowToast(confirmationMsg))
+                        }
                     }
-                    
-                    android.util.Log.d("SOS_ESP32", "SOS CANCELLED")
-                    deviceService.resetEsp32()
-
-                    val currentAlert = _emergencySession.value.activeAlert
-                    if (currentAlert != null) {
-                        databaseService.resolveSOS(currentAlert.id, "Voice Command", "Cancelled by voice command: ${command.matchedPhrase}")
-                        emergencyService.resolveEmergency(currentAlert.id, "Voice Command", "Cancelled by voice command: ${command.matchedPhrase}")
-                    }
-
-                    val confirmationMsg = "✅ SOS Emergency cancelled via voice command: \"${command.matchedPhrase}\"."
-                    _voiceCommandConfirmation.value = confirmationMsg
-                    _uiEvents.emit(UiEvent.ShowToast(confirmationMsg))
                 }
                 is com.example.service.VoiceCommand.TrackLocation -> {
                     val uid = (authState.value as? AuthState.Success)?.user?.uid ?: "anonymous"
@@ -1382,6 +1389,7 @@ fun startVoiceRecognition(context: Context) {
                 alarmVibratorService.cleanUp()
                 
                 _emergencySession.value = EmergencySession() // Reset legacy state
+                _showCancelPinDialog.value = false
                 _uiEvents.emit(UiEvent.ShowToast("SOS Session Cancelled successfully with PIN."))
                 _uiEvents.emit(UiEvent.NavigateToHome)
             } else {

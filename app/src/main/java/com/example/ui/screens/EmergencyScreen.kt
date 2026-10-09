@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
 import android.Manifest
 import android.content.pm.PackageManager
@@ -58,6 +59,12 @@ fun EmergencyScreen(
     val sosWorkflowState by viewModel.sosWorkflowState.collectAsState()
     val context = LocalContext.current
     val primaryContactPhone = contacts.firstOrNull()?.phone ?: "911"
+    
+    val isEmergencyActive = activeEmergency != null || countdown != null
+
+    BackHandler(enabled = isEmergencyActive) {
+        // Prevent system and gesture back navigation while emergency is active
+    }
     
     val permissionHandler = rememberLocationPermissionHandler {
         // Just trigger the permissions, the background service will pick up the GPS location
@@ -135,7 +142,14 @@ fun EmergencyScreen(
             CenterAlignedTopAppBar(
                 title = { Text("ACTIVE EMERGENCY", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.error) },
                 navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
+                    IconButton(
+                        onClick = {
+                            if (!isEmergencyActive) {
+                                onNavigateBack()
+                            }
+                        },
+                        enabled = !isEmergencyActive
+                    ) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
@@ -376,16 +390,16 @@ fun EmergencyScreen(
             Spacer(modifier = Modifier.height(32.dp))
 
             // Cancel SOS Button
-            var showPinDialog by remember { mutableStateOf(false) }
+            val showCancelPinDialog by viewModel.showCancelPinDialog.collectAsState()
             
             Button(
                 onClick = { 
-                    if (countdown != null || activeEmergency?.status == "COUNTDOWN") {
+                    if ((countdown != null || activeEmergency?.status == "COUNTDOWN") && viewModel.securityService.getEmergencyPin().isEmpty()) {
                         viewModel.cancelEmergencyWithPin("") { success -> 
                             if (success) onNavigateBack()
                         }
                     } else {
-                        showPinDialog = true 
+                        viewModel.openCancelPinDialog()
                     }
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
@@ -402,13 +416,13 @@ fun EmergencyScreen(
             
             Spacer(modifier = Modifier.height(32.dp))
 
-            if (showPinDialog) {
+            if (showCancelPinDialog) {
                 CancelSosDialog(
-                    onDismiss = { showPinDialog = false },
+                    onDismiss = { viewModel.dismissCancelPinDialog() },
                     onConfirm = { pin ->
                         viewModel.cancelEmergencyWithPin(pin) { success ->
                             if (success) {
-                                showPinDialog = false
+                                viewModel.dismissCancelPinDialog()
                                 onNavigateBack()
                             }
                         }

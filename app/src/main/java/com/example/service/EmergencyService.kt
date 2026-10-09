@@ -21,6 +21,10 @@ import android.net.Uri
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
+import android.os.Build
+import android.telephony.PhoneStateListener
+import android.telephony.TelephonyCallback
+import android.telephony.TelephonyManager
 import android.telecom.TelecomManager
 
 import com.example.data.local.dao.SosHistoryDao
@@ -36,10 +40,63 @@ class EmergencyService(
     private val sosHistoryDao: SosHistoryDao? = null,
     private val contactDao: EmergencyContactDao? = null
 ) {
+    var onCallStateChanged: ((Boolean) -> Unit)? = null
+    private var isCallActive = false
+    @Volatile private var initialSmsSentWithInvalidLocation: Boolean = false
+    @Volatile private var followUpLocationSmsSent: Boolean = false
+
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var trackingJob: Job? = null
     private var lastCalledEmergencyId: String? = null
     private var countdownJob: Job? = null
+
+    init {
+        registerTelephonyCallStateListener()
+    }
+
+    private fun registerTelephonyCallStateListener() {
+        val telephonyManager = context.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager ?: return
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val callback = object : TelephonyCallback(), TelephonyCallback.CallStateListener {
+                    override fun onCallStateChanged(state: Int) {
+                        handleTelephonyCallState(state)
+                    }
+                }
+                telephonyManager.registerTelephonyCallback(context.mainExecutor, callback)
+            } else {
+                @Suppress("DEPRECATION")
+                val listener = object : PhoneStateListener() {
+                    @Deprecated("Deprecated in Java")
+                    override fun onCallStateChanged(state: Int, phoneNumber: String?) {
+                        handleTelephonyCallState(state)
+                    }
+                }
+                telephonyManager.listen(listener, PhoneStateListener.LISTEN_CALL_STATE)
+            }
+        } catch (e: Exception) {
+            Log.w("EmergencyService", "Telephony call state listener registration failed/restricted: ${e.message}")
+        }
+    }
+
+    private fun handleTelephonyCallState(state: Int) {
+        when (state) {
+            TelephonyManager.CALL_STATE_OFFHOOK, TelephonyManager.CALL_STATE_RINGING -> {
+                if (!isCallActive) {
+                    isCallActive = true
+                    Log.d("EmergencyService", "Telephony call state ACTIVE ($state)")
+                    onCallStateChanged?.invoke(true)
+                }
+            }
+            TelephonyManager.CALL_STATE_IDLE -> {
+                if (isCallActive) {
+                    isCallActive = false
+                    Log.d("EmergencyService", "Telephony call state IDLE ($state)")
+                    onCallStateChanged?.invoke(false)
+                }
+            }
+        }
+    }
 
     private val _activeEmergency = MutableStateFlow<EmergencyModel?>(null)
     val activeEmergency: StateFlow<EmergencyModel?> = _activeEmergency.asStateFlow()
@@ -110,6 +167,10 @@ class EmergencyService(
         delaySosSeconds: Int = 0,
         trustedPlaceName: String? = null
     ): EmergencyModel {
+        // Reset location SMS state for new emergency
+        initialSmsSentWithInvalidLocation = false
+        followUpLocationSmsSent = false
+
         // Prevent duplicate SOS sessions
         _activeEmergency.value?.let {
             Log.w("EmergencyService", "An active emergency session is already running: ${it.emergencyId}")
@@ -275,6 +336,8 @@ class EmergencyService(
                                 val telecomManager = context.getSystemService(Context.TELECOM_SERVICE) as? TelecomManager
                                 val uri = Uri.fromParts("tel", phoneToCall, null)
                                 if (telecomManager != null) {
+                                    isCallActive = true
+                                    onCallStateChanged?.invoke(true)
                                     telecomManager.placeCall(uri, null)
                                     databaseService.addDeveloperLog("CALL_STARTED: tel:$phoneToCall via TelecomManager", "SUCCESS")
                                     Log.d("EmergencyService", "CALL_STARTED: Successfully placed call via TelecomManager.")
@@ -315,6 +378,7 @@ class EmergencyService(
                     Log.d("EmergencyService", "SMS_SKIPPED: Automatic emergency SMS skipped due to Trusted Place setting (skipAutomaticSms=true)")
                     databaseService.addDeveloperLog("SMS_SKIPPED: Automatic SMS skipped by Trusted Place setting", "INFO")
                 } else {
+                    initialSmsSentWithInvalidLocation = (model.latitude == 0.0 && model.longitude == 0.0)
                     launch { notifyEmergencyContacts(model) }
                 }
                 launch {
@@ -431,6 +495,13 @@ class EmergencyService(
                     )
                     _activeEmergency.value = updatedModel
                     saveEmergencyToCloud(updatedModel)
+
+                    if (initialSmsSentWithInvalidLocation && !followUpLocationSmsSent && (updatedModel.latitude != 0.0 || updatedModel.longitude != 0.0)) {
+                        followUpLocationSmsSent = true
+                        Log.d("EmergencyService", "F-05: Initial SMS had invalid location. Valid location acquired (${updatedModel.latitude}, ${updatedModel.longitude}). Sending follow-up SMS.")
+                        databaseService.addDeveloperLog("SMS_FOLLOWUP_SENT: Valid GPS location acquired (${updatedModel.latitude}, ${updatedModel.longitude})", "INFO")
+                        launch { notifyEmergencyContacts(updatedModel, isUpdate = true) }
+                    }
                 }
             }
         }
@@ -520,6 +591,11 @@ class EmergencyService(
     }
 
     suspend fun cancelEmergencyWithPin(pin: String, expectedPin: String, notes: String = "Cancelled with PIN"): Boolean {
+        if (expectedPin.isNotEmpty() && pin != expectedPin) {
+            Log.w("EmergencyService", "PIN mismatch during emergency cancellation attempt.")
+            return false
+        }
+
         val wasCountdownCancelled = synchronized(stateTransitionLock) {
             if (countdownJob?.isActive == true && _activeEmergency.value?.status == "COUNTDOWN") {
                 val noteText = if (notes.isNotBlank() && notes != "Cancelled with PIN") notes else "False alarm: Aborted during countdown"
@@ -546,7 +622,7 @@ class EmergencyService(
             return true
         }
         
-        if (pin != expectedPin && !notes.startsWith("Cancelled by voice", ignoreCase = true)) {
+        if (pin != expectedPin) {
             Log.w("EmergencyService", "PIN mismatch during emergency cancellation attempt.")
             return false
         }
@@ -620,6 +696,12 @@ class EmergencyService(
     }
 
     private fun closeActiveSession() {
+        initialSmsSentWithInvalidLocation = false
+        followUpLocationSmsSent = false
+        if (isCallActive) {
+            isCallActive = false
+            onCallStateChanged?.invoke(false)
+        }
         trackingJob?.cancel()
         trackingJob = null
         _activeEmergency.value = null

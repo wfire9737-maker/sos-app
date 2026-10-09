@@ -85,7 +85,13 @@ class BleForegroundService : Service() {
             return START_NOT_STICKY
         }
 
-        startForegroundWithNotification("Initializing ESP32 SOS monitoring...")
+        val foregroundSuccess = startForegroundWithNotification("Initializing ESP32 SOS monitoring...")
+        if (!foregroundSuccess) {
+            Log.e("BleForegroundService", "Failed to promote BleForegroundService to foreground due to permission/security error. Stopping service.")
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
         deviceService.startEsp32Polling()
         setupFallDetection()
         observeBleConnectionState()
@@ -195,9 +201,9 @@ class BleForegroundService : Service() {
             .build()
     }
 
-    private fun startForegroundWithNotification(statusText: String) {
+    private fun startForegroundWithNotification(statusText: String): Boolean {
         val notification = buildNotification(statusText)
-        try {
+        return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(
                     NOTIFICATION_ID,
@@ -207,8 +213,10 @@ class BleForegroundService : Service() {
             } else {
                 startForeground(NOTIFICATION_ID, notification)
             }
+            true
         } catch (e: Exception) {
-            Log.e("BleForegroundService", "Error starting foreground notification: ${e.message}")
+            Log.e("BleForegroundService", "Error starting foreground notification: ${e.message}", e)
+            false
         }
     }
 

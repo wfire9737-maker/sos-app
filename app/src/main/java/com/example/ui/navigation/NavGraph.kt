@@ -75,15 +75,19 @@ fun NavGraph(
                 is GuardianViewModel.UiEvent.NavigateToHome -> {
                     navController.navigate(Screen.Home.route) {
                         popUpTo(Screen.Login.route) { inclusive = true }
+                        launchSingleTop = true
                     }
                 }
                 is GuardianViewModel.UiEvent.NavigateToLogin -> {
                     navController.navigate(Screen.Login.route) {
                         popUpTo(0) { inclusive = true }
+                        launchSingleTop = true
                     }
                 }
                 is GuardianViewModel.UiEvent.NavigateToEmergency -> {
-                    navController.navigate(Screen.Emergency.route)
+                    navController.navigate(Screen.Emergency.route) {
+                        launchSingleTop = true
+                    }
                 }
             }
         }
@@ -152,11 +156,13 @@ fun NavGraph(
     val fallCountdown by viewModel.fallCountdown.collectAsState()
     val sosCountdown by viewModel.countdown.collectAsState()
     val activeEmergency by viewModel.activeEmergency.collectAsState()
-    LaunchedEffect(activeEmergency) {
-        if (activeEmergency != null) {
+    LaunchedEffect(activeEmergency, sosCountdown) {
+        if (activeEmergency != null || sosCountdown != null) {
             val currentRoute = navController.currentBackStackEntry?.destination?.route
             if (currentRoute != Screen.Emergency.route) {
-                navController.navigate(Screen.Emergency.route)
+                navController.navigate(Screen.Emergency.route) {
+                    launchSingleTop = true
+                }
             }
         }
     }
@@ -189,8 +195,16 @@ fun NavGraph(
         composable(Screen.Login.route) {
             LoginScreen(
                 viewModel = viewModel,
-                onNavigateToRegister = { navController.navigate(Screen.Register.route) },
-                onNavigateToForgotPassword = { navController.navigate(Screen.ForgotPassword.route) }
+                onNavigateToRegister = {
+                    navController.navigate(Screen.Register.route) {
+                        launchSingleTop = true
+                    }
+                },
+                onNavigateToForgotPassword = {
+                    navController.navigate(Screen.ForgotPassword.route) {
+                        launchSingleTop = true
+                    }
+                }
             )
         }
         composable(Screen.Register.route) {
@@ -214,49 +228,49 @@ fun NavGraph(
                     }
                 },
                 onNavigateToProfile = {
-                    navController.navigate(Screen.Profile.route)
+                    navController.navigate(Screen.Profile.route) { launchSingleTop = true }
                 },
                 onNavigateToContacts = {
-                    navController.navigate(Screen.Contacts.route)
+                    navController.navigate(Screen.Contacts.route) { launchSingleTop = true }
                 },
                 onNavigateToDevicePairing = {
-                    navController.navigate(Screen.DevicePairing.route)
+                    navController.navigate(Screen.DevicePairing.route) { launchSingleTop = true }
                 },
                 onNavigateToEmergency = {
-                    navController.navigate(Screen.Emergency.route)
+                    navController.navigate(Screen.Emergency.route) { launchSingleTop = true }
                 },
                 onNavigateToNotifications = {
-                    navController.navigate(Screen.Notifications.route)
+                    navController.navigate(Screen.Notifications.route) { launchSingleTop = true }
                 },
                 onNavigateToHistory = {
-                    navController.navigate(Screen.History.route)
+                    navController.navigate(Screen.History.route) { launchSingleTop = true }
                 },
                 onNavigateToAiDashboard = {
-                    navController.navigate(Screen.AiDashboard.route)
+                    navController.navigate(Screen.AiDashboard.route) { launchSingleTop = true }
                 },
                 onNavigateToDeviceMonitoring = {
-                    navController.navigate(Screen.DeviceMonitoring.route)
+                    navController.navigate(Screen.DeviceMonitoring.route) { launchSingleTop = true }
                 },
                 onNavigateToSettings = {
-                    navController.navigate(Screen.Settings.route)
+                    navController.navigate(Screen.Settings.route) { launchSingleTop = true }
                 },
                 onNavigateToAnalytics = {
-                    navController.navigate(Screen.Analytics.route)
+                    navController.navigate(Screen.Analytics.route) { launchSingleTop = true }
                 },
                 onNavigateToReports = {
-                    navController.navigate(Screen.Reports.route)
+                    navController.navigate(Screen.Reports.route) { launchSingleTop = true }
                 },
                 onNavigateToSafeCheckIn = {
-                    navController.navigate(Screen.SafeCheckIn.route)
+                    navController.navigate(Screen.SafeCheckIn.route) { launchSingleTop = true }
                 },
                 onNavigateToMap = {
-                    navController.navigate(Screen.Map.route)
+                    navController.navigate(Screen.Map.route) { launchSingleTop = true }
                 },
                 onNavigateToBleTest = {
-                    navController.navigate(Screen.BleTest.route)
+                    navController.navigate(Screen.BleTest.route) { launchSingleTop = true }
                 },
                 onNavigateToNearbyDiscovery = {
-                    navController.navigate(Screen.NearbyDiscovery.route)
+                    navController.navigate(Screen.NearbyDiscovery.route) { launchSingleTop = true }
                 }
             )
         }
@@ -318,8 +332,16 @@ fun NavGraph(
             TrustedPlacesScreen(
                 viewModel = viewModel,
                 onNavigateBack = { navController.navigateUp() },
-                onNavigateToAddPlace = { navController.navigate(Screen.AddEditTrustedPlace.createRoute(null)) },
-                onNavigateToEditPlace = { placeId -> navController.navigate(Screen.AddEditTrustedPlace.createRoute(placeId)) }
+                onNavigateToAddPlace = {
+                    navController.navigate(Screen.AddEditTrustedPlace.createRoute(null)) {
+                        launchSingleTop = true
+                    }
+                },
+                onNavigateToEditPlace = { placeId ->
+                    navController.navigate(Screen.AddEditTrustedPlace.createRoute(placeId)) {
+                        launchSingleTop = true
+                    }
+                }
             )
         }
         composable(
@@ -337,14 +359,46 @@ fun NavGraph(
             SettingsScreen(
                 viewModel = viewModel,
                 onNavigateBack = { navController.navigateUp() },
-                onNavigateToSecurity = { navController.navigate(Screen.Security.route) },
-                onNavigateToVoiceSos = { navController.navigate(Screen.VoiceSos.route) },
-                onNavigateToEmergencySound = { navController.navigate(Screen.EmergencySound.route) },
-                onNavigateToSafetyTimer = { navController.navigate(Screen.SafetyTimer.route) },
-                onNavigateToHelpFaq = { navController.navigate(Screen.HelpFaq.route) },
-                onNavigateToTrustedPlaces = { navController.navigate(Screen.TrustedPlaces.route) },
-                onNavigateToPermissions = { navController.navigate(Screen.Permissions.route) },
-                onNavigateToAbout = { navController.navigate(Screen.About.route) }
+                onNavigateToSecurity = {
+                    navController.navigate(Screen.Security.route) {
+                        launchSingleTop = true
+                    }
+                },
+                onNavigateToVoiceSos = {
+                    navController.navigate(Screen.VoiceSos.route) {
+                        launchSingleTop = true
+                    }
+                },
+                onNavigateToEmergencySound = {
+                    navController.navigate(Screen.EmergencySound.route) {
+                        launchSingleTop = true
+                    }
+                },
+                onNavigateToSafetyTimer = {
+                    navController.navigate(Screen.SafetyTimer.route) {
+                        launchSingleTop = true
+                    }
+                },
+                onNavigateToHelpFaq = {
+                    navController.navigate(Screen.HelpFaq.route) {
+                        launchSingleTop = true
+                    }
+                },
+                onNavigateToTrustedPlaces = {
+                    navController.navigate(Screen.TrustedPlaces.route) {
+                        launchSingleTop = true
+                    }
+                },
+                onNavigateToPermissions = {
+                    navController.navigate(Screen.Permissions.route) {
+                        launchSingleTop = true
+                    }
+                },
+                onNavigateToAbout = {
+                    navController.navigate(Screen.About.route) {
+                        launchSingleTop = true
+                    }
+                }
             )
         }
         composable(Screen.EmergencySound.route) {
@@ -418,10 +472,14 @@ fun NavGraph(
                 viewModel = viewModel,
                 onNavigateBack = { navController.navigateUp() },
                 onNavigateToChat = { macAddress, deviceName -> 
-                    navController.navigate(Screen.NearbyChat.createRoute(macAddress, deviceName))
+                    navController.navigate(Screen.NearbyChat.createRoute(macAddress, deviceName)) {
+                        launchSingleTop = true
+                    }
                 },
                 onNavigateToLocations = {
-                    navController.navigate(Screen.NearbyLocations.route)
+                    navController.navigate(Screen.NearbyLocations.route) {
+                        launchSingleTop = true
+                    }
                 }
             )
         }
