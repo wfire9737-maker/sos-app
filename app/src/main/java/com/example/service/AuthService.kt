@@ -294,7 +294,10 @@ class AuthService(private val context: Context) {
                 try { JSONObject(it).optString("uid") } catch (e: Exception) { null }
             }
 
+    var onLogout: (() -> Unit)? = null
+
     fun logout() {
+        onLogout?.invoke()
         firebaseAuth?.signOut()
         sharedPrefs.edit().remove("current_user").apply()
         _authState.value = AuthState.Initial

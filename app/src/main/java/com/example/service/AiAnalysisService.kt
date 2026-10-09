@@ -66,9 +66,14 @@ class AiAnalysisService(
         }
     }
 
+    private fun getAuthenticatedUid(): String? {
+        return com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
+    }
+
     private fun syncWithFirestore() {
         val fs = firestore ?: return
-        fs.collection("ai_analysis")
+        val uid = getAuthenticatedUid() ?: return
+        fs.collection("ai_analysis").whereEqualTo("userId", uid)
             .addSnapshotListener { snapshot, e ->
                 if (e != null) {
                     Log.e("AiAnalysisService", "Firestore listen failed.", e)
@@ -94,18 +99,20 @@ class AiAnalysisService(
     }
 
     fun addAnalysisResult(result: AiAnalysisResult) {
-        val updated = (_analysisLogs.value.filter { it.id != result.id } + result)
-            .sortedByDescending { result.timestampMs }
+        val uid = getAuthenticatedUid()
+        val resultWithUser = if (uid != null) result.copy(userId = uid) else result
+        val updated = (_analysisLogs.value.filter { it.id != resultWithUser.id } + resultWithUser)
+            .sortedByDescending { resultWithUser.timestampMs }
         _analysisLogs.value = updated
         saveLocalLogs()
 
         // Sync to Firestore
         val fs = firestore
-        if (fs != null) {
+        if (fs != null && uid != null) {
             serviceScope.launch {
                 try {
-                    fs.collection("ai_analysis").document(result.id).set(result.toMap())
-                    Log.d("AiAnalysisService", "Synced AI log ${result.id} to Firestore")
+                    fs.collection("ai_analysis").document(resultWithUser.id).set(resultWithUser.toMap())
+                    Log.d("AiAnalysisService", "Synced AI log ${resultWithUser.id} to Firestore")
                 } catch (e: Exception) {
                     Log.e("AiAnalysisService", "Failed to sync AI log to Firestore", e)
                 }

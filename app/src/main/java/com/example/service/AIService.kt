@@ -67,9 +67,14 @@ class AIService(
         }
     }
 
+    private fun getAuthenticatedUid(): String? {
+        return com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
+    }
+
     private fun syncWithFirestore() {
         val fs = firestore ?: return
-        fs.collection("ai_emergency_analysis_new")
+        val uid = getAuthenticatedUid() ?: return
+        fs.collection("ai_emergency_analysis_new").whereEqualTo("userId", uid)
             .addSnapshotListener { snapshot, e ->
                 if (e != null) {
                     Log.e("AIService", "Firestore listen failed.", e)
@@ -95,16 +100,18 @@ class AIService(
     }
 
     fun addAnalysisLog(result: AIAnalysisModel) {
-        val updated = (_analysisLogs.value.filter { it.id != result.id } + result)
+        val uid = getAuthenticatedUid()
+        val resultWithUser = if (uid != null) result.copy(userId = uid) else result
+        val updated = (_analysisLogs.value.filter { it.id != resultWithUser.id } + resultWithUser)
             .sortedByDescending { it.timestampMs }
         _analysisLogs.value = updated
         saveLocalLogs()
 
         val fs = firestore
-        if (fs != null) {
+        if (fs != null && uid != null) {
             serviceScope.launch {
                 try {
-                    fs.collection("ai_emergency_analysis_new").document(result.id).set(serializeModelToMap(result))
+                    fs.collection("ai_emergency_analysis_new").document(resultWithUser.id).set(serializeModelToMap(resultWithUser))
                 } catch (e: Exception) {
                     Log.e("AIService", "Failed to sync AI log to Firestore", e)
                 }
@@ -209,6 +216,7 @@ class AIService(
 
     private fun serializeModelToMap(item: AIAnalysisModel): Map<String, Any> {
         return mapOf(
+            "userId" to item.userId,
             "alertId" to item.alertId,
             "confidenceScore" to item.confidenceScore,
             "falseAlarmProbability" to item.falseAlarmProbability,
@@ -244,6 +252,7 @@ class AIService(
 
         return AIAnalysisModel(
             id = id,
+            userId = map["userId"]?.toString() ?: "",
             alertId = map["alertId"]?.toString() ?: "none",
             confidenceScore = (map["confidenceScore"] as? Number)?.toInt() ?: 94,
             falseAlarmProbability = (map["falseAlarmProbability"] as? Number)?.toInt() ?: 6,

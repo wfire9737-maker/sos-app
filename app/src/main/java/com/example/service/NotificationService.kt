@@ -27,7 +27,11 @@ import org.json.JSONObject
 import java.util.UUID
 
 @Suppress("DEPRECATION")
-class NotificationService(private val context: Context, private val firestore: FirebaseFirestore?) {
+class NotificationService(
+    private val context: Context, 
+    private val firestore: FirebaseFirestore?,
+    private val authService: AuthService? = null
+) {
     
     private val _notifications = MutableStateFlow<List<NotificationItem>>(emptyList())
     val notifications: StateFlow<List<NotificationItem>> = _notifications.asStateFlow()
@@ -44,6 +48,17 @@ class NotificationService(private val context: Context, private val firestore: F
         loadLocalNotifications()
         retrieveFCMToken()
         listenToFirestoreNotifications()
+        authService?.onLogout = { stopListener() }
+    }
+
+    fun stopListener() {
+        try {
+            firestoreListenerRegistration?.remove()
+        } catch (e: Exception) {
+            Log.e("NotificationService", "Error stopping listener", e)
+        } finally {
+            firestoreListenerRegistration = null
+        }
     }
 
     private fun createNotificationChannel() {

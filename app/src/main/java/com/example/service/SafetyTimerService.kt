@@ -166,8 +166,10 @@ class SafetyTimerService(
 
     private fun syncTimerToFirestore(statusStr: String) {
         val fs = firestore ?: return
+        val uid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: return
         try {
             val timerData = mapOf(
+                "userId" to uid,
                 "status" to statusStr,
                 "activityDescription" to _activityDescription.value,
                 "totalDurationSeconds" to _totalDurationSeconds.value,

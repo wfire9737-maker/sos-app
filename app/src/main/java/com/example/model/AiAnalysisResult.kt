@@ -65,6 +65,7 @@ data class TimelineEvent(
 
 data class AiAnalysisResult(
     val id: String = "",
+    val userId: String = "",
     val alertId: String = "",
     val confidenceScore: Int = 94,
     val falseAlarmProbability: Int = 6,
@@ -79,6 +80,7 @@ data class AiAnalysisResult(
     fun toMap(): Map<String, Any> {
         return mapOf(
             "id" to id,
+            "userId" to userId,
             "alertId" to alertId,
             "confidenceScore" to confidenceScore,
             "falseAlarmProbability" to falseAlarmProbability,
@@ -103,6 +105,7 @@ data class AiAnalysisResult(
 
             return AiAnalysisResult(
                 id = map["id"] as? String ?: "",
+                userId = map["userId"] as? String ?: "",
                 alertId = map["alertId"] as? String ?: "",
                 confidenceScore = (map["confidenceScore"] as? Number)?.toInt() ?: 94,
                 falseAlarmProbability = (map["falseAlarmProbability"] as? Number)?.toInt() ?: 6,

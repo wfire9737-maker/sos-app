@@ -16,9 +16,11 @@ class FallRepository(
         fallEventDao.insertEvent(event)
         
         val fs = firestore ?: return
+        val uid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: return
         try {
             val eventMap = mapOf(
                 "id" to event.id,
+                "userId" to uid,
                 "timestampMs" to event.timestampMs,
                 "eventType" to event.eventType,
                 "sensorReadingDetails" to event.sensorReadingDetails

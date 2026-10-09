@@ -21,6 +21,7 @@ data class AITimelineEvent(
 
 data class AIAnalysisModel(
     val id: String = UUID.randomUUID().toString(),
+    val userId: String = "",
     val alertId: String = "none",
     val confidenceScore: Int = 94,
     val falseAlarmProbability: Int = 6,

@@ -1,0 +1,13 @@
+{
+  "name": "sos-firestore-rules-tests",
+  "version": "1.0.0",
+  "description": "Firestore rules unit tests for Physical Emergency SOS Button",
+  "private": true,
+  "scripts": {
+    "test": "node --test test/firestore.rules.test.js"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^3.0.4",
+    "firebase": "^10.12.0"
+  }
+}

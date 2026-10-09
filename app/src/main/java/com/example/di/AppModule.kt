@@ -75,7 +75,7 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideNotificationService(@ApplicationContext context: Context, databaseService: DatabaseService): NotificationService = NotificationService(context, databaseService.firestoreInstance)
+    fun provideNotificationService(@ApplicationContext context: Context, databaseService: DatabaseService, authService: AuthService): NotificationService = NotificationService(context, databaseService.firestoreInstance, authService)
 
     @Provides
     @Singleton
