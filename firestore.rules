@@ -51,6 +51,11 @@ service cloud.firestore {
       match /settings/{settingId} {
         allow read, write: if isOwner(uid);
       }
+
+      // 5b. Notifications Subcollection: users/{uid}/notifications/{notificationId}
+      match /notifications/{notificationId} {
+        allow read, write: if isOwner(uid);
+      }
     }
 
     // 6. Active Emergencies: emergencies/{emergencyId}
@@ -106,7 +111,7 @@ service cloud.firestore {
     }
 
     match /notifications/{notificationId} {
-      allow read, write: if isAuthenticated();
+      allow read, write: if false;
     }
 
     match /safety_timers/{timerId} {

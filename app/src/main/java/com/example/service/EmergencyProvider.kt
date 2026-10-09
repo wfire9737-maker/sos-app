@@ -115,12 +115,52 @@ class EmergencyProvider(
 
     
     fun getMatchedTrustedPlace(lat: Double, lng: Double): TrustedPlace? {
-        val results = FloatArray(1)
-        for (place in trustedPlacesService.trustedPlaces.value) {
-            if (!place.isEnabled) continue
-            android.location.Location.distanceBetween(lat, lng, place.latitude, place.longitude, results)
-            if (results[0] <= place.radius) return place
+        val enabledPlaces = trustedPlacesService.trustedPlaces.value.filter { it.isEnabled }
+        if (enabledPlaces.isEmpty()) return null
+
+        val isValidCoord = lat.isFinite() && lng.isFinite() &&
+                !(lat == 0.0 && lng == 0.0) &&
+                Math.abs(lat) <= 90.0 && Math.abs(lng) <= 180.0
+
+        if (isValidCoord) {
+            val results = FloatArray(1)
+            for (place in enabledPlaces) {
+                try {
+                    android.location.Location.distanceBetween(lat, lng, place.latitude, place.longitude, results)
+                    if (results[0] <= place.radius) {
+                        return place
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("EmergencyProvider", "Error calculating distance to place ${place.placeId}", e)
+                }
+            }
+            // Valid coordinates are authoritative; if no enabled trusted place contains the user, return null
+            return null
         }
+
+        // Fallback to Geofence state stored in SharedPreferences ONLY when coordinates are invalid or unavailable
+        val prefs = context.getSharedPreferences("trusted_places_state", Context.MODE_PRIVATE)
+        val now = System.currentTimeMillis()
+        val freshnessThresholdMs = 24 * 60 * 60 * 1000L // 24 hours
+
+        for (place in enabledPlaces) {
+            try {
+                val isInside = prefs.getBoolean("is_inside_${place.placeId}", false)
+                val timestamp = prefs.getLong("timestamp_${place.placeId}", 0L)
+                if (isInside) {
+                    val isFresh = timestamp > 0L && (now - timestamp) in 0..freshnessThresholdMs
+                    if (isFresh) {
+                        android.util.Log.d("EmergencyProvider", "Matched trusted place via geofence state: ${place.name} (${place.placeId})")
+                        return place
+                    } else {
+                        android.util.Log.w("EmergencyProvider", "Geofence state for ${place.name} expired or invalid (timestamp=$timestamp)")
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("EmergencyProvider", "Error reading geofence state for place ${place.placeId}", e)
+            }
+        }
+
         return null
     }
 
@@ -219,74 +259,74 @@ class EmergencyProvider(
         bearing: Float? = null,
         locationSource: String = "PHONE_GPS"
     ) {
-        scope.launch {
-            val effectiveLat = lat ?: locationService.currentLocation.value.latitude
-            val effectiveLng = lng ?: locationService.currentLocation.value.longitude
+        val effectiveLat = lat ?: locationService.currentLocation.value.latitude
+        val effectiveLng = lng ?: locationService.currentLocation.value.longitude
 
-            if (!shouldSendSos(effectiveLat, effectiveLng)) {
-                val matchedPlace = getMatchedTrustedPlace(effectiveLat, effectiveLng)
-                android.util.Log.d("EmergencyProvider", "SOS dispatch cancelled: Trusted Place ${matchedPlace?.name} has alwaysSendSos=false")
-                return@launch
+        if (!shouldSendSos(effectiveLat, effectiveLng)) {
+            val matchedPlace = getMatchedTrustedPlace(effectiveLat, effectiveLng)
+            android.util.Log.d("EmergencyProvider", "SOS dispatch cancelled: Trusted Place ${matchedPlace?.name} has alwaysSendSos=false")
+            return
+        }
+
+        val isSoundAllowed = shouldPlaySosAlarm(effectiveLat, effectiveLng)
+        val skipCall = shouldSkipPhoneCall(effectiveLat, effectiveLng)
+        val skipSms = shouldSkipSms(effectiveLat, effectiveLng)
+        val delaySeconds = getDelaySosSeconds(effectiveLat, effectiveLng)
+
+        val isVibrationEnabled = context.getSharedPreferences(
+            "smart_sos_settings",
+            Context.MODE_PRIVATE
+        ).getBoolean("sos_vibration_enabled", true)
+
+        if (isEmergencyInProgress()) {
+            val model = emergencyService.activeEmergency.value
+            if (model != null && model.status != "COUNTDOWN") {
+                emergencyService.notifyEmergencyContacts(model, isUpdate = true)
             }
-
-            val isSoundAllowed = shouldPlaySosAlarm(effectiveLat, effectiveLng)
-            val skipCall = shouldSkipPhoneCall(effectiveLat, effectiveLng)
-            val skipSms = shouldSkipSms(effectiveLat, effectiveLng)
-            val delaySeconds = getDelaySosSeconds(effectiveLat, effectiveLng)
-
-            val isVibrationEnabled = context.getSharedPreferences(
-                "smart_sos_settings",
-                Context.MODE_PRIVATE
-            ).getBoolean("sos_vibration_enabled", true)
-
-            if (isEmergencyInProgress()) {
-                val model = emergencyService.activeEmergency.value
-                if (model != null && model.status != "COUNTDOWN") {
-                    emergencyService.notifyEmergencyContacts(model, isUpdate = true)
-                }
-                if (isSoundAllowed) {
-                    alarmVibratorService.startAlarm()
-                }
-                if (isVibrationEnabled) {
-                    alarmVibratorService.startVibration()
-                }
-                return@launch
-            }
-            
-            val user = (authService.authState.value as? com.example.service.AuthState.Success)?.user
-            val userId = user?.uid ?: "user-101"
-            val userName = user?.name ?: "Marcus Vance"
-            val userPhone = user?.phone ?: "+1-555-0143"
-
-            // Trigger alarm conditionally based on sos_sound_enabled and Trusted Place settings
             if (isSoundAllowed) {
                 alarmVibratorService.startAlarm()
             }
             if (isVibrationEnabled) {
                 alarmVibratorService.startVibration()
             }
+            return
+        }
+        
+        val user = (authService.authState.value as? com.example.service.AuthState.Success)?.user
+        val userId = user?.uid ?: "user-101"
+        val userName = user?.name ?: "Marcus Vance"
+        val userPhone = user?.phone ?: "+1-555-0143"
 
-            val matchedPlace = getMatchedTrustedPlace(effectiveLat, effectiveLng)
+        // Trigger alarm conditionally based on sos_sound_enabled and Trusted Place settings
+        if (isSoundAllowed) {
+            alarmVibratorService.startAlarm()
+        }
+        if (isVibrationEnabled) {
+            alarmVibratorService.startVibration()
+        }
 
-            val model = emergencyService.startEmergency(
-                userId = userId,
-                userName = userName,
-                userPhone = userPhone,
-                triggerType = triggerSource,
-                deviceId = deviceId,
-                customLat = lat ?: locationService.currentLocation.value.latitude,
-                customLng = lng ?: locationService.currentLocation.value.longitude,
-                customAccuracy = accuracy ?: locationService.currentLocation.value.accuracy,
-                customAltitude = altitude,
-                customSpeed = speed,
-                customBearing = bearing,
-                locationSource = locationSource,
-                skipPhoneCall = skipCall,
-                skipSms = skipSms,
-                delaySosSeconds = delaySeconds,
-                trustedPlaceName = matchedPlace?.name
-            )
+        val matchedPlace = getMatchedTrustedPlace(effectiveLat, effectiveLng)
 
+        val model = emergencyService.startEmergency(
+            userId = userId,
+            userName = userName,
+            userPhone = userPhone,
+            triggerType = triggerSource,
+            deviceId = deviceId,
+            customLat = lat ?: locationService.currentLocation.value.latitude,
+            customLng = lng ?: locationService.currentLocation.value.longitude,
+            customAccuracy = accuracy ?: locationService.currentLocation.value.accuracy,
+            customAltitude = altitude,
+            customSpeed = speed,
+            customBearing = bearing,
+            locationSource = locationSource,
+            skipPhoneCall = skipCall,
+            skipSms = skipSms,
+            delaySosSeconds = delaySeconds,
+            trustedPlaceName = matchedPlace?.name
+        )
+
+        scope.launch {
             // Trigger AI Emergency Analysis
             val analysis = com.example.model.AIAnalysisModel(
                 alertId = model.emergencyId,

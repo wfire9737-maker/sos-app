@@ -108,10 +108,19 @@ class NotificationService(private val context: Context, private val firestore: F
         sharedPrefs.edit().putString("notification_items", arr.toString()).apply()
     }
 
+    private var firestoreListenerRegistration: com.google.firebase.firestore.ListenerRegistration? = null
+
+    private fun getAuthenticatedUid(): String? {
+        return com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
+    }
+
     private fun listenToFirestoreNotifications() {
         val db = firestore ?: return
+        val uid = getAuthenticatedUid() ?: return
+        
+        firestoreListenerRegistration?.remove()
         // Real-time listener for user alerts mapped to local notifications
-        db.collection("notifications")
+        firestoreListenerRegistration = db.collection("users").document(uid).collection("notifications")
             .orderBy("timestamp", com.google.firebase.firestore.Query.Direction.DESCENDING)
             .addSnapshotListener { snapshot, e ->
                 if (e != null) {
@@ -175,7 +184,8 @@ class NotificationService(private val context: Context, private val firestore: F
 
         // Upload to Firestore if online
         val db = firestore
-        if (db != null) {
+        val uid = getAuthenticatedUid()
+        if (db != null && uid != null) {
             val map = hashMapOf(
                 "title" to item.title,
                 "body" to item.body,
@@ -184,7 +194,7 @@ class NotificationService(private val context: Context, private val firestore: F
                 "isRead" to item.isRead,
                 "deviceId" to item.deviceId
             )
-            db.collection("notifications").document(item.id).set(map)
+            db.collection("users").document(uid).collection("notifications").document(item.id).set(map)
                 .addOnFailureListener { e ->
                     Log.w("NotificationService", "Failed to upload notification to Firestore: ${e.message}")
                 }
@@ -200,8 +210,9 @@ class NotificationService(private val context: Context, private val firestore: F
 
         // Sync to Firestore
         val db = firestore
-        if (db != null) {
-            db.collection("notifications").document(id).update("isRead", true)
+        val uid = getAuthenticatedUid()
+        if (db != null && uid != null) {
+            db.collection("users").document(uid).collection("notifications").document(id).update("isRead", true)
         }
     }
 
@@ -212,13 +223,14 @@ class NotificationService(private val context: Context, private val firestore: F
 
         // Bulk update in Firestore
         val db = firestore
-        if (db != null) {
+        val uid = getAuthenticatedUid()
+        if (db != null && uid != null) {
             CoroutineScope(Dispatchers.IO).launch {
                 try {
                     val batch = db.batch()
                     for (item in _notifications.value) {
                         if (!item.isRead) {
-                            val docRef = db.collection("notifications").document(item.id)
+                            val docRef = db.collection("users").document(uid).collection("notifications").document(item.id)
                             batch.update(docRef, "isRead", true)
                         }
                     }
@@ -236,8 +248,9 @@ class NotificationService(private val context: Context, private val firestore: F
         saveLocalNotifications()
 
         val db = firestore
-        if (db != null) {
-            db.collection("notifications").document(id).delete()
+        val uid = getAuthenticatedUid()
+        if (db != null && uid != null) {
+            db.collection("users").document(uid).collection("notifications").document(id).delete()
         }
     }
 

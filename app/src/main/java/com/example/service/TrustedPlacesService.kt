@@ -161,6 +161,15 @@ class TrustedPlacesService(
     suspend fun deleteTrustedPlace(placeId: String) {
         try {
             trustedPlaceDao.deleteTrustedPlaceById(placeId)
+            try {
+                context.getSharedPreferences("trusted_places_state", Context.MODE_PRIVATE)
+                    .edit()
+                    .remove("is_inside_$placeId")
+                    .remove("timestamp_$placeId")
+                    .apply()
+            } catch (e: Exception) {
+                Log.e("TrustedPlacesService", "Failed to clear geofence state for $placeId", e)
+            }
             Log.d("CLOUD_DEBUG", "AUTH_CHECK currentUid=$currentUserId")
             if (currentUserId.isNotBlank()) {
                 Log.d("CLOUD_DEBUG", "PLACE_WRITE_START uid=$currentUserId placeId=$placeId operation=delete")
@@ -190,9 +199,33 @@ class TrustedPlacesService(
         currentUserId = ""
         _trustedPlaces.value = emptyList()
         try {
+            context.getSharedPreferences("trusted_places_state", Context.MODE_PRIVATE)
+                .edit()
+                .clear()
+                .apply()
+        } catch (e: Exception) {
+            Log.e("TrustedPlacesService", "Failed to clear geofence state prefs", e)
+        }
+        try {
             geofenceManager.updateGeofences(emptyList())
         } catch (e: Exception) {
             // Ignore geofence reset exceptions
+        }
+    }
+
+    fun isInsideGeofence(placeId: String): Boolean {
+        if (placeId.isBlank()) return false
+        return try {
+            val prefs = context.getSharedPreferences("trusted_places_state", Context.MODE_PRIVATE)
+            val isInside = prefs.getBoolean("is_inside_$placeId", false)
+            val timestamp = prefs.getLong("timestamp_$placeId", 0L)
+            val now = System.currentTimeMillis()
+            val freshnessThresholdMs = 24 * 60 * 60 * 1000L
+            val isFresh = timestamp > 0L && (now - timestamp) in 0..freshnessThresholdMs
+            isInside && isFresh
+        } catch (e: Exception) {
+            Log.e("TrustedPlacesService", "Error checking geofence state for $placeId", e)
+            false
         }
     }
 }

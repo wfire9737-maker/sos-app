@@ -154,12 +154,23 @@ class MotionProcessor(
 
     /**
      * Triggered directly by the ESP32 when it detects abnormal motion locally.
-     * Bypasses the local state machine and directly enters POSSIBLE_FALL state.
+     * Bypasses the local state machine and directly enters POSSIBLE_FALL state unless suppressed by active cooldown.
      */
     fun triggerHardwareFallEvent(reading: Mpu6050Reading) {
         Log.d("SOS_FALL_DEBUG", "MotionProcessor hardware fall event received")
         FallDebugBridge.log("MotionProcessor", "Hardware fall event received")
         val now = System.currentTimeMillis()
+
+        if (inCooldown) {
+            if (now - lastFallEventTimestamp < COOLDOWN_MS) {
+                Log.d(TAG, "MOTION: Hardware fall event suppressed due to active cooldown (${COOLDOWN_MS - (now - lastFallEventTimestamp)}ms remaining)")
+                FallDebugBridge.log("MotionProcessor", "Hardware fall event suppressed due to active cooldown")
+                return
+            } else {
+                inCooldown = false
+            }
+        }
+
         val eventId = "FALL_ESP32_${fallEventCounter.incrementAndGet()}_${now}"
         _motionState.value = MotionState.POSSIBLE_FALL
         Log.d(TAG, "MOTION: ESP32 hardware motion alert received (Event ID: $eventId)")

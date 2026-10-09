@@ -58,7 +58,8 @@ fun EmergencyScreen(
     val contacts by viewModel.contacts.collectAsState()
     val sosWorkflowState by viewModel.sosWorkflowState.collectAsState()
     val context = LocalContext.current
-    val primaryContactPhone = contacts.firstOrNull()?.phone ?: "911"
+    val primaryContactPhone = contacts.firstOrNull()?.phone?.trim() ?: ""
+    val hasValidPhone = primaryContactPhone.isNotEmpty() && primaryContactPhone.matches(Regex("^[+]?[0-9\\s-]{3,15}$"))
     
     val isEmergencyActive = activeEmergency != null || countdown != null
 
@@ -342,15 +343,19 @@ fun EmergencyScreen(
                 ) {
                     ActionCard(
                         title = "Call Emergency Contact",
-                        subtitle = "Instantly dials the primary emergency contact or 911",
+                        subtitle = if (hasValidPhone) "Instantly dials $primaryContactPhone" else "No valid emergency contact phone configured",
                         icon = Icons.Default.Phone,
-                        color = MaterialTheme.colorScheme.error,
+                        color = if (hasValidPhone) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.outline,
                         onClick = {
-                            if (ContextCompat.checkSelfPermission(context, Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED) {
-                                val intent = Intent(Intent.ACTION_CALL).apply { data = Uri.parse("tel:$primaryContactPhone") }
-                                context.startActivity(intent)
+                            if (hasValidPhone) {
+                                if (ContextCompat.checkSelfPermission(context, Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED) {
+                                    val intent = Intent(Intent.ACTION_CALL).apply { data = Uri.parse("tel:$primaryContactPhone") }
+                                    context.startActivity(intent)
+                                } else {
+                                    callPermissionLauncher.launch(Manifest.permission.CALL_PHONE)
+                                }
                             } else {
-                                callPermissionLauncher.launch(Manifest.permission.CALL_PHONE)
+                                android.widget.Toast.makeText(context, "Please configure a valid emergency contact phone number in settings.", android.widget.Toast.LENGTH_LONG).show()
                             }
                         }
                     )

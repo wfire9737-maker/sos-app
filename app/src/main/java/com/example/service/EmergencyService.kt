@@ -149,7 +149,7 @@ class EmergencyService(
         return false
     }
 
-    suspend fun startEmergency(
+    fun startEmergency(
         userId: String,
         userName: String,
         userPhone: String,
@@ -323,35 +323,49 @@ class EmergencyService(
             } else {
                 launch(Dispatchers.Main) {
                     val primaryContact = databaseService.contacts.value.firstOrNull()
-                    val phoneToCall = primaryContact?.phone ?: "911"
-                    databaseService.addDeveloperLog("CALL_REQUESTED: $phoneToCall (ID: $emergencyId)", "INFO")
+                    val phoneToCall = primaryContact?.phone?.trim() ?: ""
 
-                    if (lastCalledEmergencyId == emergencyId) {
-                        Log.w("EmergencyService", "Call already placed for emergency: $emergencyId")
+                    if (phoneToCall.isEmpty() || !phoneToCall.matches(Regex("^[+]?[0-9\\s-]{3,15}$"))) {
+                        databaseService.addDeveloperLog("CALL_SKIPPED: No valid emergency contact phone number configured", "WARN")
+                        Log.w("EmergencyService", "CALL_SKIPPED: No valid emergency contact phone number configured")
                     } else {
-                        lastCalledEmergencyId = emergencyId
-                        if (ContextCompat.checkSelfPermission(context, Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED) {
-                            Log.d("EmergencyService", "CALL_REQUESTED: Attempting background dial to $phoneToCall")
-                            try {
-                                val telecomManager = context.getSystemService(Context.TELECOM_SERVICE) as? TelecomManager
-                                val uri = Uri.fromParts("tel", phoneToCall, null)
-                                if (telecomManager != null) {
-                                    isCallActive = true
-                                    onCallStateChanged?.invoke(true)
-                                    telecomManager.placeCall(uri, null)
-                                    databaseService.addDeveloperLog("CALL_STARTED: tel:$phoneToCall via TelecomManager", "SUCCESS")
-                                    Log.d("EmergencyService", "CALL_STARTED: Successfully placed call via TelecomManager.")
-                                } else {
-                                    databaseService.addDeveloperLog("CALL_FAILED: TelecomManager.placeCall: TelecomManager is null", "ERROR")
-                                    Log.e("EmergencyService", "CALL_FAILED: TelecomManager is null")
-                                }
-                            } catch (e: Exception) {
-                                databaseService.addDeveloperLog("CALL_FAILED: TelecomManager.placeCall: ${e.message}", "ERROR")
-                                Log.e("EmergencyService", "CALL_FAILED: TelecomManager.placeCall failed: ${e.message}")
-                            }
+                        databaseService.addDeveloperLog("CALL_REQUESTED: $phoneToCall (ID: $emergencyId)", "INFO")
+
+                        if (lastCalledEmergencyId == emergencyId) {
+                            Log.w("EmergencyService", "Call already placed for emergency: $emergencyId")
                         } else {
-                            databaseService.addDeveloperLog("CALL_PERMISSION_DENIED: CALL_PHONE permission not granted", "ERROR")
-                            Log.w("EmergencyService", "CALL_PERMISSION_DENIED: Cannot place call.")
+                            lastCalledEmergencyId = emergencyId
+                            if (ContextCompat.checkSelfPermission(context, Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED) {
+                                Log.d("EmergencyService", "CALL_REQUESTED: Attempting background dial to $phoneToCall")
+                                try {
+                                    val telecomManager = context.getSystemService(Context.TELECOM_SERVICE) as? TelecomManager
+                                    val uri = Uri.fromParts("tel", phoneToCall, null)
+                                    if (telecomManager != null) {
+                                        isCallActive = true
+                                        onCallStateChanged?.invoke(true)
+                                        telecomManager.placeCall(uri, null)
+                                        databaseService.addDeveloperLog("CALL_STARTED: tel:$phoneToCall via TelecomManager", "SUCCESS")
+                                        Log.d("EmergencyService", "CALL_STARTED: Successfully placed call via TelecomManager.")
+                                    } else {
+                                        if (isCallActive) {
+                                            isCallActive = false
+                                            onCallStateChanged?.invoke(false)
+                                        }
+                                        databaseService.addDeveloperLog("CALL_FAILED: TelecomManager.placeCall: TelecomManager is null", "ERROR")
+                                        Log.e("EmergencyService", "CALL_FAILED: TelecomManager is null")
+                                    }
+                                } catch (e: Exception) {
+                                    if (isCallActive) {
+                                        isCallActive = false
+                                        onCallStateChanged?.invoke(false)
+                                    }
+                                    databaseService.addDeveloperLog("CALL_FAILED: TelecomManager.placeCall: ${e.message}", "ERROR")
+                                    Log.e("EmergencyService", "CALL_FAILED: TelecomManager.placeCall failed: ${e.message}")
+                                }
+                            } else {
+                                databaseService.addDeveloperLog("CALL_PERMISSION_DENIED: CALL_PHONE permission not granted", "ERROR")
+                                Log.w("EmergencyService", "CALL_PERMISSION_DENIED: Cannot place call.")
+                            }
                         }
                     }
                 }

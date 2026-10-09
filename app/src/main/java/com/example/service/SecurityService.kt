@@ -2,6 +2,7 @@ package com.example.service
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.os.Build
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import javax.inject.Inject
@@ -15,6 +16,7 @@ class SecurityService @Inject constructor(context: Context) {
 
     init {
         var prefs: SharedPreferences? = null
+        val isRobolectric = Build.FINGERPRINT?.contains("robolectric", ignoreCase = true) == true
         try {
             val masterKey = MasterKey.Builder(context)
                 .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
@@ -28,8 +30,13 @@ class SecurityService @Inject constructor(context: Context) {
                 EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
             )
         } catch (e: Exception) {
-            Log.e("SecurityService", "Failed to initialize EncryptedSharedPreferences, falling back to standard prefs", e)
-            prefs = context.getSharedPreferences("guardian_fallback_prefs", Context.MODE_PRIVATE)
+            if (isRobolectric) {
+                Log.w("SecurityService", "Robolectric environment detected, using fallback prefs for unit tests", e)
+                prefs = context.getSharedPreferences("guardian_test_prefs", Context.MODE_PRIVATE)
+            } else {
+                Log.e("SecurityService", "Failed to initialize EncryptedSharedPreferences securely", e)
+                throw SecurityException("Failed to initialize secure storage for PIN", e)
+            }
         }
         securePrefs = prefs!!
     }
@@ -39,10 +46,14 @@ class SecurityService @Inject constructor(context: Context) {
     }
 
     fun getEmergencyPin(): String {
-        return securePrefs.getString("EMERGENCY_PIN", "9999") ?: "9999"
+        return securePrefs.getString("EMERGENCY_PIN", "") ?: ""
     }
 
     fun verifyEmergencyPin(pin: String): Boolean {
-        return getEmergencyPin() == pin
+        val expected = getEmergencyPin()
+        if (expected.isEmpty()) return false
+        return expected == pin
     }
 }
+
+

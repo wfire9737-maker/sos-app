@@ -41,7 +41,22 @@ class FallDetectionService(
     fun triggerFall() {
         Log.d("SOS_FALL_DEBUG", "FallDetectionService.triggerFall() entered")
         com.example.ble.FallDebugBridge.log("FallDetectionService entered", "triggerFall() entered")
-        setGaitState(
+
+        synchronized(this) {
+            val currentStateVal = _currentState.value
+            if (currentStateVal == "SUDDEN_FALL_DETECTED" ||
+                currentStateVal == "FALL_COUNTDOWN" ||
+                currentStateVal == "FALL_SOS_AUTO_TRIGGER" ||
+                countdownJob?.isActive == true
+            ) {
+                Log.d("FallDetectionService", "Ignored duplicate triggerFall() in state: $currentStateVal")
+                com.example.ble.FallDebugBridge.log("FallDetectionService", "Ignored duplicate triggerFall() ($currentStateVal)")
+                return
+            }
+            _currentState.value = "SUDDEN_FALL_DETECTED"
+        }
+
+        logEvent(
             "SUDDEN_FALL_DETECTED",
             "High impact IMU spike detected."
         )
@@ -50,35 +65,46 @@ class FallDetectionService(
 
     private fun startFallCountdown() {
         val initialSeconds = settingsRepository.getFallResponseDelaySeconds()
-        countdownJob?.cancel()
-        _currentState.value = "FALL_COUNTDOWN"
-        _countdownSeconds.value = initialSeconds
+        synchronized(this) {
+            countdownJob?.cancel()
+            _currentState.value = "FALL_COUNTDOWN"
+            _countdownSeconds.value = initialSeconds
 
-        countdownJob = serviceScope.launch {
-            while (_countdownSeconds.value > 0) {
-                delay(1000)
-                _countdownSeconds.value = _countdownSeconds.value - 1
-                Log.d("FallDetectionService", "Fall countdown tick: ${_countdownSeconds.value}")
+            countdownJob = serviceScope.launch {
+                while (_countdownSeconds.value > 0) {
+                    delay(1000)
+                    _countdownSeconds.value = _countdownSeconds.value - 1
+                    Log.d("FallDetectionService", "Fall countdown tick: ${_countdownSeconds.value}")
+                }
+
+                // Countdown reached 0 - Trigger SOS
+                setGaitState(
+                    "FALL_SOS_AUTO_TRIGGER",
+                    "Countdown expired. Fall was not cancelled by wearer. Dispatching SOS workflow."
+                )
+                try {
+                    onSosTriggeredCallback?.invoke()
+                } catch (e: Exception) {
+                    Log.e("FallDetectionService", "Error dispatching Fall SOS callback", e)
+                } finally {
+                    synchronized(this@FallDetectionService) {
+                        _currentState.value = "STANDING"
+                    }
+                }
             }
-
-            // Countdown reached 0 - Trigger SOS
-            setGaitState(
-                "FALL_SOS_AUTO_TRIGGER",
-                "Countdown expired. Fall was not cancelled by wearer. Dispatching SOS workflow."
-            )
-            onSosTriggeredCallback?.invoke()
         }
     }
 
     fun cancelFallCountdown() {
-        countdownJob?.cancel()
-        countdownJob = null
-        setGaitState(
+        synchronized(this) {
+            countdownJob?.cancel()
+            countdownJob = null
+            _currentState.value = "STANDING"
+        }
+        logEvent(
             "FALL_CANCELLED",
             "Wearer pressed Cancel on fall response countdown modal. Restored standby monitoring."
         )
-        // Reset to standing
-        _currentState.value = "STANDING"
         onFallCancelledCallback?.invoke()
     }
 
@@ -103,6 +129,10 @@ class FallDetectionService(
     }
 
     fun cleanup() {
-        countdownJob?.cancel()
+        synchronized(this) {
+            countdownJob?.cancel()
+            countdownJob = null
+            _currentState.value = "STANDING"
+        }
     }
 }
