@@ -1372,7 +1372,6 @@ fun startVoiceRecognition(context: Context) {
                 // Automatically close the session when marked safe
                 delay(3000)
                 _emergencySession.value = EmergencySession() // reset session
-                _uiEvents.emit(UiEvent.NavigateToHome)
             }
         }
     }
@@ -1387,6 +1386,7 @@ fun startVoiceRecognition(context: Context) {
                 alarmVibratorService.stopAlarm()
                 alarmVibratorService.stopVibration()
                 alarmVibratorService.cleanUp()
+                _isSirenPlaying.value = false
                 
                 _emergencySession.value = EmergencySession() // Reset legacy state
                 _showCancelPinDialog.value = false
@@ -1396,6 +1396,68 @@ fun startVoiceRecognition(context: Context) {
                 _uiEvents.emit(UiEvent.ShowToast("Incorrect Emergency Security PIN."))
             }
             callback(success)
+        }
+    }
+
+    fun isPhysicalSosPendingCancellation(): Boolean {
+        return emergencyService.isPhysicalSosPendingCancellation()
+    }
+
+    private var isCancellationInProgress = false
+
+    fun cancelPendingPhysicalSos(
+        onSuccess: (() -> Unit)? = null,
+        onFallbackToPin: (() -> Unit)? = null,
+        callback: ((Boolean) -> Unit)? = null
+    ) {
+        if (isCancellationInProgress) return
+        isCancellationInProgress = true
+        viewModelScope.launch {
+            try {
+                val cancelled = emergencyService.cancelPendingPhysicalSos()
+                if (cancelled) {
+                    Log.d("SOS_ESP32", "PHYSICAL SOS CANCELLED DURING COUNTDOWN")
+                    deviceService.resetEsp32()
+                    alarmVibratorService.stopAlarm()
+                    alarmVibratorService.stopVibration()
+                    alarmVibratorService.cleanUp()
+                    _isSirenPlaying.value = false
+
+                    _emergencySession.value = EmergencySession()
+                    _showCancelPinDialog.value = false
+                    _uiEvents.emit(UiEvent.ShowToast("Physical SOS cancelled successfully."))
+                    _uiEvents.emit(UiEvent.NavigateToHome)
+                    callback?.invoke(true)
+                } else {
+                    onFallbackToPin?.invoke()
+                    callback?.invoke(false)
+                }
+            } finally {
+                isCancellationInProgress = false
+            }
+        }
+    }
+
+    fun handleCancelSosClick(onSuccessNavBack: (() -> Unit)? = null) {
+        if (isPhysicalSosPendingCancellation() ||
+            ((countdown.value != null || activeEmergency.value?.status == "COUNTDOWN") &&
+                activeEmergency.value?.triggerType == "PHYSICAL_BLE_BUTTON")
+        ) {
+            cancelPendingPhysicalSos(
+                onFallbackToPin = {
+                    if (securityService.getEmergencyPin().isEmpty()) {
+                        cancelEmergencyWithPin("") { }
+                    } else {
+                        openCancelPinDialog()
+                    }
+                }
+            )
+        } else if ((countdown.value != null || activeEmergency.value?.status == "COUNTDOWN") &&
+            securityService.getEmergencyPin().isEmpty()
+        ) {
+            cancelEmergencyWithPin("") { }
+        } else {
+            openCancelPinDialog()
         }
     }
 

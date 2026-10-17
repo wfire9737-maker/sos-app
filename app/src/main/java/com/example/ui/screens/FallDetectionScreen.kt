@@ -43,13 +43,6 @@ fun FallDetectionScreen(
     val mpuMotionState by viewModel.mpuMotionState.collectAsState()
     val mpuHardwareState by viewModel.mpuHardwareState.collectAsState()
 
-    // Show Countdown overlay Dialog if in count-down state
-    if (currentState == "FALL_COUNTDOWN") {
-        FallCountdownDialog(
-            secondsLeft = countdownSeconds,
-            onCancel = { viewModel.cancelFallCountdown() }
-        )
-    }
 
     Scaffold(
         topBar = {

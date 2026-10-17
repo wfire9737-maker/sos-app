@@ -328,11 +328,14 @@ fun SecurityScreen(
                         .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.08f), RoundedCornerShape(16.dp))
                 ) {
                     Column {
-                        // Logout row
+                        var isLoggingOut by remember { mutableStateOf(false) }
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable { viewModel.logout() }
+                                .clickable(enabled = !isLoggingOut) { 
+                                    isLoggingOut = true
+                                    viewModel.logout() 
+                                }
                                 .padding(16.dp)
                                 .testTag("security_logout_row"),
                             verticalAlignment = Alignment.CenterVertically
@@ -449,14 +452,17 @@ fun SecurityScreen(
                 }
             },
             confirmButton = {
+                var isSavingEmergencyPin by remember { mutableStateOf(false) }
                 Button(
                     onClick = {
+                        if (isSavingEmergencyPin) return@Button
                         if (inputEmergencyPin.length == 4) {
+                            isSavingEmergencyPin = true
                             viewModel.setEmergencyPin(inputEmergencyPin)
                             showEmergencyPinDialog = false
                         }
                     },
-                    enabled = inputEmergencyPin.length == 4,
+                    enabled = !isSavingEmergencyPin && inputEmergencyPin.length == 4,
                     modifier = Modifier.testTag("security_emergency_pin_save")
                 ) {
                     Text("Save Code")
@@ -500,14 +506,17 @@ fun SecurityScreen(
                 }
             },
             confirmButton = {
+                var isDeletingAccount by remember { mutableStateOf(false) }
                 Button(
                     onClick = {
+                        if (isDeletingAccount) return@Button
                         if (deleteConfirmText == "DELETE") {
+                            isDeletingAccount = true
                             viewModel.deleteAccount()
                             showDeleteAccountDialog = false
                         }
                     },
-                    enabled = deleteConfirmText == "DELETE",
+                    enabled = !isDeletingAccount && deleteConfirmText == "DELETE",
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
                     modifier = Modifier.testTag("security_delete_account_confirm")
                 ) {

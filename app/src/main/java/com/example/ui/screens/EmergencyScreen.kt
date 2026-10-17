@@ -76,15 +76,6 @@ fun EmergencyScreen(
             permissionHandler()
         }
     }
-
-    var hasEverBeenActive by remember { mutableStateOf(activeEmergency != null || countdown != null) }
-    LaunchedEffect(activeEmergency, countdown) {
-        if (activeEmergency != null || countdown != null) {
-            hasEverBeenActive = true
-        } else if (hasEverBeenActive) {
-            onNavigateBack()
-        }
-    }
     
     val sosTriggerHandler = rememberLocationPermissionHandler {
         viewModel.triggerManualSOS()
@@ -254,9 +245,7 @@ fun EmergencyScreen(
                         Spacer(modifier = Modifier.height(12.dp))
                         Button(
                             onClick = {
-                                viewModel.cancelEmergencyWithPin("") { success ->
-                                    if (success) onNavigateBack()
-                                }
+                                viewModel.handleCancelSosClick()
                             },
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = MaterialTheme.colorScheme.surface,
@@ -399,13 +388,7 @@ fun EmergencyScreen(
             
             Button(
                 onClick = { 
-                    if ((countdown != null || activeEmergency?.status == "COUNTDOWN") && viewModel.securityService.getEmergencyPin().isEmpty()) {
-                        viewModel.cancelEmergencyWithPin("") { success -> 
-                            if (success) onNavigateBack()
-                        }
-                    } else {
-                        viewModel.openCancelPinDialog()
-                    }
+                    viewModel.handleCancelSosClick()
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
                 modifier = Modifier
@@ -428,7 +411,6 @@ fun EmergencyScreen(
                         viewModel.cancelEmergencyWithPin(pin) { success ->
                             if (success) {
                                 viewModel.dismissCancelPinDialog()
-                                onNavigateBack()
                             }
                         }
                     }

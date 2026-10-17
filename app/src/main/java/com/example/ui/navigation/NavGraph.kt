@@ -74,7 +74,7 @@ fun NavGraph(
                 }
                 is GuardianViewModel.UiEvent.NavigateToHome -> {
                     navController.navigate(Screen.Home.route) {
-                        popUpTo(Screen.Login.route) { inclusive = true }
+                        popUpTo(Screen.Home.route) { inclusive = false }
                         launchSingleTop = true
                     }
                 }
@@ -520,11 +520,5 @@ fun NavGraph(
         )
     }
 
-    if (sosCountdown != null) {
-        SosCountdownDialog(
-            secondsLeft = sosCountdown!!,
-            onCancel = { viewModel.cancelEmergencyWithPin("") {} }
-        )
-    }
 }
 

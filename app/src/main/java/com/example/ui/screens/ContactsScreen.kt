@@ -219,23 +219,27 @@ fun ContactsScreen(
     }
 
     contactToDelete?.let { contact ->
+        var isDeleting by remember { mutableStateOf(false) }
         AlertDialog(
-            onDismissRequest = { contactToDelete = null },
+            onDismissRequest = { if (!isDeleting) contactToDelete = null },
             title = { Text("Delete Contact") },
             text = { Text("Are you sure you want to remove ${contact.name} from your emergency contacts?") },
             confirmButton = {
                 Button(
                     onClick = {
+                        if (isDeleting) return@Button
+                        isDeleting = true
                         viewModel.deleteEmergencyContact(contact.id)
                         contactToDelete = null
                     },
+                    enabled = !isDeleting,
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                 ) {
                     Text("Delete")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { contactToDelete = null }) {
+                TextButton(onClick = { if (!isDeleting) contactToDelete = null }) {
                     Text("Cancel")
                 }
             }
@@ -526,9 +530,12 @@ fun AddEditContactDialog(
             }
         },
         confirmButton = {
+            var isSaving by remember { mutableStateOf(false) }
             Button(
                 onClick = {
+                    if (isSaving) return@Button
                     if (name.isNotBlank() && phone.isNotBlank()) {
+                        isSaving = true
                         onSave(
                             contact?.copy(
                                 name = name.trim(),
@@ -548,7 +555,7 @@ fun AddEditContactDialog(
                         )
                     }
                 },
-                enabled = name.isNotBlank() && phone.isNotBlank() && phone.matches(Regex("^[+]?[0-9\\s-]{7,15}$"))
+                enabled = !isSaving && name.isNotBlank() && phone.isNotBlank() && phone.matches(Regex("^[+]?[0-9\\s-]{7,15}$"))
             ) {
                 Text("Save")
             }

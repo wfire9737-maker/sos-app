@@ -472,12 +472,16 @@ fun AddEditTrustedPlaceScreen(
                 Text("Show confirmation dialog", modifier = Modifier.padding(start = 8.dp))
             }
 
+            var isSubmitting by remember { mutableStateOf(false) }
+
             Button(
                 onClick = {
+                    if (isSubmitting) return@Button
                     if (!hasValidLocation || latDouble == null || lngDouble == null) {
                         Toast.makeText(context, "Please capture your current location before saving", Toast.LENGTH_SHORT).show()
                         return@Button
                     }
+                    isSubmitting = true
                     val lat = latDouble
                     val lng = lngDouble
                     val place = existingPlace?.copy(
@@ -519,7 +523,7 @@ fun AddEditTrustedPlaceScreen(
                     }
                     onNavigateBack()
                 },
-                enabled = hasValidLocation && name.isNotBlank(),
+                enabled = !isSubmitting && hasValidLocation && name.isNotBlank(),
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(52.dp),
