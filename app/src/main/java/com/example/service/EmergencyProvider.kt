@@ -124,18 +124,23 @@ class EmergencyProvider(
 
         if (isValidCoord) {
             val results = FloatArray(1)
+            var nearestPlace: TrustedPlace? = null
+            var minDistance = Float.MAX_VALUE
+
             for (place in enabledPlaces) {
                 try {
                     android.location.Location.distanceBetween(lat, lng, place.latitude, place.longitude, results)
-                    if (results[0] <= place.radius) {
-                        return place
+                    val dist = results[0]
+                    if (dist <= place.radius && dist < minDistance) {
+                        minDistance = dist
+                        nearestPlace = place
                     }
                 } catch (e: Exception) {
                     android.util.Log.e("EmergencyProvider", "Error calculating distance to place ${place.placeId}", e)
                 }
             }
             // Valid coordinates are authoritative; if no enabled trusted place contains the user, return null
-            return null
+            return nearestPlace
         }
 
         // Fallback to Geofence state stored in SharedPreferences ONLY when coordinates are invalid or unavailable

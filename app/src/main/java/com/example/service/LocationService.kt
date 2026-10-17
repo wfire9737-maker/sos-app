@@ -184,6 +184,8 @@ class LocationService(
                 }
 
                 
+                val fixTime = if (loc.time > 0L) loc.time else System.currentTimeMillis()
+
                 val lastLoc = _currentLocation.value
                 val results = FloatArray(1)
                 Location.distanceBetween(lastLoc.latitude, lastLoc.longitude, loc.latitude, loc.longitude, results)
@@ -197,8 +199,26 @@ class LocationService(
                 _routePoints.value = updatedPoints
                 
                 val speedKmh = loc.speed * 3.6
+
+                // Immediately update current location state with the new GPS fix
+                updateLocationState { current ->
+                    if (fixTime >= current.timestamp) {
+                        current.copy(
+                            latitude = loc.latitude,
+                            longitude = loc.longitude,
+                            speed = speedKmh,
+                            bearing = loc.bearing,
+                            altitude = loc.altitude,
+                            accuracy = loc.accuracy,
+                            timestamp = fixTime,
+                            distanceTraveled = totalDistance
+                        )
+                    } else {
+                        current
+                    }
+                }
                 
-                // Get address string
+                // Asynchronous reverse-geocoding for address string display
                 scope.launch(Dispatchers.IO) {
                     var addressStr = ""
                     try {
@@ -211,18 +231,14 @@ class LocationService(
                         Log.e("LocationService", "Geocoder failed", e)
                     }
                     
-                    updateLocationState {
-                        it.copy(
-                            latitude = loc.latitude,
-                            longitude = loc.longitude,
-                            speed = speedKmh,
-                            bearing = loc.bearing,
-                            altitude = loc.altitude,
-                            accuracy = loc.accuracy,
-                            timestamp = System.currentTimeMillis(),
-                            distanceTraveled = totalDistance,
-                            address = if (addressStr.isNotEmpty()) addressStr else it.address
-                        )
+                    if (addressStr.isNotEmpty()) {
+                        updateLocationState { current ->
+                            if (fixTime >= current.timestamp) {
+                                current.copy(address = addressStr)
+                            } else {
+                                current
+                            }
+                        }
                     }
                 }
             }
