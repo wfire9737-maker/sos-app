@@ -343,6 +343,8 @@ class GuardianViewModel @Inject constructor(
     val authState: StateFlow<AuthState> = authService.authState
     private val _sosWorkflowState = MutableStateFlow(com.example.model.SosWorkflowState.IDLE)
     val sosWorkflowState: StateFlow<com.example.model.SosWorkflowState> = _sosWorkflowState.asStateFlow()
+    private val isManualSosAdmissionClaimed = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val isReNotificationInProgress = java.util.concurrent.atomic.AtomicBoolean(false)
 
     // Emergency SOS State
     private val _emergencySession = MutableStateFlow(EmergencySession())
@@ -938,6 +940,7 @@ class GuardianViewModel @Inject constructor(
     fun cancelPendingSos() {
         _showSosConfirmationDialog.value = false
         pendingSosConfirmationAction = null
+        isManualSosAdmissionClaimed.set(false)
     }
 
     private suspend fun initiateEmergencySequence(
@@ -1006,45 +1009,80 @@ class GuardianViewModel @Inject constructor(
     }
 
     fun triggerManualSOS(lat: Double = 37.7749, lng: Double = -122.4194, onEmergencyStarted: (() -> Unit)? = null) {
-        viewModelScope.launch {
-            if (_sosWorkflowState.value != com.example.model.SosWorkflowState.IDLE && _sosWorkflowState.value != com.example.model.SosWorkflowState.COMPLETED) {
-                return@launch
+        if (emergencyService.isEmergencyActive()) {
+            if (!isReNotificationInProgress.compareAndSet(false, true)) {
+                return
             }
-            if (emergencyService.isEmergencyActive()) {
-                 emergencyService.activeEmergency.value?.let { model ->
-                     emergencyService.notifyEmergencyContacts(model, isUpdate = true)
-                 }
-                 _uiEvents.emit(UiEvent.ShowToast("ALERT TRANSMITTED: Contacts Notified Again!"))
-                 onEmergencyStarted?.invoke()
-                 return@launch
-            }
-
-            val effectiveLat = locationService.currentLocation.value.latitude
-            val effectiveLng = locationService.currentLocation.value.longitude
-
-            // If interactive foreground UI and confirmation is configured for this Trusted Place, prompt user first
-            if (_isUiInForeground.value && shouldShowConfirmationDialog(effectiveLat, effectiveLng)) {
-                if (_showSosConfirmationDialog.value) return@launch // Prevent multiple dialogs
-                pendingSosConfirmationAction = {
-                    executeManualSos(onEmergencyStarted)
+            viewModelScope.launch {
+                try {
+                    emergencyService.activeEmergency.value?.let { model ->
+                        emergencyService.notifyEmergencyContacts(model, isUpdate = true)
+                    }
+                    _uiEvents.emit(UiEvent.ShowToast("ALERT TRANSMITTED: Contacts Notified Again!"))
+                    onEmergencyStarted?.invoke()
+                } finally {
+                    isReNotificationInProgress.set(false)
                 }
-                _showSosConfirmationDialog.value = true
-                return@launch
             }
+            return
+        }
 
-            executeManualSos(onEmergencyStarted)
+        if (!isManualSosAdmissionClaimed.compareAndSet(false, true)) {
+            return
+        }
+
+        viewModelScope.launch {
+            try {
+                if (_sosWorkflowState.value != com.example.model.SosWorkflowState.IDLE && _sosWorkflowState.value != com.example.model.SosWorkflowState.COMPLETED) {
+                    isManualSosAdmissionClaimed.set(false)
+                    return@launch
+                }
+
+                val effectiveLat = locationService.currentLocation.value.latitude
+                val effectiveLng = locationService.currentLocation.value.longitude
+
+                // If interactive foreground UI and confirmation is configured for this Trusted Place, prompt user first
+                if (_isUiInForeground.value && shouldShowConfirmationDialog(effectiveLat, effectiveLng)) {
+                    if (_showSosConfirmationDialog.value) {
+                        isManualSosAdmissionClaimed.set(false)
+                        return@launch
+                    }
+                    pendingSosConfirmationAction = {
+                        executeManualSos(onEmergencyStarted)
+                    }
+                    _showSosConfirmationDialog.value = true
+                    return@launch
+                }
+
+                executeManualSos(onEmergencyStarted)
+            } catch (e: Exception) {
+                isManualSosAdmissionClaimed.set(false)
+                _sosWorkflowState.value = com.example.model.SosWorkflowState.IDLE
+                Log.e("GuardianViewModel", "Failed to admit manual SOS: ${e.message}", e)
+            }
         }
     }
 
     private fun executeManualSos(onEmergencyStarted: (() -> Unit)? = null) {
         viewModelScope.launch {
-            _sosWorkflowState.value = com.example.model.SosWorkflowState.IDLE
-            val model = initiateEmergencySequence(
-                triggerSource = "MANUAL",
-                deviceId = "MOBILE-APP-SOS"
-            )
-            if (model != null) {
-                onEmergencyStarted?.invoke()
+            try {
+                _sosWorkflowState.value = com.example.model.SosWorkflowState.OBTAINING_LOCATION
+                val model = initiateEmergencySequence(
+                    triggerSource = "MANUAL",
+                    deviceId = "MOBILE-APP-SOS"
+                )
+                if (model != null) {
+                    _sosWorkflowState.value = com.example.model.SosWorkflowState.COMPLETED
+                    onEmergencyStarted?.invoke()
+                    _sosWorkflowState.value = com.example.model.SosWorkflowState.IDLE
+                } else {
+                    _sosWorkflowState.value = com.example.model.SosWorkflowState.IDLE
+                    isManualSosAdmissionClaimed.set(false)
+                }
+            } catch (e: Exception) {
+                _sosWorkflowState.value = com.example.model.SosWorkflowState.IDLE
+                isManualSosAdmissionClaimed.set(false)
+                Log.e("GuardianViewModel", "Error in executeManualSos: ${e.message}", e)
             }
         }
     }
@@ -1372,6 +1410,8 @@ fun startVoiceRecognition(context: Context) {
                 // Automatically close the session when marked safe
                 delay(3000)
                 _emergencySession.value = EmergencySession() // reset session
+                isManualSosAdmissionClaimed.set(false)
+                _sosWorkflowState.value = com.example.model.SosWorkflowState.IDLE
             }
         }
     }
@@ -1390,6 +1430,8 @@ fun startVoiceRecognition(context: Context) {
                 
                 _emergencySession.value = EmergencySession() // Reset legacy state
                 _showCancelPinDialog.value = false
+                isManualSosAdmissionClaimed.set(false)
+                _sosWorkflowState.value = com.example.model.SosWorkflowState.IDLE
                 _uiEvents.emit(UiEvent.ShowToast("SOS Session Cancelled successfully with PIN."))
                 _uiEvents.emit(UiEvent.NavigateToHome)
             } else {
@@ -1425,6 +1467,8 @@ fun startVoiceRecognition(context: Context) {
 
                     _emergencySession.value = EmergencySession()
                     _showCancelPinDialog.value = false
+                    isManualSosAdmissionClaimed.set(false)
+                    _sosWorkflowState.value = com.example.model.SosWorkflowState.IDLE
                     _uiEvents.emit(UiEvent.ShowToast("Physical SOS cancelled successfully."))
                     _uiEvents.emit(UiEvent.NavigateToHome)
                     callback?.invoke(true)
@@ -1785,6 +1829,14 @@ fun startVoiceRecognition(context: Context) {
                         aiConfidence = model.aiConfidenceScore,
                         isMarkedSafe = model.status == "MARKED_SAFE" || model.status == "RESOLVED" || model.status == "CANCELLED"
                     )
+                }
+            }
+        }
+
+        viewModelScope.launch {
+            emergencyService.activeEmergency.collect { emergency ->
+                if (emergency == null) {
+                    isManualSosAdmissionClaimed.set(false)
                 }
             }
         }

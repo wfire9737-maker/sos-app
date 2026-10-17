@@ -54,6 +54,7 @@ fun SecurityScreen(
     // Dialog control
     var showEmergencyPinDialog by remember { mutableStateOf(false) }
     var showDeleteAccountDialog by remember { mutableStateOf(false) }
+    var showLogoutDialog by remember { mutableStateOf(false) }
     var deleteConfirmText by remember { mutableStateOf("") }
 
     // Temporary values for dialogs
@@ -328,13 +329,11 @@ fun SecurityScreen(
                         .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.08f), RoundedCornerShape(16.dp))
                 ) {
                     Column {
-                        var isLoggingOut by remember { mutableStateOf(false) }
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable(enabled = !isLoggingOut) { 
-                                    isLoggingOut = true
-                                    viewModel.logout() 
+                                .clickable { 
+                                    showLogoutDialog = true
                                 }
                                 .padding(16.dp)
                                 .testTag("security_logout_row"),
@@ -525,6 +524,37 @@ fun SecurityScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showDeleteAccountDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (showLogoutDialog) {
+        var isLoggingOut by remember { mutableStateOf(false) }
+        AlertDialog(
+            onDismissRequest = { if (!isLoggingOut) showLogoutDialog = false },
+            title = { Text("Log Out") },
+            text = { Text("Are you sure you want to log out? Your SOS wearable will remain active but won't sync until you log back in.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (isLoggingOut) return@Button
+                        isLoggingOut = true
+                        viewModel.logout()
+                        showLogoutDialog = false
+                    },
+                    enabled = !isLoggingOut,
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Log Out")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { if (!isLoggingOut) showLogoutDialog = false },
+                    enabled = !isLoggingOut
+                ) {
                     Text("Cancel")
                 }
             }
