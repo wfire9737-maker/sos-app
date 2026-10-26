@@ -64,8 +64,7 @@ class NearbyGattClient(private val context: Context) {
                         gatt.setCharacteristicNotification(payloadChar, true)
                         val payloadConfigDesc = payloadChar.getDescriptor(java.util.UUID.fromString("00002902-0000-1000-8000-00805f9b34fb"))
                         if (payloadConfigDesc != null) {
-                            payloadConfigDesc.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-                            gatt.writeDescriptor(payloadConfigDesc)
+                            writeDescriptorValue(gatt, payloadConfigDesc, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
                             return // Chain continues in onDescriptorWrite
                         }
                     }
@@ -75,8 +74,7 @@ class NearbyGattClient(private val context: Context) {
                         gatt.setCharacteristicNotification(statusChar, true)
                         val configDesc = statusChar.getDescriptor(java.util.UUID.fromString("00002902-0000-1000-8000-00805f9b34fb"))
                         if (configDesc != null) {
-                            configDesc.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-                            gatt.writeDescriptor(configDesc)
+                            writeDescriptorValue(gatt, configDesc, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
                         } else {
                             sendConnectionRequest(gatt, requestChar)
                         }
@@ -97,8 +95,7 @@ class NearbyGattClient(private val context: Context) {
                             gatt.setCharacteristicNotification(statusChar, true)
                             val configDesc = statusChar.getDescriptor(java.util.UUID.fromString("00002902-0000-1000-8000-00805f9b34fb"))
                             if (configDesc != null) {
-                                configDesc.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-                                gatt.writeDescriptor(configDesc)
+                                writeDescriptorValue(gatt, configDesc, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
                             } else {
                                 sendConnectionRequest(gatt, requestChar)
                             }
@@ -166,6 +163,35 @@ class NearbyGattClient(private val context: Context) {
         }
     }
 
+    private fun writeDescriptorValue(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, value: ByteArray): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            gatt.writeDescriptor(descriptor, value) == BluetoothGatt.GATT_SUCCESS
+        } else {
+            @Suppress("DEPRECATION")
+            descriptor.value = value
+            @Suppress("DEPRECATION")
+            gatt.writeDescriptor(descriptor)
+        }
+    }
+
+    private fun writeCharacteristicValue(
+        gatt: BluetoothGatt,
+        characteristic: BluetoothGattCharacteristic,
+        value: ByteArray,
+        writeType: Int = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+    ): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            gatt.writeCharacteristic(characteristic, value, writeType) == BluetoothGatt.GATT_SUCCESS
+        } else {
+            @Suppress("DEPRECATION")
+            characteristic.value = value
+            @Suppress("DEPRECATION")
+            characteristic.writeType = writeType
+            @Suppress("DEPRECATION")
+            gatt.writeCharacteristic(characteristic)
+        }
+    }
+
     private fun sendConnectionRequest(gatt: BluetoothGatt, requestChar: BluetoothGattCharacteristic) {
         try {
             val prefs = context.getSharedPreferences("smart_sos_settings", Context.MODE_PRIVATE)
@@ -173,15 +199,14 @@ class NearbyGattClient(private val context: Context) {
             val nameBytes = (if (myName.isNullOrBlank()) NearbyBleProtocol.DEFAULT_DEVICE_NAME else myName)
                 .toByteArray(Charsets.UTF_8).let { if (it.size > 24) it.copyOfRange(0, 24) else it }
             val payload = byteArrayOf(1) + nameBytes
-            requestChar.value = payload
-            gatt.writeCharacteristic(requestChar)
+            writeCharacteristicValue(gatt, requestChar, payload)
             Log.d("NearbyGattClient", "NEARBY_BLE: Sent connection request with name payload.")
         } catch (_: SecurityException) {}
     }
 
     fun connectToDevice(macAddress: String) {
         if (bluetoothGatt != null) {
-            disconnect()
+            closeGatt()
         }
         isConnected = false
         connectedDeviceAddress = null
@@ -217,8 +242,7 @@ class NearbyGattClient(private val context: Context) {
             val service = gatt.getService(NearbyBleProtocol.NEARBY_SERVICE_UUID)
             val payloadChar = service?.getCharacteristic(NearbyBleProtocol.NEARBY_PAYLOAD_CHAR_UUID)
             if (payloadChar != null) {
-                payloadChar.value = payloadBytes
-                val writeSuccess = gatt.writeCharacteristic(payloadChar)
+                val writeSuccess = writeCharacteristicValue(gatt, payloadChar, payloadBytes)
                 Log.d("NearbyGattClient", "NEARBY_BLE: writeCharacteristic invoked for ${gatt.device.address}, success=$writeSuccess")
                 return writeSuccess
             } else {

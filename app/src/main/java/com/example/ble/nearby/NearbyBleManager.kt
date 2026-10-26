@@ -64,7 +64,7 @@ class NearbyBleManager @Inject constructor(
             }
         }
         gattServer.onConnectionRequested = { macAddress, senderName ->
-            updateDeviceConnectionState(macAddress, NearbyConnectionState.DISCONNECTED, senderName)
+            updateDeviceConnectionState(macAddress, NearbyConnectionState.REQUESTING, senderName)
         }
         gattServer.onActiveConnectionsChanged = { count ->
             if (count == 0 && isSessionActive && !isBurstActive && !isConnectionPending && !hasActiveConnection()) {
@@ -74,6 +74,12 @@ class NearbyBleManager @Inject constructor(
             }
         }
         gattServer.onIncomingPayloadReceived = { macAddress, payload ->
+            handler.removeCallbacks(connectionTimeoutRunnable)
+            isConnectionPending = false
+            pendingConnectionMac = null
+            updateDeviceConnectionState(macAddress, NearbyConnectionState.CONNECTED)
+            advertiser.stopAdvertising()
+            isBurstActive = false
             _incomingPayloads.tryEmit(macAddress to payload)
             Log.d(TAG, "Received payload from (Server role): $macAddress")
         }
@@ -99,6 +105,12 @@ class NearbyBleManager @Inject constructor(
             }
         }
         gattClient.onIncomingPayloadReceived = { macAddress, payload ->
+            handler.removeCallbacks(connectionTimeoutRunnable)
+            isConnectionPending = false
+            pendingConnectionMac = null
+            updateDeviceConnectionState(macAddress, NearbyConnectionState.CONNECTED)
+            advertiser.stopAdvertising()
+            isBurstActive = false
             _incomingPayloads.tryEmit(macAddress to payload)
             Log.d(TAG, "Received payload from (Client role): $macAddress")
         }
@@ -159,16 +171,20 @@ class NearbyBleManager @Inject constructor(
     }
     
     fun acceptIncomingConnection(macAddress: String) {
-        updateDeviceConnectionState(macAddress, NearbyConnectionState.CONNECTED)
-        gattServer.acceptConnection(macAddress)
+        val device = findDevice(macAddress)
+        val targetMac = device?.macAddress ?: macAddress
+        updateDeviceConnectionState(targetMac, NearbyConnectionState.CONNECTED)
+        gattServer.acceptConnection(targetMac)
         // Stop presence advertising once connection is accepted to avoid BLE radio interference
         advertiser.stopAdvertising()
         isBurstActive = false
     }
     
     fun declineIncomingConnection(macAddress: String) {
-        updateDeviceConnectionState(macAddress, NearbyConnectionState.DISCONNECTED)
-        gattServer.declineConnection(macAddress)
+        val device = findDevice(macAddress)
+        val targetMac = device?.macAddress ?: macAddress
+        updateDeviceConnectionState(targetMac, NearbyConnectionState.DISCONNECTED)
+        gattServer.declineConnection(targetMac)
     }
 
     fun sendNearbyPayload(target: String, payload: String): Boolean {
