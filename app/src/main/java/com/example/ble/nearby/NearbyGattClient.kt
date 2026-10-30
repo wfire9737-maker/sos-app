@@ -258,9 +258,10 @@ class NearbyGattClient(private val context: Context) {
         try {
             bluetoothGatt?.disconnect()
         } catch (_: SecurityException) {}
+        closeGatt()
     }
     
-    private fun closeGatt() {
+    fun closeGatt() {
         try {
             isConnected = false
             connectedDeviceAddress = null

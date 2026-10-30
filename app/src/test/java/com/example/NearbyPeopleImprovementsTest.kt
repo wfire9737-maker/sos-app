@@ -1,5 +1,7 @@
 package com.example
 
+import android.content.Context
+import androidx.test.core.app.ApplicationProvider
 import com.example.ble.nearby.NearbyConnectionState
 import com.example.ble.nearby.NearbyDevice
 import com.example.ble.nearby.NearbyDeviceScanner
@@ -7,9 +9,15 @@ import com.example.model.MessageDeliveryState
 import com.example.model.NearbyChatMessage
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [36])
 class NearbyPeopleImprovementsTest {
 
     @Test
@@ -202,5 +210,79 @@ class NearbyPeopleImprovementsTest {
         assertTrue("Connected device must remain", devices.containsKey("active_id"))
         assertTrue("Requesting device must remain", devices.containsKey("requesting_id"))
         assertFalse("Stale disconnected device should be pruned", devices.containsKey("stale_id"))
+    }
+
+    @Test
+    fun testSingleActiveConnectedPeerRuleEnforcedInScanner() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val scanner = NearbyDeviceScanner(context)
+
+        // Device A connects
+        scanner.updateDeviceConnectionState("11:11:11:11:11:11", NearbyConnectionState.CONNECTED, "Peer A")
+        assertEquals(NearbyConnectionState.CONNECTED, scanner.nearbyDevices.value["11:11:11:11:11:11"]?.connectionState)
+        assertEquals("11:11:11:11:11:11", scanner.activeConnectedPeerId)
+
+        // Device B connects
+        scanner.updateDeviceConnectionState("22:22:22:22:22:22", NearbyConnectionState.CONNECTED, "Peer B")
+        assertEquals("22:22:22:22:22:22", scanner.activeConnectedPeerId)
+
+        // Device A must now be DISCONNECTED, Device B must be CONNECTED
+        assertEquals(NearbyConnectionState.DISCONNECTED, scanner.nearbyDevices.value["11:11:11:11:11:11"]?.connectionState)
+        assertEquals(NearbyConnectionState.CONNECTED, scanner.nearbyDevices.value["22:22:22:22:22:22"]?.connectionState)
+
+        // Disconnecting Device B clears activeConnectedPeerId
+        scanner.updateDeviceConnectionState("22:22:22:22:22:22", NearbyConnectionState.DISCONNECTED)
+        assertNull(scanner.activeConnectedPeerId)
+        assertEquals(NearbyConnectionState.DISCONNECTED, scanner.nearbyDevices.value["22:22:22:22:22:22"]?.connectionState)
+    }
+
+    @Test
+    fun testEnforceSingleConnectedPeerPrunesStaleConnections() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val scanner = NearbyDeviceScanner(context)
+
+        scanner.updateDeviceConnectionState("11:11:11:11:11:11", NearbyConnectionState.CONNECTED, "Peer A")
+        assertEquals(NearbyConnectionState.CONNECTED, scanner.nearbyDevices.value["11:11:11:11:11:11"]?.connectionState)
+
+        // Enforce null (e.g., after disconnection)
+        scanner.enforceSingleConnectedPeer(null)
+        assertEquals(NearbyConnectionState.DISCONNECTED, scanner.nearbyDevices.value["11:11:11:11:11:11"]?.connectionState)
+        assertNull(scanner.activeConnectedPeerId)
+    }
+
+    @Test
+    fun testReconnectingToPreviousDeviceRetainsChatHistoryWithoutDuplicates() {
+        val myId = "my_phone_id"
+        val peerA = "AA:BB:CC:DD:EE:01"
+
+        val chatMessages = mutableListOf<NearbyChatMessage>()
+
+        fun addMessage(msg: NearbyChatMessage) {
+            if (chatMessages.none { it.messageId == msg.messageId }) {
+                chatMessages.add(msg)
+            }
+        }
+
+        // Conversation during session 1
+        val m1 = NearbyChatMessage("m1", myId, peerA, "Message 1", 1000L, true, MessageDeliveryState.SENT, peerA)
+        val m2 = NearbyChatMessage("m2", peerA, myId, "Reply 1", 2000L, false, MessageDeliveryState.DELIVERED, peerA)
+        addMessage(m1)
+        addMessage(m2)
+
+        assertEquals(2, chatMessages.size)
+
+        // Simulate disconnection then reconnection: re-receiving same messages or reconnecting does not duplicate
+        addMessage(m1)
+        addMessage(m2)
+        assertEquals(2, chatMessages.size)
+
+        // New message after reconnection
+        val m3 = NearbyChatMessage("m3", myId, peerA, "Message 2 after reconnect", 3000L, true, MessageDeliveryState.SENT, peerA)
+        addMessage(m3)
+
+        assertEquals(3, chatMessages.size)
+        assertEquals("Message 1", chatMessages[0].text)
+        assertEquals("Reply 1", chatMessages[1].text)
+        assertEquals("Message 2 after reconnect", chatMessages[2].text)
     }
 }

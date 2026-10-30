@@ -36,6 +36,17 @@ class NearbyBleManager @Inject constructor(
     private var isConnectionPending = false
     private var pendingConnectionMac: String? = null
 
+    private var activeConnectedPeerMac: String? = null
+    val activeConnectedPeer: String?
+        get() = activeConnectedPeerMac
+
+    fun getCurrentActivePeer(): String? {
+        return activeConnectedPeerMac
+            ?: gattClient.connectedDeviceAddress
+            ?: gattServer.connectedDeviceAddress
+            ?: scanner.nearbyDevices.value.values.firstOrNull { it.connectionState == NearbyConnectionState.CONNECTED }?.let { it.macAddress ?: it.id }
+    }
+
     private val connectionTimeoutRunnable = Runnable {
         Log.w(TAG, "Connection attempt timed out for $pendingConnectionMac")
         val targetMac = pendingConnectionMac
@@ -44,8 +55,13 @@ class NearbyBleManager @Inject constructor(
         
         if (targetMac != null) {
             gattClient.disconnect()
+            gattClient.closeGatt()
             updateDeviceConnectionState(targetMac, NearbyConnectionState.DISCONNECTED)
+            if (activeConnectedPeerMac.equals(targetMac, ignoreCase = true)) {
+                activeConnectedPeerMac = null
+            }
         }
+        scanner.enforceSingleConnectedPeer(activeConnectedPeerMac)
         
         // Stop temporary connection advertising if not in burst and no active connections
         if (isSessionActive && !isBurstActive && !hasActiveConnection()) {
@@ -57,58 +73,90 @@ class NearbyBleManager @Inject constructor(
     
     init {
         gattServer.onRemoteDeviceDisconnected = { macAddress ->
+            Log.d(TAG, "GattServer remote device disconnected: $macAddress")
+            if (activeConnectedPeerMac.equals(macAddress, ignoreCase = true)) {
+                activeConnectedPeerMac = null
+            }
             updateDeviceConnectionState(macAddress, NearbyConnectionState.DISCONNECTED)
+            scanner.enforceSingleConnectedPeer(activeConnectedPeerMac)
             if (isSessionActive && !hasActiveConnection() && !isConnectionPending) {
                 handler.removeCallbacks(advertiseRunnable)
                 handler.post(advertiseRunnable)
             }
         }
         gattServer.onConnectionRequested = { macAddress, senderName ->
-            updateDeviceConnectionState(macAddress, NearbyConnectionState.REQUESTING, senderName)
-        }
-        gattServer.onActiveConnectionsChanged = { count ->
-            if (count == 0 && isSessionActive && !isBurstActive && !isConnectionPending && !hasActiveConnection()) {
-                advertiser.stopAdvertising()
-                handler.removeCallbacks(advertiseRunnable)
-                handler.post(advertiseRunnable)
+            val currentActive = getCurrentActivePeer()
+            if (currentActive != null && !currentActive.equals(macAddress, ignoreCase = true) && hasActiveConnection()) {
+                Log.w(TAG, "Incoming connection request from $macAddress rejected because peer $currentActive is currently connected.")
+                gattServer.declineConnection(macAddress)
+                updateDeviceConnectionState(macAddress, NearbyConnectionState.DISCONNECTED, senderName)
+            } else {
+                updateDeviceConnectionState(macAddress, NearbyConnectionState.REQUESTING, senderName)
             }
         }
-        gattServer.onIncomingPayloadReceived = { macAddress, payload ->
-            handler.removeCallbacks(connectionTimeoutRunnable)
-            isConnectionPending = false
-            pendingConnectionMac = null
-            updateDeviceConnectionState(macAddress, NearbyConnectionState.CONNECTED)
-            advertiser.stopAdvertising()
-            isBurstActive = false
-            _incomingPayloads.tryEmit(macAddress to payload)
-            Log.d(TAG, "Received payload from (Server role): $macAddress")
-        }
-        gattClient.onConnectionStateChanged = { macAddress, newState ->
-            updateDeviceConnectionState(macAddress, newState)
-            if (newState == NearbyConnectionState.CONNECTED) {
-                Log.d(TAG, "Connection established successfully with $macAddress")
-                handler.removeCallbacks(connectionTimeoutRunnable)
-                isConnectionPending = false
-                pendingConnectionMac = null
-                // Stop presence advertising while preserving active GATT connection
-                advertiser.stopAdvertising()
-                isBurstActive = false
-            } else if (newState == NearbyConnectionState.DISCONNECTED) {
-                handler.removeCallbacks(connectionTimeoutRunnable)
-                isConnectionPending = false
-                pendingConnectionMac = null
-                if (isSessionActive && !hasActiveConnection()) {
+        gattServer.onActiveConnectionsChanged = { count ->
+            if (count == 0) {
+                if (activeConnectedPeerMac != null && !gattClient.isConnected) {
+                    activeConnectedPeerMac = null
+                    scanner.enforceSingleConnectedPeer(null)
+                }
+                if (isSessionActive && !isBurstActive && !isConnectionPending && !hasActiveConnection()) {
                     advertiser.stopAdvertising()
                     handler.removeCallbacks(advertiseRunnable)
                     handler.post(advertiseRunnable)
                 }
             }
         }
+        gattServer.onIncomingPayloadReceived = { macAddress, payload ->
+            handler.removeCallbacks(connectionTimeoutRunnable)
+            isConnectionPending = false
+            pendingConnectionMac = null
+            activeConnectedPeerMac = macAddress
+            updateDeviceConnectionState(macAddress, NearbyConnectionState.CONNECTED)
+            scanner.enforceSingleConnectedPeer(macAddress)
+            advertiser.stopAdvertising()
+            isBurstActive = false
+            _incomingPayloads.tryEmit(macAddress to payload)
+            Log.d(TAG, "Received payload from (Server role): $macAddress")
+        }
+        gattClient.onConnectionStateChanged = { macAddress, newState ->
+            if (newState == NearbyConnectionState.CONNECTED) {
+                Log.d(TAG, "Connection established successfully with $macAddress")
+                handler.removeCallbacks(connectionTimeoutRunnable)
+                isConnectionPending = false
+                pendingConnectionMac = null
+                activeConnectedPeerMac = macAddress
+                updateDeviceConnectionState(macAddress, NearbyConnectionState.CONNECTED)
+                scanner.enforceSingleConnectedPeer(macAddress)
+                // Stop presence advertising while preserving active GATT connection
+                advertiser.stopAdvertising()
+                isBurstActive = false
+            } else if (newState == NearbyConnectionState.DISCONNECTED) {
+                Log.d(TAG, "Connection disconnected with $macAddress")
+                handler.removeCallbacks(connectionTimeoutRunnable)
+                isConnectionPending = false
+                pendingConnectionMac = null
+                if (activeConnectedPeerMac.equals(macAddress, ignoreCase = true)) {
+                    activeConnectedPeerMac = null
+                }
+                updateDeviceConnectionState(macAddress, NearbyConnectionState.DISCONNECTED)
+                scanner.enforceSingleConnectedPeer(activeConnectedPeerMac)
+                if (isSessionActive && !hasActiveConnection()) {
+                    advertiser.stopAdvertising()
+                    handler.removeCallbacks(advertiseRunnable)
+                    handler.post(advertiseRunnable)
+                }
+            } else {
+                updateDeviceConnectionState(macAddress, newState)
+            }
+        }
         gattClient.onIncomingPayloadReceived = { macAddress, payload ->
             handler.removeCallbacks(connectionTimeoutRunnable)
             isConnectionPending = false
             pendingConnectionMac = null
+            activeConnectedPeerMac = macAddress
             updateDeviceConnectionState(macAddress, NearbyConnectionState.CONNECTED)
+            scanner.enforceSingleConnectedPeer(macAddress)
             advertiser.stopAdvertising()
             isBurstActive = false
             _incomingPayloads.tryEmit(macAddress to payload)
@@ -129,12 +177,29 @@ class NearbyBleManager @Inject constructor(
             ?: nearbyDevices.value.values.firstOrNull { it.id == identifier || it.macAddress == identifier }
     }
     
+    private fun disconnectInternal(macAddress: String) {
+        Log.d(TAG, "Tearing down connection for $macAddress")
+        handler.removeCallbacks(connectionTimeoutRunnable)
+        if (pendingConnectionMac.equals(macAddress, ignoreCase = true)) {
+            isConnectionPending = false
+            pendingConnectionMac = null
+        }
+        gattClient.disconnect()
+        gattClient.closeGatt()
+        gattServer.disconnectDevice(macAddress)
+        updateDeviceConnectionState(macAddress, NearbyConnectionState.DISCONNECTED)
+        if (activeConnectedPeerMac.equals(macAddress, ignoreCase = true)) {
+            activeConnectedPeerMac = null
+        }
+        scanner.enforceSingleConnectedPeer(activeConnectedPeerMac)
+    }
+
     fun requestConnection(target: String) {
         val device = findDevice(target)
         val targetMac = device?.macAddress ?: target
 
         // Prevent duplicate connection if already connected to this peer
-        if (device?.connectionState == NearbyConnectionState.CONNECTED ||
+        if ((device?.connectionState == NearbyConnectionState.CONNECTED && activeConnectedPeerMac.equals(targetMac, ignoreCase = true)) ||
             (gattClient.isConnected && gattClient.connectedDeviceAddress.equals(targetMac, ignoreCase = true))) {
             Log.d(TAG, "Device $targetMac is already connected. Skipping duplicate connection.")
             return
@@ -144,6 +209,24 @@ class NearbyBleManager @Inject constructor(
         if (isConnectionPending && pendingConnectionMac.equals(targetMac, ignoreCase = true)) {
             Log.d(TAG, "Connection already pending for $targetMac. Skipping duplicate connection.")
             return
+        }
+
+        // Single Active Peer Rule: If connected to another peer, disconnect it completely first
+        val currentActive = getCurrentActivePeer()
+        if (currentActive != null && !currentActive.equals(targetMac, ignoreCase = true)) {
+            Log.d(TAG, "Single active peer rule: Disconnecting existing peer $currentActive before connecting to $targetMac")
+            disconnectInternal(currentActive)
+        }
+
+        // If another pending connection exists, clean it up
+        if (isConnectionPending && pendingConnectionMac != null) {
+            val oldPending = pendingConnectionMac!!
+            handler.removeCallbacks(connectionTimeoutRunnable)
+            gattClient.disconnect()
+            gattClient.closeGatt()
+            updateDeviceConnectionState(oldPending, NearbyConnectionState.DISCONNECTED)
+            isConnectionPending = false
+            pendingConnectionMac = null
         }
 
         if (device != null && System.currentTimeMillis() - device.lastSeen > STALE_DEVICE_THRESHOLD_MS) {
@@ -160,6 +243,7 @@ class NearbyBleManager @Inject constructor(
             advertiser.startAdvertising()
         }
 
+        // Mark targetMac as REQUESTING (NOT CONNECTED - only mark CONNECTED once GATT callback confirms connection)
         updateDeviceConnectionState(targetMac, NearbyConnectionState.REQUESTING)
 
         handler.removeCallbacks(connectionTimeoutRunnable)
@@ -171,12 +255,7 @@ class NearbyBleManager @Inject constructor(
     fun disconnect(target: String) {
         val device = findDevice(target)
         val targetMac = device?.macAddress ?: target
-        handler.removeCallbacks(connectionTimeoutRunnable)
-        isConnectionPending = false
-        pendingConnectionMac = null
-        gattClient.disconnect()
-        gattServer.disconnectDevice(targetMac)
-        updateDeviceConnectionState(targetMac, NearbyConnectionState.DISCONNECTED)
+        disconnectInternal(targetMac)
         if (isSessionActive && !isBurstActive && !hasActiveConnection()) {
             advertiser.stopAdvertising()
             handler.removeCallbacks(advertiseRunnable)
@@ -187,11 +266,22 @@ class NearbyBleManager @Inject constructor(
     fun acceptIncomingConnection(macAddress: String) {
         val device = findDevice(macAddress)
         val targetMac = device?.macAddress ?: macAddress
-        if (device?.connectionState == NearbyConnectionState.CONNECTED) {
+
+        // Single Active Peer Rule: If connected to another peer, disconnect it completely first
+        val currentActive = getCurrentActivePeer()
+        if (currentActive != null && !currentActive.equals(targetMac, ignoreCase = true)) {
+            Log.d(TAG, "Single active peer rule: Disconnecting existing peer $currentActive before accepting $targetMac")
+            disconnectInternal(currentActive)
+        }
+
+        if (device?.connectionState == NearbyConnectionState.CONNECTED && activeConnectedPeerMac.equals(targetMac, ignoreCase = true)) {
             Log.d(TAG, "Incoming connection for $targetMac already connected. Skipping duplicate accept.")
             return
         }
+
+        activeConnectedPeerMac = targetMac
         updateDeviceConnectionState(targetMac, NearbyConnectionState.CONNECTED)
+        scanner.enforceSingleConnectedPeer(targetMac)
         gattServer.acceptConnection(targetMac)
         // Stop presence advertising once connection is accepted to avoid BLE radio interference
         advertiser.stopAdvertising()
@@ -286,6 +376,8 @@ class NearbyBleManager @Inject constructor(
         isBurstActive = false
         isConnectionPending = false
         pendingConnectionMac = null
+        activeConnectedPeerMac = null
+        scanner.enforceSingleConnectedPeer(null)
         handler.removeCallbacks(connectionTimeoutRunnable)
         handler.removeCallbacks(advertiseRunnable)
         advertiser.stopAdvertising()

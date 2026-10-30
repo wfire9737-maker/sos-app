@@ -329,12 +329,19 @@ class NearbyGattServer(private val context: Context) {
         }
     }
 
+    val connectedDeviceAddress: String?
+        get() = connectedDevice?.address
+
     fun disconnectDevice(macAddress: String) {
         val device = connectedDevice
         if (device != null && (macAddress.isBlank() || device.address.equals(macAddress, ignoreCase = true))) {
             try {
                 gattServer?.cancelConnection(device)
             } catch (_: SecurityException) {}
+            subscribedPayloadDevices.remove(device.address)
+            connectedDevice = null
+            if (activeConnections > 0) activeConnections--
+            onActiveConnectionsChanged?.invoke(activeConnections)
         }
     }
 

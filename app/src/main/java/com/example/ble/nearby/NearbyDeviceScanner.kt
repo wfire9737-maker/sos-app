@@ -46,6 +46,8 @@ class NearbyDeviceScanner(private val context: Context) {
     // Internal cache of discovered devices keyed by application-level stableDeviceId
     private val deviceCache = mutableMapOf<String, NearbyDevice>()
     private val deviceMapLock = Any()
+    var activeConnectedPeerId: String? = null
+        private set
 
     // UI-exposed map of discovered devices (Key: stableDeviceId, Value: NearbyDevice)
     private val _nearbyDevices = MutableStateFlow<Map<String, NearbyDevice>>(emptyMap())
@@ -104,7 +106,15 @@ class NearbyDeviceScanner(private val context: Context) {
                         }
 
                         val connectionState = when (existing?.connectionState) {
-                            NearbyConnectionState.CONNECTED -> NearbyConnectionState.CONNECTED
+                            NearbyConnectionState.CONNECTED -> {
+                                val currentActive = activeConnectedPeerId
+                                if (currentActive != null &&
+                                    (stableDeviceId.equals(currentActive, ignoreCase = true) || address.equals(currentActive, ignoreCase = true))) {
+                                    NearbyConnectionState.CONNECTED
+                                } else {
+                                    NearbyConnectionState.DISCONNECTED
+                                }
+                            }
                             NearbyConnectionState.REQUESTING -> NearbyConnectionState.REQUESTING
                             else -> NearbyConnectionState.DISCONNECTED
                         }
@@ -307,6 +317,26 @@ class NearbyDeviceScanner(private val context: Context) {
         }
     }
 
+    fun enforceSingleConnectedPeer(activePeerId: String?) {
+        synchronized(deviceMapLock) {
+            activeConnectedPeerId = activePeerId
+            var changed = false
+            for (entry in deviceCache.entries) {
+                val dev = entry.value
+                val isCurrentActive = activePeerId != null &&
+                        (dev.id.equals(activePeerId, ignoreCase = true) || dev.macAddress.equals(activePeerId, ignoreCase = true))
+                if (!isCurrentActive && dev.connectionState == NearbyConnectionState.CONNECTED) {
+                    entry.setValue(dev.copy(connectionState = NearbyConnectionState.DISCONNECTED))
+                    changed = true
+                }
+            }
+            if (changed) {
+                hasPendingUiUpdate = false
+                _nearbyDevices.value = deviceCache.toMap()
+            }
+        }
+    }
+
     fun updateDeviceConnectionState(identifier: String, state: NearbyConnectionState, deviceName: String? = null) {
         synchronized(deviceMapLock) {
             // Find existing device by stableDeviceId OR BLE macAddress
@@ -314,6 +344,20 @@ class NearbyDeviceScanner(private val context: Context) {
             val resolvedKey = existingEntry?.id ?: identifier
             val resolvedMac = existingEntry?.macAddress ?: identifier
             val resolvedName = deviceName ?: existingEntry?.deviceName ?: NearbyBleProtocol.DEFAULT_DEVICE_NAME
+
+            if (state == NearbyConnectionState.CONNECTED) {
+                activeConnectedPeerId = resolvedKey
+                // Enforce single active peer: all other devices must be DISCONNECTED
+                for (entry in deviceCache.entries) {
+                    if (entry.key != resolvedKey && entry.value.connectionState == NearbyConnectionState.CONNECTED) {
+                        entry.setValue(entry.value.copy(connectionState = NearbyConnectionState.DISCONNECTED))
+                    }
+                }
+            } else if (state == NearbyConnectionState.DISCONNECTED) {
+                if (resolvedKey.equals(activeConnectedPeerId, ignoreCase = true) || resolvedMac.equals(activeConnectedPeerId, ignoreCase = true)) {
+                    activeConnectedPeerId = null
+                }
+            }
 
             val updatedDevice = existingEntry?.copy(
                 connectionState = state,
