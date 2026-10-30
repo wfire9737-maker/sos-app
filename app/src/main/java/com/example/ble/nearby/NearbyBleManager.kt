@@ -132,6 +132,20 @@ class NearbyBleManager @Inject constructor(
     fun requestConnection(target: String) {
         val device = findDevice(target)
         val targetMac = device?.macAddress ?: target
+
+        // Prevent duplicate connection if already connected to this peer
+        if (device?.connectionState == NearbyConnectionState.CONNECTED ||
+            (gattClient.isConnected && gattClient.connectedDeviceAddress.equals(targetMac, ignoreCase = true))) {
+            Log.d(TAG, "Device $targetMac is already connected. Skipping duplicate connection.")
+            return
+        }
+
+        // Prevent duplicate connection if already requesting this peer
+        if (isConnectionPending && pendingConnectionMac.equals(targetMac, ignoreCase = true)) {
+            Log.d(TAG, "Connection already pending for $targetMac. Skipping duplicate connection.")
+            return
+        }
+
         if (device != null && System.currentTimeMillis() - device.lastSeen > STALE_DEVICE_THRESHOLD_MS) {
             Log.w(TAG, "Device $target is stale (last seen > 60s ago), ignoring connection request.")
             updateDeviceConnectionState(targetMac, NearbyConnectionState.DISCONNECTED)
@@ -173,6 +187,10 @@ class NearbyBleManager @Inject constructor(
     fun acceptIncomingConnection(macAddress: String) {
         val device = findDevice(macAddress)
         val targetMac = device?.macAddress ?: macAddress
+        if (device?.connectionState == NearbyConnectionState.CONNECTED) {
+            Log.d(TAG, "Incoming connection for $targetMac already connected. Skipping duplicate accept.")
+            return
+        }
         updateDeviceConnectionState(targetMac, NearbyConnectionState.CONNECTED)
         gattServer.acceptConnection(targetMac)
         // Stop presence advertising once connection is accepted to avoid BLE radio interference
@@ -294,5 +312,37 @@ class NearbyBleManager @Inject constructor(
         if (!isSessionActive) {
             scanner.stopScanning()
         }
+    }
+
+    private var isManualRefreshing = false
+    private val refreshLock = Any()
+
+    fun manualRefresh(onComplete: () -> Unit = {}) {
+        synchronized(refreshLock) {
+            if (isManualRefreshing) {
+                Log.d(TAG, "Manual refresh already running, ignoring duplicate request.")
+                return
+            }
+            isManualRefreshing = true
+        }
+
+        Log.d(TAG, "Triggering fresh nearby BLE discovery...")
+        scanner.manualRefresh()
+
+        // If presence discovery session is active and not connected, perform an active burst
+        if (isSessionActive && !hasActiveConnection()) {
+            advertiser.startAdvertising()
+        }
+
+        handler.postDelayed({
+            synchronized(refreshLock) {
+                isManualRefreshing = false
+            }
+            if (isSessionActive && !hasActiveConnection() && !isBurstActive) {
+                advertiser.stopAdvertising()
+            }
+            Log.d(TAG, "Manual refresh finished.")
+            onComplete()
+        }, 1500L)
     }
 }

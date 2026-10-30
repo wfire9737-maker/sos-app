@@ -14,5 +14,6 @@ data class NearbyChatMessage(
     val text: String,
     val timestamp: Long,
     val isOutgoing: Boolean,
-    var deliveryState: MessageDeliveryState
+    var deliveryState: MessageDeliveryState,
+    val peerAddress: String = ""
 )

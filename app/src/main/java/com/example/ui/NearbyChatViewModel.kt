@@ -39,6 +39,15 @@ class NearbyChatViewModel @Inject constructor(
             )
     }
 
+    fun getMessagesForPeer(peerMac: String): StateFlow<List<NearbyChatMessage>> {
+        return repository.getMessagesForPeer(peerMac)
+            .stateIn(
+                viewModelScope,
+                SharingStarted.WhileSubscribed(5000),
+                emptyList()
+            )
+    }
+
     fun sendText(macAddress: String, text: String): Boolean {
         return repository.sendText(macAddress, text)
     }

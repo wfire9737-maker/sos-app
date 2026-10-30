@@ -9,9 +9,11 @@ import com.example.model.NearbyChatMessage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import java.util.UUID
 import javax.inject.Inject
@@ -71,7 +73,8 @@ class NearbyChatRepository @Inject constructor(
                             text = payload.payload.trim(),
                             timestamp = payload.timestamp,
                             isOutgoing = false,
-                            deliveryState = MessageDeliveryState.DELIVERED
+                            deliveryState = MessageDeliveryState.DELIVERED,
+                            peerAddress = macAddress
                         )
                         _messages.value = _messages.value + newMsg
                     }
@@ -147,7 +150,8 @@ class NearbyChatRepository @Inject constructor(
             text = trimmedText,
             timestamp = timestamp,
             isOutgoing = true,
-            deliveryState = MessageDeliveryState.SENDING
+            deliveryState = MessageDeliveryState.SENDING,
+            peerAddress = macAddress
         )
         
         synchronized(messageLock) {
@@ -171,6 +175,30 @@ class NearbyChatRepository @Inject constructor(
         return success
     }
     
+    fun getMessagesForPeer(peerIdentifier: String): Flow<List<NearbyChatMessage>> {
+        return _messages.map { allMessages ->
+            val resolvedDevice = nearbyBleManager.findDevice(peerIdentifier)
+            val peerMac = resolvedDevice?.macAddress ?: peerIdentifier
+            val peerId = resolvedDevice?.id ?: peerIdentifier
+            
+            allMessages.filter { msg ->
+                if (msg.peerAddress.isNotBlank()) {
+                    msg.peerAddress.equals(peerMac, ignoreCase = true) ||
+                    msg.peerAddress.equals(peerId, ignoreCase = true) ||
+                    msg.peerAddress.equals(peerIdentifier, ignoreCase = true)
+                } else if (msg.isOutgoing) {
+                    msg.receiverId.equals(peerMac, ignoreCase = true) ||
+                    msg.receiverId.equals(peerId, ignoreCase = true) ||
+                    msg.receiverId.equals(peerIdentifier, ignoreCase = true)
+                } else {
+                    msg.senderId.equals(peerMac, ignoreCase = true) ||
+                    msg.senderId.equals(peerId, ignoreCase = true) ||
+                    msg.senderId.equals(peerIdentifier, ignoreCase = true)
+                }
+            }
+        }
+    }
+
     fun clearMessages() {
         synchronized(messageLock) {
             _messages.value = emptyList()

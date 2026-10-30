@@ -26,6 +26,7 @@ class NearbyDeviceScanner(private val context: Context) {
         private const val TAG = "NearbyScanner"
         const val STALE_DEVICE_THRESHOLD_MS = 60_000L // 60-second stale retention window
         private const val PRUNE_INTERVAL_MS = 5_000L // 5-second periodic stale cleanup check
+        const val UI_REFRESH_THROTTLE_MS = 1_000L // Controlled refresh: at most once per second
     }
 
     private val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
@@ -37,6 +38,9 @@ class NearbyDeviceScanner(private val context: Context) {
     private var isHardwareScanning = false
     private var isDiscoverySessionActive = false
     private var stalePruningJob: Job? = null
+    private var uiRefreshJob: Job? = null
+    @Volatile
+    private var hasPendingUiUpdate = false
     private val scannerScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     // Internal cache of discovered devices keyed by application-level stableDeviceId
@@ -120,7 +124,13 @@ class NearbyDeviceScanner(private val context: Context) {
                         }
 
                         deviceCache[stableDeviceId] = updatedDevice
-                        _nearbyDevices.value = deviceCache.toMap()
+                        if (_nearbyDevices.value.isEmpty()) {
+                            // Publish immediately on the very first discovered device
+                            _nearbyDevices.value = deviceCache.toMap()
+                        } else {
+                            // Throttle updates to at most once per second
+                            hasPendingUiUpdate = true
+                        }
 
                         if (existing == null) {
                             Log.d(
@@ -181,6 +191,7 @@ class NearbyDeviceScanner(private val context: Context) {
             Log.d(TAG, "NEARBY_DEBUG: Scanner started (single continuous session, mode=BALANCED)")
 
             startPeriodicStalePruning()
+            startPeriodicUiRefresh()
         } catch (e: SecurityException) {
             Log.e(TAG, "NEARBY_DEBUG: Missing BLUETOOTH_SCAN permission to start scan", e)
             isDiscoverySessionActive = false
@@ -200,6 +211,8 @@ class NearbyDeviceScanner(private val context: Context) {
         isDiscoverySessionActive = false
         stalePruningJob?.cancel()
         stalePruningJob = null
+        uiRefreshJob?.cancel()
+        uiRefreshJob = null
 
         if (isHardwareScanning) {
             try {
@@ -211,6 +224,21 @@ class NearbyDeviceScanner(private val context: Context) {
                 Log.e(TAG, "NEARBY_DEBUG: Error stopping BLE scan", e)
             } finally {
                 isHardwareScanning = false
+            }
+        }
+    }
+
+    private fun startPeriodicUiRefresh() {
+        uiRefreshJob?.cancel()
+        uiRefreshJob = scannerScope.launch {
+            while (isActive && isDiscoverySessionActive) {
+                delay(UI_REFRESH_THROTTLE_MS)
+                synchronized(deviceMapLock) {
+                    if (hasPendingUiUpdate) {
+                        hasPendingUiUpdate = false
+                        _nearbyDevices.value = deviceCache.toMap()
+                    }
+                }
             }
         }
     }
@@ -249,8 +277,33 @@ class NearbyDeviceScanner(private val context: Context) {
             }
 
             if (hasPruned) {
+                hasPendingUiUpdate = false
                 _nearbyDevices.value = deviceCache.toMap()
             }
+        }
+    }
+
+    fun manualRefresh() {
+        val now = System.currentTimeMillis()
+        synchronized(deviceMapLock) {
+            val iterator = deviceCache.entries.iterator()
+            while (iterator.hasNext()) {
+                val entry = iterator.next()
+                val device = entry.value
+                // Only prune disconnected devices that have been inactive for > 15s during manual refresh.
+                // NEVER prune devices that are CONNECTED or REQUESTING to strictly preserve active connections.
+                if (device.connectionState == NearbyConnectionState.DISCONNECTED) {
+                    if (now - device.lastSeen > 15_000L) {
+                        iterator.remove()
+                    }
+                }
+            }
+            hasPendingUiUpdate = false
+            _nearbyDevices.value = deviceCache.toMap()
+        }
+
+        if (!isDiscoverySessionActive || !isHardwareScanning) {
+            startScanning()
         }
     }
 
@@ -275,6 +328,7 @@ class NearbyDeviceScanner(private val context: Context) {
             )
 
             deviceCache[resolvedKey] = updatedDevice
+            hasPendingUiUpdate = false
             _nearbyDevices.value = deviceCache.toMap()
         }
     }

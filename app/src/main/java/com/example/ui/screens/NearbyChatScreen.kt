@@ -33,7 +33,10 @@ fun NearbyChatScreen(
     onNavigateBack: () -> Unit,
     viewModel: NearbyChatViewModel = hiltViewModel()
 ) {
-    val messages by viewModel.messages.collectAsState()
+    val messagesFlow = remember(viewModel, macAddress) {
+        viewModel.getMessagesForPeer(macAddress)
+    }
+    val messages by messagesFlow.collectAsState()
     val connectionStateFlow = remember(viewModel, macAddress) {
         viewModel.getConnectionState(macAddress)
     }
